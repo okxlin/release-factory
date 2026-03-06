@@ -1,0 +1,105 @@
+name: Build OpenClaw Upstream Sandbox Image
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: build-and-push-openclaw-sandbox-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_REPO: openclaw-sandbox
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Normalize repository owner
+        id: owner
+        run: |
+          LOWER_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "lower_owner=$LOWER_OWNER" >> $GITHUB_OUTPUT
+
+      - name: Get latest OpenClaw release tag
+        id: get_release
+        run: |
+          LATEST_TAG=$(curl -s https://api.github.com/repos/openclaw/openclaw/releases/latest | jq -r .tag_name)
+          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" == "null" ]; then
+            echo "Failed to get latest release tag"
+            exit 1
+          fi
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+      - name: Check if image already exists in GHCR
+        id: check_exists
+        run: |
+          LOWER_OWNER="${{ steps.owner.outputs.lower_owner }}"
+          TARGET_TAG="${{ steps.get_release.outputs.tag }}-sandbox"
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -u "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
+            "https://ghcr.io/v2/${LOWER_OWNER}/${{ env.IMAGE_REPO }}/manifests/$TARGET_TAG")
+          if [ "$STATUS_CODE" -eq 200 ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          elif [ "$STATUS_CODE" -eq 404 ]; then
+            echo "skip=false" >> $GITHUB_OUTPUT
+          else
+            echo "Unexpected GHCR response code: $STATUS_CODE. Continuing with build." >&2
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout OpenClaw Official Repository
+        if: steps.check_exists.outputs.skip == 'false'
+        uses: actions/checkout@v4
+        with:
+          repository: openclaw/openclaw
+          ref: ${{ steps.get_release.outputs.tag }}
+
+      - name: Set up QEMU
+        if: steps.check_exists.outputs.skip == 'false'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: steps.check_exists.outputs.skip == 'false'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: steps.check_exists.outputs.skip == 'false'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        if: steps.check_exists.outputs.skip == 'false'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ env.IMAGE_REPO }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ steps.get_release.outputs.tag }}-sandbox
+
+      - name: Build and push Docker image
+        if: steps.check_exists.outputs.skip == 'false'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          build-args: |
+            OPENCLAW_INSTALL_DOCKER_CLI=1
+            OPENCLAW_PREFER_PNPM=1
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
