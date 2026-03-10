@@ -1,0 +1,139 @@
+name: Build 1Panel Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "1Panel version tag (e.g. v2.1.3)"
+        required: true
+        default: "v2.1.3"
+  push:
+    paths:
+      - "1panel-builder/scripts/**"
+      - "1panel-builder/configs/**"
+      - ".github/workflows/build-v2-offline.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build-offline:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    
+    defaults:
+      run:
+        working-directory: ./1panel-builder
+        
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64, armv7, ppc64le, s390x]
+
+    env:
+      VERSION: ${{ github.event.inputs.version || 'v2.1.3' }}
+      ARCH: ${{ matrix.arch }}
+      ACTOR: ${{ github.actor }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq rsync file
+
+      - name: Prepare builder dependencies
+        run: |
+          chmod +x scripts/*.sh
+          bash scripts/prepare-test-builder.sh \
+            --version "$VERSION" \
+            --arch "$ARCH" \
+            --output-dir ./output/prepare \
+            --execute
+
+      - name: Build binaries
+        run: |
+          bash scripts/build-on-builder.sh \
+            --version "$VERSION" \
+            --arch "$ARCH" \
+            --output-dir ./output/build \
+            --execute
+
+      - name: Package installer
+        run: |
+          sed -i 's|install -m 0644 /dev/null|curl -sSL https://github.com/P3TERX/GeoLite.mmdb/releases/latest/download/GeoLite2-City.mmdb -o|g' scripts/package-installer.sh
+
+          bash scripts/package-installer.sh \
+            --version "$VERSION" \
+            --arch "$ARCH" \
+            --output-dir ./output/package \
+            --execute
+
+      - name: Rename and Verify package structure
+        run: |
+          ORIGINAL_PKG="./output/package/${ARCH}/1panel-installer-${VERSION}-${ARCH}.tar.gz"
+          NEW_PKG="./output/package/${ARCH}/1panel-${ACTOR}-${VERSION}-${ARCH}.tar.gz"
+          
+          mv "$ORIGINAL_PKG" "$NEW_PKG"
+          test -f "$NEW_PKG"
+          
+          tar -tzf "$NEW_PKG" | egrep '(^\./1panel-core$|^\./1panel-agent$|^\./1pctl$|^\./install.sh$|^\./initscript/|^\./lang/)' >/dev/null
+          sha256sum "$NEW_PKG" | tee "./output/package/${ARCH}/1panel-${ACTOR}-${VERSION}-${ARCH}.sha256"
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: 1panel-${{ env.ACTOR }}-${{ env.VERSION }}-${{ env.ARCH }}
+          path: |
+            1panel-builder/output/package/${{ env.ARCH }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-${{ env.ARCH }}.tar.gz
+            1panel-builder/output/package/${{ env.ARCH }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-${{ env.ARCH }}.sha256
+          if-no-files-found: error
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: 1panel-${{ env.ACTOR }}-${{ env.VERSION }}
+          name: 📦 1Panel (@${{ env.ACTOR }}) ${{ env.VERSION }}
+          body: |
+            ### 🇨🇳 中文说明
+            **项目：** 1Panel `${{ env.VERSION }}` 多架构离线构建产物
+            **构建者：** @${{ env.ACTOR }}
+            
+            这是一次自动化的矩阵构建，包含了基于 QEMU 纯净环境编译的完整安装包。
+            
+            #### 📥 下载指引
+            请根据你的服务器架构下载对应的 `.tar.gz` 压缩包，并建议同时下载对应的 `.sha256` 文件校验完整性。
+            支持的架构：`amd64`, `arm64`, `armv7`, `ppc64le`, `s390x`
+            
+            > **注意：** 多架构产物由 Matrix 任务并发上传。如果刷新网页后暂未看到你需要的架构包，说明该架构仍在编译中，请稍等片刻。
+            
+            ---
+            
+            ### 🇬🇧 English Description
+            **Project:** 1Panel `${{ env.VERSION }}` Multi-Architecture Offline Build
+            **Builder:** @${{ env.ACTOR }}
+            
+            This is an automated matrix build containing full offline installation packages compiled in a clean QEMU environment.
+            
+            #### 📥 Download Instructions
+            Please download the corresponding `.tar.gz` archive for your server architecture. We highly recommend downloading the accompanying `.sha256` file for integrity verification.
+            Supported architectures: `amd64`, `arm64`, `armv7`, `ppc64le`, `s390x`
+            
+            > **Note:** Artifacts for different architectures are uploaded concurrently via Matrix jobs. If you don't see your specific architecture package yet, please wait a moment for the background jobs to complete and refresh the page.
+          draft: false
+          prerelease: false
+          files: |
+            1panel-builder/output/package/${{ env.ARCH }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-${{ env.ARCH }}.tar.gz
+            1panel-builder/output/package/${{ env.ARCH }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-${{ env.ARCH }}.sha256
