@@ -55,7 +55,7 @@ jobs:
           bash scripts/prepare-test-builder.sh \
             --version "$VERSION" \
             --arch "$ARCH" \
-            --output-dir ./output/prepare \
+            --output-dir "$PWD/output/prepare" \
             --execute
 
       - name: Build binaries
@@ -63,7 +63,7 @@ jobs:
           bash scripts/build-on-builder.sh \
             --version "$VERSION" \
             --arch "$ARCH" \
-            --output-dir ./output/build \
+            --output-dir "$PWD/output/build" \
             --execute
 
       - name: Package installer
@@ -73,7 +73,7 @@ jobs:
           bash scripts/package-installer.sh \
             --version "$VERSION" \
             --arch "$ARCH" \
-            --output-dir ./output/package \
+            --output-dir "$PWD/output/package" \
             --execute
 
       - name: Rename and Verify package structure
