@@ -68,8 +68,6 @@ jobs:
 
       - name: Package installer
         run: |
-          sed -i 's|install -m 0644 /dev/null|curl -sSL https://github.com/P3TERX/GeoLite.mmdb/releases/latest/download/GeoLite2-City.mmdb -o|g' scripts/package-installer.sh
-
           bash scripts/package-installer.sh \
             --version "$VERSION" \
             --arch "$ARCH" \
