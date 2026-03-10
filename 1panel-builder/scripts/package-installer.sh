@@ -189,8 +189,15 @@ package_one() {
   run_cmd "cp '$src_agent' '$stage/1panel-agent'"
   run_cmd "chmod +x '$stage/1panel-core' '$stage/1panel-agent' '$stage/1pctl'"
 
-  # GeoIP.mmdb: install.sh 会 cp 该文件，若 installer 仓库无该文件则补一个占位文件以避免安装中断
-  run_cmd "if [[ ! -f '$stage/GeoIP.mmdb' ]]; then install -m 0644 /dev/null '$stage/GeoIP.mmdb'; fi"
+  # GeoIP.mmdb: 从官方对应版本的安装包中精准提取，确保与官方行为完全一致
+  local official_url="https://resource.fit2cloud.com/1panel/package/v2/stable/${VERSION}/release/1panel-${VERSION}-linux-amd64.tar.gz"
+  local tar_dir="1panel-${VERSION}-linux-amd64"
+
+  run_cmd "if [[ ! -f '$stage/GeoIP.mmdb' ]]; then \
+    echo 'Downloading official package to extract GeoIP.mmdb...' && \
+    curl -sSL -o /tmp/1p-official-for-geoip.tar.gz '$official_url' && \
+    tar -xzf /tmp/1p-official-for-geoip.tar.gz -C '$stage' --strip-components=1 '$tar_dir/GeoIP.mmdb'; \
+  fi"
 
   run_cmd "cd '$stage' && tar -czf '$out_tar' ."
   run_cmd "sha256sum '$out_tar' > '$out_tar.sha256'"
