@@ -71,14 +71,14 @@ verify_bin() {
   local s
   s="$(strings -a "$bin" 2>/dev/null || true)"
 
-  if printf '%s
-' "$s" | grep -Eiq 'GNU coreutils|/usr/bin/true'; then
+if printf '%s
+' "$s" | grep -Ei 'GNU coreutils|/usr/bin/true' >/dev/null; then
     err "$kind 命中黑名单字符串(GNU coreutils 或 /usr/bin/true): $bin"
     return 1
   fi
 
-  if ! printf '%s
-' "$s" | grep -Eiq '1panel|1Panel-dev'; then
+if ! printf '%s
+' "$s" | grep -Ei '1panel|1Panel-dev' >/dev/null; then
     # 最小替代校验：命名必须符合 1panel 二进制规范（避免误收其它 ELF）
     if [[ "$(basename "$bin")" != 1panel-core-* && "$(basename "$bin")" != 1panel-agent-* ]]; then
       err "$kind 未命中白名单字符串(1panel/1Panel-dev)，且文件名不符合最小替代校验: $bin"

@@ -65,16 +65,16 @@ verify_bin() {
 
   local s
   s="$(strings -a "$bin" 2>/dev/null || true)"
-  if printf '%s
-' "$s" | grep -Eiq 'GNU coreutils|/usr/bin/true'; then
+if printf '%s
+' "$s" | grep -Ei 'GNU coreutils|/usr/bin/true' >/dev/null; then
     err "$kind 命中黑名单字符串(GNU coreutils 或 /usr/bin/true): $bin"
     return 1
   fi
 
-  if ! printf '%s
-' "$s" | grep -Eiq '1panel|1Panel-dev'; then
+if ! printf '%s
+' "$s" | grep -Ei '1panel|1Panel-dev' >/dev/null; then
     if command -v go >/dev/null 2>&1; then
-      if ! go version -m "$bin" 2>/dev/null | grep -Eiq '1Panel-dev/1Panel|1panel'; then
+      if ! go version -m "$bin" 2>/dev/null | grep -Ei '1Panel-dev/1Panel|1panel' >/dev/null; then
         err "$kind 未命中白名单字符串(1panel/1Panel-dev)且 Go metadata 校验失败: $bin"
         return 1
       fi
