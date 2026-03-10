@@ -101,28 +101,114 @@ jobs:
           name: 📦 1Panel (@${{ env.ACTOR }}) ${{ env.VERSION }}
           body: |
             ### 🇨🇳 中文说明
-            **项目：** 1Panel `${{ env.VERSION }}` 多架构离线构建产物
+            **项目：** 1Panel `${{ env.VERSION }}` 多架构构建产物
             **构建者：** @${{ env.ACTOR }}
             
-            这是一次自动化的矩阵构建，包含了基于 QEMU 纯净环境编译的完整安装包。
+            这是一次自动化的矩阵构建，包含完整的安装包产物。
             
             #### 📥 下载指引
             请根据你的服务器架构下载对应的 `.tar.gz` 压缩包，并建议同时下载对应的 `.sha256` 文件校验完整性。
-            支持的架构：`amd64`, `arm64`, `armv7`, `ppc64le`, `s390x`
+
+
+            <table>
+              <thead>
+                <tr>
+                  <th>架构</th>
+                  <th>系统</th>
+                  <th>链接</th>
+                  <th>校验</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><img src="https://img.shields.io/badge/ARCH-amd64-2ea44f?style=flat" /></td>
+                  <td><img src="https://img.shields.io/badge/OS-Linux-fabd14?style=flat" /></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-amd64.tar.gz">下载</a></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-amd64.sha256">SHA256</a></td>
+                </tr>
+                <tr>
+                  <td><img src="https://img.shields.io/badge/ARCH-arm64-1f6feb?style=flat" /></td>
+                  <td><img src="https://img.shields.io/badge/OS-Linux-fabd14?style=flat" /></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-arm64.tar.gz">下载</a></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-arm64.sha256">SHA256</a></td>
+                </tr>
+                <tr>
+                  <td><img src="https://img.shields.io/badge/ARCH-armv7-f97316?style=flat" /></td>
+                  <td><img src="https://img.shields.io/badge/OS-Linux-fabd14?style=flat" /></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-armv7.tar.gz">下载</a></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-armv7.sha256">SHA256</a></td>
+                </tr>
+                <tr>
+                  <td><img src="https://img.shields.io/badge/ARCH-ppc64le-8b5cf6?style=flat" /></td>
+                  <td><img src="https://img.shields.io/badge/OS-Linux-fabd14?style=flat" /></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-ppc64le.tar.gz">下载</a></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-ppc64le.sha256">SHA256</a></td>
+                </tr>
+                <tr>
+                  <td><img src="https://img.shields.io/badge/ARCH-s390x-0ea5e9?style=flat" /></td>
+                  <td><img src="https://img.shields.io/badge/OS-Linux-fabd14?style=flat" /></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-s390x.tar.gz">下载</a></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-s390x.sha256">SHA256</a></td>
+                </tr>
+              </tbody>
+            </table>
             
             > **注意：** 多架构产物由 Matrix 任务并发上传。如果刷新网页后暂未看到你需要的架构包，说明该架构仍在编译中，请稍等片刻。
             
             ---
             
             ### 🇬🇧 English Description
-            **Project:** 1Panel `${{ env.VERSION }}` Multi-Architecture Offline Build
+            **Project:** 1Panel `${{ env.VERSION }}` Multi-Architecture Build
             **Builder:** @${{ env.ACTOR }}
             
-            This is an automated matrix build containing full offline installation packages compiled in a clean QEMU environment.
+            This is an automated matrix build containing full installation packages.
             
             #### 📥 Download Instructions
             Please download the corresponding `.tar.gz` archive for your server architecture. We highly recommend downloading the accompanying `.sha256` file for integrity verification.
-            Supported architectures: `amd64`, `arm64`, `armv7`, `ppc64le`, `s390x`
+
+
+            <table>
+              <thead>
+                <tr>
+                  <th>Architecture</th>
+                  <th>OS</th>
+                  <th>Link</th>
+                  <th>Checksum</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><img src="https://img.shields.io/badge/ARCH-amd64-2ea44f?style=flat" /></td>
+                  <td><img src="https://img.shields.io/badge/OS-Linux-fabd14?style=flat" /></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-amd64.tar.gz">Download</a></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-amd64.sha256">SHA256</a></td>
+                </tr>
+                <tr>
+                  <td><img src="https://img.shields.io/badge/ARCH-arm64-1f6feb?style=flat" /></td>
+                  <td><img src="https://img.shields.io/badge/OS-Linux-fabd14?style=flat" /></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-arm64.tar.gz">Download</a></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-arm64.sha256">SHA256</a></td>
+                </tr>
+                <tr>
+                  <td><img src="https://img.shields.io/badge/ARCH-armv7-f97316?style=flat" /></td>
+                  <td><img src="https://img.shields.io/badge/OS-Linux-fabd14?style=flat" /></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-armv7.tar.gz">Download</a></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-armv7.sha256">SHA256</a></td>
+                </tr>
+                <tr>
+                  <td><img src="https://img.shields.io/badge/ARCH-ppc64le-8b5cf6?style=flat" /></td>
+                  <td><img src="https://img.shields.io/badge/OS-Linux-fabd14?style=flat" /></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-ppc64le.tar.gz">Download</a></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-ppc64le.sha256">SHA256</a></td>
+                </tr>
+                <tr>
+                  <td><img src="https://img.shields.io/badge/ARCH-s390x-0ea5e9?style=flat" /></td>
+                  <td><img src="https://img.shields.io/badge/OS-Linux-fabd14?style=flat" /></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-s390x.tar.gz">Download</a></td>
+                  <td><a href="https://github.com/${{ github.repository }}/releases/download/1panel-${{ env.ACTOR }}-${{ env.VERSION }}/1panel-${{ env.ACTOR }}-${{ env.VERSION }}-s390x.sha256">SHA256</a></td>
+                </tr>
+              </tbody>
+            </table>
             
             > **Note:** Artifacts for different architectures are uploaded concurrently via Matrix jobs. If you don't see your specific architecture package yet, please wait a moment for the background jobs to complete and refresh the page.
           draft: false
