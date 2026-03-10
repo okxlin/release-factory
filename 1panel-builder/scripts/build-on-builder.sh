@@ -177,7 +177,7 @@ run_cmd "git -C '$WORKDIR/1Panel-src' fetch --tags --force"
 run_cmd "git -C '$WORKDIR/1Panel-src' checkout '$VERSION'"
 
 # frontend 构建顺序：安装依赖 -> 构建
-run_cmd "cd '$WORKDIR/1Panel-src/frontend' && npm ci"
+run_cmd "cd '$WORKDIR/1Panel-src/frontend' && npm install"
 run_cmd "cd '$WORKDIR/1Panel-src/frontend' && npm run build:pro"
 
 build_one() {
