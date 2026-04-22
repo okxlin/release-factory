@@ -1,0 +1,20 @@
+#!/bin/bash
+
+BIN=/usr/bin/google-chrome
+
+if pgrep chrome > /dev/null; then
+  rm -f "$HOME/.config/google-chrome/Singleton"*
+fi
+
+${BIN} \
+  --no-first-run \
+  --no-sandbox \
+  --password-store=basic \
+  --simulate-outdated-no-au='Tue, 31 Dec 2099 23:59:59 GMT' \
+  --start-maximized \
+  --test-type \
+  --user-data-dir \
+  --remote-debugging-address=0.0.0.0 \
+  --remote-debugging-port="${BROWSER_DEBUG_PORT:-9222}" \
+  --user-data-dir="${BROWSER_USER_DATA_DIR:-$HOME/.config/google-chrome}" \
+  "$@" > /dev/null 2>&1
