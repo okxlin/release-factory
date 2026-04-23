@@ -10,10 +10,13 @@ ARG NODE_MAJOR=20
 ENV DEBIAN_FRONTEND=noninteractive \
     GEMINI_SKILL_HOME=/opt/gemini-skill \
     OUTPUT_DIR=/output \
+    BROWSER_PATH=/usr/bin/wrapped-chrome \
     BROWSER_DEBUG_PORT=9222 \
     BROWSER_HEADLESS=false \
     BROWSER_USER_DATA_DIR=/config/browser-profile \
     BROWSER_PROTOCOL_TIMEOUT=180000 \
+    XDG_RUNTIME_DIR=/config/.XDG \
+    WAYLAND_DISPLAY=wayland-1 \
     DAEMON_PORT=40225 \
     DAEMON_TTL_MS=1800000
 
@@ -31,9 +34,9 @@ RUN git clone --depth=1 --branch ${GEMINI_SKILL_REF} ${GEMINI_SKILL_REPO} ${GEMI
 COPY . /
 
 RUN chmod +x /etc/s6-overlay/s6-rc.d/svc-gemini-skill-daemon/run \
-    && mkdir -p /output /config/browser-profile /etc/s6-overlay/s6-rc.d/svc-gemini-skill-daemon/dependencies.d \
+    && mkdir -p /output /config/.XDG /config/browser-profile /etc/s6-overlay/s6-rc.d/svc-gemini-skill-daemon/dependencies.d \
     && touch /etc/s6-overlay/s6-rc.d/user/contents.d/svc-gemini-skill-daemon \
-    && chown -R abc:abc /output /config/browser-profile ${GEMINI_SKILL_HOME}
+    && chown -R abc:abc /output /config/.XDG /config/browser-profile ${GEMINI_SKILL_HOME}
 
 EXPOSE 3001 40225 9222
 
