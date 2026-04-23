@@ -3,5 +3,6 @@ set -euo pipefail
 
 mkdir -p "${OUTPUT_DIR:-/output}" "${XDG_RUNTIME_DIR:-/config/.XDG}" "${BROWSER_USER_DATA_DIR:-/config/browser-profile}" "${BROWSER_USER_DATA_DIR:-/config/browser-profile}/Default"
 chown -R abc:abc "${OUTPUT_DIR:-/output}" "${XDG_RUNTIME_DIR:-/config/.XDG}" "${BROWSER_USER_DATA_DIR:-/config/browser-profile}" /opt/gemini-skill || true
+chmod -R u+rwX,g+rwX "${OUTPUT_DIR:-/output}" "${XDG_RUNTIME_DIR:-/config/.XDG}" "${BROWSER_USER_DATA_DIR:-/config/browser-profile}" || true
 
 exec s6-setuidgid abc /usr/bin/node /opt/gemini-skill/src/daemon/server.js
