@@ -404,5 +404,195 @@ if "method: fullSize ? 'preview-canvas-fullsize' : 'preview-canvas'" not in s:
         raise SystemExit('generateImage block not found in gemini-ops.js')
     s = s.replace(old_generate, new_generate, 1)
 
+# --- 6) fullSize 严格落盘：不再用 preview-canvas 冒充下载成功 ---
+old_fullsize_flow = """      // 2. 优先走预览层原图提取（新版 Gemini 最稳定）
+      await sleep(1200);
+      const openPreview = await this.openLatestImagePreview();
+      if (openPreview.ok) {
+        const previewResult = await this.extractPreviewImageBase64();
+        if (previewResult.ok) {
+          return {
+            ok: true,
+            method: fullSize ? 'preview-canvas-fullsize' : 'preview-canvas',
+            elapsed: waitResult.elapsed,
+            ...previewResult,
+          };
+        }
+      }
+
+      // 3. 回退到旧流程（兼容历史页面）
+"""
+
+new_fullsize_flow = """      // 2. fullSize 模式优先走“下载完整尺寸文件”
+      await sleep(1200);
+      const openPreview = await this.openLatestImagePreview();
+      if (fullSize) {
+        if (!openPreview.ok) {
+          return { ok: false, error: 'fullsize_preview_not_opened', elapsed: waitResult.elapsed };
+        }
+        const dlResult = await this.downloadFullSizeImage();
+        if (dlResult.ok && dlResult.filePath) {
+          return { ok: true, method: 'fullSize-download', elapsed: waitResult.elapsed, ...dlResult };
+        }
+        return {
+          ok: false,
+          error: 'fullsize_download_failed',
+          elapsed: waitResult.elapsed,
+          detail: dlResult,
+        };
+      }
+
+      // 3. 非 fullSize：预览层提取（base64）
+      if (openPreview.ok) {
+        const previewResult = await this.extractPreviewImageBase64();
+        if (previewResult.ok) {
+          return {
+            ok: true,
+            method: 'preview-canvas',
+            elapsed: waitResult.elapsed,
+            ...previewResult,
+          };
+        }
+      }
+
+      // 4. 回退到旧流程（兼容历史页面）
+"""
+
+if "method: 'fullSize-download'" not in s and old_fullsize_flow in s:
+    s = s.replace(old_fullsize_flow, new_fullsize_flow, 1)
+
+# --- 7) downloadFullSizeImage：补强无事件场景（目录轮询 + 重试点击） ---
+anchor_download_setup = """      await client.send('Browser.setDownloadBehavior', {
+        behavior: 'allow',       // 不用 allowAndName，避免 GUID 临时文件被 Windows Server 安全策略拦截
+        downloadPath: downloadDir,
+        eventsEnabled: true,
+      });
+"""
+
+insert_download_setup = """      await client.send('Browser.setDownloadBehavior', {
+        behavior: 'allow',       // 不用 allowAndName，避免 GUID 临时文件被 Windows Server 安全策略拦截
+        downloadPath: downloadDir,
+        eventsEnabled: true,
+      });
+
+      const { readdirSync, statSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const exts = new Set(['.png', '.jpg', '.jpeg', '.webp']);
+      const listDownloadedFiles = () => {
+        try {
+          return readdirSync(downloadDir)
+            .map((name) => {
+              const filePath = join(downloadDir, name);
+              let st;
+              try { st = statSync(filePath); } catch { return null; }
+              if (!st.isFile()) return null;
+              const ext = (name.match(/\\.[^.]+$/)?.[0] || '').toLowerCase();
+              if (!exts.has(ext)) return null;
+              return { name, filePath, mtimeMs: st.mtimeMs, size: st.size };
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.mtimeMs - a.mtimeMs);
+        } catch {
+          return [];
+        }
+      };
+      const preFiles = listDownloadedFiles();
+      const preMap = new Map(preFiles.map(f => [f.name, `${f.mtimeMs}:${f.size}`]));
+"""
+
+if "const listDownloadedFiles = () => {" not in s and anchor_download_setup in s:
+    s = s.replace(anchor_download_setup, insert_download_setup, 1)
+
+old_catch_poll = """      } catch (err) {
+        // 兜底：有些页面版本点击下载后不会上报 Browser.download* 事件，改用目录轮询判断是否落盘
+        try {
+          const started = Date.now();
+          while (Date.now() - started < 20_000) {
+            await sleep(1000);
+            const files = listDownloadedFiles();
+            const changed = files.find((f) => {
+              const prev = preMap.get(f.name);
+              const now = `${f.mtimeMs}:${f.size}`;
+              return !prev || prev !== now;
+            });
+            if (changed) {
+              return {
+                ok: true,
+                filePath: changed.filePath,
+                suggestedFilename: changed.name,
+                src: imgInfo.src,
+                index: imgInfo.index,
+                total: imgInfo.total,
+                note: 'download_event_missing_fallback_by_polling',
+                size: changed.size,
+              };
+            }
+          }
+        } catch {}
+
+        return {
+          ok: false,
+          error: err.message,
+          src: imgInfo.src,
+          index: imgInfo.index,
+          total: imgInfo.total,
+        };
+      }
+"""
+
+new_catch_poll = """      } catch (err) {
+        // 兜底：有些页面版本点击下载后不会上报 Browser.download* 事件，改用目录轮询判断是否落盘
+        try {
+          const started = Date.now();
+          let attempt = 0;
+          while (Date.now() - started < 25_000) {
+            attempt += 1;
+            // 重试点击下载按钮（有时首击不生效）
+            try {
+              await op.query(() => {
+                const btn = document.querySelector('mat-dialog-container button[data-test-id="download-generated-image-button"], .cdk-overlay-container button[data-test-id="download-generated-image-button"], button[data-test-id="download-generated-image-button"]');
+                if (!btn) return false;
+                const cls = btn.className || '';
+                if (btn.disabled || cls.includes('mat-mdc-button-disabled')) return false;
+                btn.click();
+                return true;
+              });
+            } catch {}
+
+            await sleep(1000);
+            const files = listDownloadedFiles();
+            const changed = files.find((f) => {
+              const prev = preMap.get(f.name);
+              const now = `${f.mtimeMs}:${f.size}`;
+              return !prev || prev !== now;
+            });
+            if (changed) {
+              return {
+                ok: true,
+                filePath: changed.filePath,
+                suggestedFilename: changed.name,
+                src: imgInfo.src,
+                index: imgInfo.index,
+                total: imgInfo.total,
+                note: `download_event_missing_fallback_by_polling_retry_${attempt}`,
+                size: changed.size,
+              };
+            }
+          }
+        } catch {}
+
+        return {
+          ok: false,
+          error: err.message,
+          src: imgInfo.src,
+          index: imgInfo.index,
+          total: imgInfo.total,
+        };
+      }
+"""
+
+if "download_event_missing_fallback_by_polling_retry_${attempt}" not in s and old_catch_poll in s:
+    s = s.replace(old_catch_poll, new_catch_poll, 1)
+
 TARGET.write_text(s)
 print(f'patched {TARGET}')
