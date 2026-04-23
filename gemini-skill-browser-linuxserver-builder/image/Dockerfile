@@ -33,10 +33,11 @@ RUN git clone --depth=1 --branch ${GEMINI_SKILL_REF} ${GEMINI_SKILL_REPO} ${GEMI
 
 COPY . /
 
-RUN chmod +x /etc/s6-overlay/s6-rc.d/svc-gemini-skill-daemon/run \
+RUN chmod +x /etc/s6-overlay/s6-rc.d/svc-gemini-skill-daemon/run /usr/local/bin/patch_gemini_ops_sendwait.py \
     && mkdir -p /output /config/.XDG /config/browser-profile /etc/s6-overlay/s6-rc.d/svc-gemini-skill-daemon/dependencies.d \
     && touch /etc/s6-overlay/s6-rc.d/user/contents.d/svc-gemini-skill-daemon \
-    && chown -R abc:abc /output /config/.XDG /config/browser-profile ${GEMINI_SKILL_HOME}
+    && chown -R abc:abc /output /config/.XDG /config/browser-profile ${GEMINI_SKILL_HOME} \
+    && python3 /usr/local/bin/patch_gemini_ops_sendwait.py ${GEMINI_SKILL_HOME}/src/gemini-ops.js
 
 EXPOSE 3001 40225 9222
 
