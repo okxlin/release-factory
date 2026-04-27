@@ -1,0 +1,106 @@
+name: Build Oh My OpenCode Runtime Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Published image tag; leave empty to use latest"
+        required: false
+        default: "latest"
+      platforms:
+        description: "Comma-separated target platforms"
+        required: true
+        default: "linux/amd64,linux/arm64"
+      push_latest:
+        description: "Also publish latest tag"
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: build-oh-my-opencode-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE_REPO: oh-my-opencode-runtime
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Normalize repository owner
+        id: owner
+        run: |
+          LOWER_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "lower_owner=$LOWER_OWNER" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve build parameters
+        id: params
+        run: |
+          chmod +x oh-my-opencode-builder/scripts/*.sh
+          bash oh-my-opencode-builder/scripts/resolve-build-params.sh \
+            --image-repo "${IMAGE_REPO}" \
+            --platforms "${{ github.event.inputs.platforms || 'linux/amd64,linux/arm64' }}" \
+            --image-tag "${{ github.event.inputs.image_tag || 'latest' }}" \
+            --push-latest "${{ github.event.inputs.push_latest == true && 'true' || 'false' }}" \
+            --latest-tag "latest" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}
+          tags: ${{ steps.params.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=Oh My OpenCode Runtime
+            org.opencontainers.image.description=Persistent OpenCode runtime with oh-my-opencode bootstrap and plugin-friendly storage.
+            org.opencontainers.image.vendor=${{ github.repository_owner }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./oh-my-opencode-builder/image
+          file: ./oh-my-opencode-builder/image/Dockerfile
+          platforms: ${{ steps.params.outputs.platforms }}
+          push: true
+          build-args: |
+            USER_UID=1000
+            USER_GID=1000
+            HOST_DOCKER_GID=997
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Emit build summary
+        run: |
+          {
+            echo "## Oh My OpenCode runtime image build"
+            echo ""
+            echo "- Image: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}"
+            echo "- Published image tag: ${{ steps.params.outputs.image_tag }}"
+            echo "- Tags: ${{ steps.meta.outputs.tags }}"
+            echo "- Platforms: ${{ steps.params.outputs.platforms }}"
+          } >> "$GITHUB_STEP_SUMMARY"
