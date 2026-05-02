@@ -12,23 +12,10 @@ log() {
   printf '[plugins] %s\n' "$*"
 }
 
-sync_config_mount() {
-  local target_dir="$1"
-  if [[ "$target_dir" == "$HOME/.config/opencode" ]]; then
-    return 0
-  fi
-  mkdir -p "$target_dir"
-  if [[ -f "$HOME/.config/opencode/opencode.json" ]]; then
-    cp "$HOME/.config/opencode/opencode.json" "$target_dir/opencode.json"
-  fi
-  if [[ -f "$HOME/.config/opencode/dcp.jsonc" ]]; then
-    cp "$HOME/.config/opencode/dcp.jsonc" "$target_dir/dcp.jsonc"
-  fi
-}
-
-cp_config_mount_back() {
+sync_config_home() {
+  mkdir -p "$HOME/.config/opencode"
   if [[ -n "${OPENCODE_CONFIG_DIR:-}" && "$OPENCODE_CONFIG_DIR" != "$HOME/.config/opencode" ]]; then
-    mkdir -p "$HOME/.config/opencode"
+    mkdir -p "$OPENCODE_CONFIG_DIR"
     if [[ -f "$OPENCODE_CONFIG_DIR/opencode.json" ]]; then
       cp "$OPENCODE_CONFIG_DIR/opencode.json" "$HOME/.config/opencode/opencode.json"
     fi
@@ -50,7 +37,7 @@ ensure_config_dir() {
   if [[ -w "$CONTAINER_CONFIG" ]] || [[ ! -e "$CONTAINER_CONFIG" ]]; then
     mkdir -p "$CONTAINER_CONFIG/opencode"
     export OPENCODE_CONFIG_DIR="$CONTAINER_CONFIG/opencode"
-    sync_config_mount "$OPENCODE_CONFIG_DIR"
+    sync_config_home
   else
     export OPENCODE_CONFIG_DIR="$HOME/.config/opencode"
     log "config mount not writable: $CONTAINER_CONFIG; falling back to $OPENCODE_CONFIG_DIR"
@@ -66,12 +53,12 @@ install_dcp() {
   else
     opencode plugin @tarquinen/opencode-dcp@latest || true
   fi
-  cp_config_mount_back
-  sync_config_mount "$OPENCODE_CONFIG_DIR"
+  python3 /app/scripts/update_opencode_config.py plugin @tarquinen/opencode-dcp@latest
+  sync_config_home
   if [[ -n "${DCP_CONFIG_B64:-}" ]]; then
     log 'writing DCP config from DCP_CONFIG_B64'
-    printf '%s' "$DCP_CONFIG_B64" | base64 -d > "$HOME/.config/opencode/dcp.jsonc"
-    sync_config_mount "$OPENCODE_CONFIG_DIR"
+    printf '%s' "$DCP_CONFIG_B64" | base64 -d > "$OPENCODE_CONFIG_DIR/dcp.jsonc"
+    sync_config_home
   fi
 }
 
@@ -82,8 +69,7 @@ install_gpt_unlocked() {
     if [[ "${GPT_UNLOCKED_PLUGIN_SOURCE}" == "npm" ]]; then
       log 'registering opencode-gpt-unlocked npm plugin in opencode config'
       python3 /app/scripts/update_opencode_config.py plugin opencode-gpt-unlocked@latest
-      cp_config_mount_back
-      sync_config_mount "$OPENCODE_CONFIG_DIR"
+      sync_config_home
     else
       log 'GPT unlocked plugin source is not npm; skipping config mutation'
     fi
