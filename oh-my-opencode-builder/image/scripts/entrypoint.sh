@@ -26,6 +26,33 @@ if [[ -n "${HOME:-}" ]]; then
 fi
 
 mkdir -p "${CONTAINER_WORKSPACE}" "${CONTAINER_CONFIG}" "${CONTAINER_CACHE}" "${CONTAINER_DATA}" "${OPENCODE_INSTALL_DIR}" "${OPENCODE_NPM_BIN_DIR}" "${OMO_INSTALL_DIR}" "$HOME/.config" "$HOME/.cache" "$HOME/.local/bin"
+mkdir -p "${OPENCODE_CONFIG_DIR}"
+
+sample_user_config="${OPENCODE_CONFIG_DIR}/opencode.user.sample.json"
+if [[ ! -f "${sample_user_config}" ]]; then
+  cat > "${sample_user_config}" <<'EOF'
+{
+  "plugin": [
+    "your-plugin-name"
+  ],
+  "provider": {
+    "mimo": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Mimo",
+      "options": {
+        "baseURL": "{env:OPENAI_BASE_URL}",
+        "apiKey": "{env:OPENAI_API_KEY}"
+      },
+      "models": {
+        "mimo-v2.5": {
+          "name": "mimo-v2.5"
+        }
+      }
+    }
+  }
+}
+EOF
+fi
 
 log() {
   printf '[entrypoint] %s\n' "$*"

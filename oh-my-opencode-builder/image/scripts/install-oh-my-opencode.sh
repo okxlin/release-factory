@@ -8,11 +8,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-sync_opencode_json_to_mount() {
+sync_opencode_json_to_home() {
+  mkdir -p "$HOME/.config/opencode"
   if [[ -n "${OPENCODE_CONFIG_DIR:-}" && "$OPENCODE_CONFIG_DIR" != "$HOME/.config/opencode" ]]; then
     mkdir -p "$OPENCODE_CONFIG_DIR"
-    if [[ -f "$HOME/.config/opencode/opencode.json" ]]; then
-      cp "$HOME/.config/opencode/opencode.json" "$OPENCODE_CONFIG_DIR/opencode.json"
+    if [[ -f "$OPENCODE_CONFIG_DIR/opencode.json" ]]; then
+      cp "$OPENCODE_CONFIG_DIR/opencode.json" "$HOME/.config/opencode/opencode.json"
     fi
   fi
 }
@@ -39,9 +40,10 @@ echo "[install-oh-my-opencode] running: ${install_cmd[*]}"
 cd "${OMO_INSTALL_DIR}"
 "${install_cmd[@]}"
 python3 /app/scripts/update_opencode_config.py oh-my-opencode register
-sync_opencode_json_to_mount
+sync_opencode_json_to_home
 if [[ -n "${OPENCODE_CONFIG_DIR:-}" && "$OPENCODE_CONFIG_DIR" != "$HOME/.config/opencode" ]]; then
   export OPENCODE_CONFIG_DIR
   python3 /app/scripts/update_opencode_config.py plugin opencode-gpt-unlocked@latest
   python3 /app/scripts/update_opencode_config.py oh-my-opencode register
+  sync_opencode_json_to_home
 fi

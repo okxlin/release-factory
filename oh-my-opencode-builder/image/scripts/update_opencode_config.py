@@ -11,6 +11,7 @@ CONFIG_DIRS = [
 ]
 
 CONFIG_FILES = ['opencode.json', 'opencode.jsonc']
+USER_CONFIG_FILES = ['opencode.user.json', 'opencode.user.jsonc']
 
 
 def resolve_config_dir() -> Path | None:
@@ -87,6 +88,49 @@ def locate_config() -> Path:
     return Path.home() / '.config' / 'opencode' / 'opencode.json'
 
 
+def locate_user_config(config_path: Path) -> Path | None:
+    for filename in USER_CONFIG_FILES:
+        candidate = config_path.parent / filename
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def merge_plugin_lists(base_plugins, overlay_plugins):
+    merged = []
+    seen = set()
+    for item in list(base_plugins) + list(overlay_plugins):
+        key = json.dumps(item, sort_keys=True, ensure_ascii=False) if isinstance(item, (dict, list)) else str(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+    return merged
+
+
+def deep_merge(base, overlay, path=()):
+    if isinstance(base, dict) and isinstance(overlay, dict):
+        merged = dict(base)
+        for key, value in overlay.items():
+            merged[key] = deep_merge(base.get(key), value, path + (key,))
+        return merged
+    if path == ('plugin',):
+        base_plugins = base if isinstance(base, list) else []
+        overlay_plugins = overlay if isinstance(overlay, list) else []
+        return merge_plugin_lists(base_plugins, overlay_plugins)
+    return overlay
+
+
+def apply_user_overrides(data, config_path: Path):
+    user_config_path = locate_user_config(config_path)
+    if not user_config_path:
+        return data
+    user_data = load_config(user_config_path)
+    if not isinstance(user_data, dict):
+        return data
+    return deep_merge(data, user_data)
+
+
 def ensure_plugin(data, plugin_name):
     plugins = data.get('plugin')
     if not isinstance(plugins, list):
@@ -135,6 +179,68 @@ def ensure_refusal_settings(data):
     data['experimental'] = experimental
 
 
+def detect_provider_id() -> str:
+    provider = os.environ.get('OPENCODE_PROVIDER_ID', '').strip()
+    if provider:
+        return provider
+    for key in ('OPENCODE_MODEL', 'OPENCODE_SMALL_MODEL'):
+        value = os.environ.get(key, '').strip()
+        if '/' in value:
+            provider_id = value.split('/', 1)[0].strip()
+            if provider_id:
+                return provider_id
+    return 'openai'
+
+
+def detect_provider_base_url(provider_id: str) -> str:
+    provider_env_map = {
+        'openai': 'OPENAI_BASE_URL',
+        'anthropic': 'ANTHROPIC_BASE_URL',
+        'openrouter': 'OPENROUTER_BASE_URL',
+        'google': 'GEMINI_BASE_URL',
+        'gemini': 'GEMINI_BASE_URL',
+    }
+    env_key = provider_env_map.get(provider_id)
+    if not env_key:
+        return ''
+    return os.environ.get(env_key, '').strip()
+
+
+def ensure_model_settings(data):
+    model = os.environ.get('OPENCODE_MODEL', '').strip()
+    small_model = os.environ.get('OPENCODE_SMALL_MODEL', '').strip()
+    provider_id = detect_provider_id()
+    provider_base_url = detect_provider_base_url(provider_id)
+
+    if model:
+        data['model'] = model
+    if small_model:
+        data['small_model'] = small_model
+
+    if provider_base_url:
+        providers = data.get('provider')
+        if not isinstance(providers, dict):
+            providers = {}
+        provider_config = providers.get(provider_id)
+        if not isinstance(provider_config, dict):
+            provider_config = {}
+        options = provider_config.get('options')
+        if not isinstance(options, dict):
+            options = {}
+        options['baseURL'] = provider_base_url
+        provider_config['options'] = options
+        providers[provider_id] = provider_config
+        data['provider'] = providers
+
+
+def ensure_extra_plugins(data):
+    raw = os.environ.get('OPENCODE_EXTRA_PLUGINS', '').strip()
+    if not raw:
+        return
+    for plugin_name in [item.strip() for item in raw.split(',') if item.strip()]:
+        ensure_plugin(data, plugin_name)
+
+
 def main():
     if len(sys.argv) < 3:
         raise SystemExit('usage: update_opencode_config.py plugin <plugin-name> | oh-my-opencode register')
@@ -145,10 +251,15 @@ def main():
         ensure_plugin(data, value)
         if value.startswith('opencode-gpt-unlocked'):
             ensure_refusal_settings(data)
+        ensure_model_settings(data)
+        ensure_extra_plugins(data)
     elif action == 'oh-my-opencode' and value == 'register':
         ensure_oh_my_opencode_registration(data)
+        ensure_model_settings(data)
+        ensure_extra_plugins(data)
     else:
         raise SystemExit(f'unknown action: {action} {value}')
+    data = apply_user_overrides(data, path)
     save_config(path, data)
     print(path)
 
