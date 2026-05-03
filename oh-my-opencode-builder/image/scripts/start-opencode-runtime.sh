@@ -30,6 +30,11 @@ if [[ "${OPENCODE_INSTALL_PLUGINS}" == "1" ]]; then
   "${SCRIPT_DIR}/install-opencode-plugins.sh"
 fi
 
+if command -v python3 >/dev/null 2>&1; then
+  python3 "${SCRIPT_DIR}/update_opencode_config.py" sync-model
+  python3 "${SCRIPT_DIR}/update_oh_my_openagent_config.py"
+fi
+
 case "${OPENCODE_RUNTIME_MODE}" in
   acp)
     runtime_label="ACP"

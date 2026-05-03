@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import copy
 import json
 import os
 import sys
@@ -135,20 +136,102 @@ def ensure_refusal_settings(data):
     data['experimental'] = experimental
 
 
+def ensure_model_settings(data):
+    model = os.environ.get('OPENCODE_MODEL', '').strip()
+    small_model = os.environ.get('OPENCODE_SMALL_MODEL', '').strip()
+    provider_id = os.environ.get('OPENCODE_PROVIDER_ID', '').strip()
+    if model:
+        data['model'] = model
+    if small_model:
+        data['small_model'] = small_model
+    provider_map = {
+        'openai': ('OPENAI_BASE_URL', 'OPENAI_API_KEY'),
+        'anthropic': ('ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY'),
+        'openrouter': ('OPENROUTER_BASE_URL', 'OPENROUTER_API_KEY'),
+        'gemini': ('GEMINI_BASE_URL', 'GEMINI_API_KEY'),
+        'gpt-unlocked': ('GPT_UNLOCKED_BASE_URL', 'GPT_UNLOCKED_API_KEY'),
+        'mimo': ('OPENAI_BASE_URL', 'OPENAI_API_KEY'),
+        'xiaomi': ('OPENAI_BASE_URL', 'OPENAI_API_KEY'),
+    }
+    if provider_id:
+        provider = data.get('provider')
+        if not isinstance(provider, dict):
+            provider = {}
+        provider_entry = provider.get(provider_id)
+        if not isinstance(provider_entry, dict):
+            provider_entry = {}
+        options = provider_entry.get('options')
+        if not isinstance(options, dict):
+            options = {}
+        base_env, key_env = provider_map.get(provider_id, ('', ''))
+        base_url = os.environ.get(base_env, '').strip() if base_env else ''
+        api_key = os.environ.get(key_env, '').strip() if key_env else ''
+        if base_url:
+            options['baseURL'] = base_url
+        if api_key:
+            options['apiKey'] = api_key
+        if options:
+            provider_entry['options'] = options
+        if provider_entry:
+            provider[provider_id] = provider_entry
+        if provider:
+            data['provider'] = provider
+
+
+def merge_values(base, override):
+    if isinstance(base, dict) and isinstance(override, dict):
+        result = {k: copy.deepcopy(v) for k, v in base.items()}
+        for key, value in override.items():
+            if key in result:
+                result[key] = merge_values(result[key], value)
+            else:
+                result[key] = copy.deepcopy(value)
+        return result
+    if isinstance(base, list) and isinstance(override, list):
+        if all(isinstance(v, str) for v in base + override):
+            merged = []
+            seen = set()
+            for item in base + override:
+                if item in seen:
+                    continue
+                seen.add(item)
+                merged.append(item)
+            return merged
+        return copy.deepcopy(base) + copy.deepcopy(override)
+    return copy.deepcopy(override)
+
+
+def apply_user_override(data, config_path: Path):
+    user_override = config_path.with_name('opencode.user.json')
+    if user_override.exists():
+        override_data = load_config(user_override)
+        if isinstance(override_data, dict):
+            return merge_values(data, override_data)
+    return data
+
+
 def main():
-    if len(sys.argv) < 3:
-        raise SystemExit('usage: update_opencode_config.py plugin <plugin-name> | oh-my-opencode register')
-    action, value = sys.argv[1], sys.argv[2]
+    if len(sys.argv) < 2:
+        raise SystemExit('usage: update_opencode_config.py plugin <plugin-name> | oh-my-opencode register | sync-model')
+    action = sys.argv[1]
+    value = sys.argv[2] if len(sys.argv) >= 3 else None
     path = locate_config()
     data = load_config(path)
     if action == 'plugin':
+        if not value:
+            raise SystemExit('usage: update_opencode_config.py plugin <plugin-name>')
         ensure_plugin(data, value)
         if value.startswith('opencode-gpt-unlocked'):
             ensure_refusal_settings(data)
     elif action == 'oh-my-opencode' and value == 'register':
         ensure_oh_my_opencode_registration(data)
+    elif action == 'sync-model':
+        pass
     else:
-        raise SystemExit(f'unknown action: {action} {value}')
+        suffix = f' {value}' if value is not None else ''
+        raise SystemExit(f'unknown action: {action}{suffix}')
+    ensure_model_settings(data)
+    data = apply_user_override(data, path)
     save_config(path, data)
     print(path)
 
