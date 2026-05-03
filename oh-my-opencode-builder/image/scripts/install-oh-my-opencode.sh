@@ -40,10 +40,12 @@ echo "[install-oh-my-opencode] running: ${install_cmd[*]}"
 cd "${OMO_INSTALL_DIR}"
 "${install_cmd[@]}"
 python3 /app/scripts/update_opencode_config.py oh-my-opencode register
+python3 /app/scripts/update_oh_my_openagent_config.py
 sync_opencode_json_to_home
 if [[ -n "${OPENCODE_CONFIG_DIR:-}" && "$OPENCODE_CONFIG_DIR" != "$HOME/.config/opencode" ]]; then
   export OPENCODE_CONFIG_DIR
   python3 /app/scripts/update_opencode_config.py plugin opencode-gpt-unlocked@latest
   python3 /app/scripts/update_opencode_config.py oh-my-opencode register
+  python3 /app/scripts/update_oh_my_openagent_config.py
   sync_opencode_json_to_home
 fi

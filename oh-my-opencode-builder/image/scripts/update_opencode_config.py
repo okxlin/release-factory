@@ -199,6 +199,8 @@ def detect_provider_base_url(provider_id: str) -> str:
         'openrouter': 'OPENROUTER_BASE_URL',
         'google': 'GEMINI_BASE_URL',
         'gemini': 'GEMINI_BASE_URL',
+        'mimo': 'OPENAI_BASE_URL',
+        'xiaomi': 'OPENAI_BASE_URL',
     }
     env_key = provider_env_map.get(provider_id)
     if not env_key:
@@ -228,6 +230,9 @@ def ensure_model_settings(data):
         if not isinstance(options, dict):
             options = {}
         options['baseURL'] = provider_base_url
+        api_key = os.environ.get('OPENAI_API_KEY', '').strip() if provider_id in {'openai', 'mimo', 'xiaomi'} else ''
+        if api_key:
+            options['apiKey'] = api_key
         provider_config['options'] = options
         providers[provider_id] = provider_config
         data['provider'] = providers
@@ -242,12 +247,15 @@ def ensure_extra_plugins(data):
 
 
 def main():
-    if len(sys.argv) < 3:
-        raise SystemExit('usage: update_opencode_config.py plugin <plugin-name> | oh-my-opencode register')
-    action, value = sys.argv[1], sys.argv[2]
+    if len(sys.argv) < 2:
+        raise SystemExit('usage: update_opencode_config.py plugin <plugin-name> | oh-my-opencode register | sync-model')
+    action = sys.argv[1]
+    value = sys.argv[2] if len(sys.argv) >= 3 else None
     path = locate_config()
     data = load_config(path)
     if action == 'plugin':
+        if not value:
+            raise SystemExit('usage: update_opencode_config.py plugin <plugin-name>')
         ensure_plugin(data, value)
         if value.startswith('opencode-gpt-unlocked'):
             ensure_refusal_settings(data)
@@ -257,8 +265,11 @@ def main():
         ensure_oh_my_opencode_registration(data)
         ensure_model_settings(data)
         ensure_extra_plugins(data)
+    elif action == 'sync-model':
+        ensure_model_settings(data)
     else:
-        raise SystemExit(f'unknown action: {action} {value}')
+        suffix = f' {value}' if value is not None else ''
+        raise SystemExit(f'unknown action: {action}{suffix}')
     data = apply_user_overrides(data, path)
     save_config(path, data)
     print(path)
