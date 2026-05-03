@@ -50,6 +50,28 @@ RUN apt-get update \
         tini \
         unzip \
         xz-utils \
+        vim-tiny \
+        wget \
+        tree \
+        zip \
+        htop \
+        net-tools \
+        iproute2 \
+        iputils-ping \
+        git-lfs \
+        postgresql-client \
+        redis-tools \
+        mariadb-client \
+        tmux \
+        gettext-base \
+        diffutils \
+        patch \
+        shellcheck \
+        shfmt \
+        bat \
+        fzf \
+        ncdu \
+        httpie \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
     && chmod a+r /etc/apt/keyrings/docker.asc \
@@ -102,7 +124,9 @@ WORKDIR /app
 COPY scripts /app/scripts
 RUN chmod +x /app/scripts/*.sh /app/scripts/*.py
 
-RUN ln -sf /usr/bin/fdfind /usr/local/bin/fd || true
+RUN ln -sf /usr/bin/fdfind /usr/local/bin/fd || true \
+    && ln -sf /usr/bin/vim.tiny /usr/local/bin/vim || true \
+    && ln -sf /usr/bin/batcat /usr/local/bin/bat || true
 
 RUN mkdir -p /workspace /config /data /cache \
     && chown -R ${USER_UID}:${USER_GID} /app /workspace /config /data /cache /opt/bun /home/${USERNAME}
