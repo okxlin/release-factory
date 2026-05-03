@@ -76,7 +76,6 @@ RUN apt-get update \
         iotop \
         nethogs \
         strace \
-        ltrace \
         pigz \
         yq \
         tldr \
