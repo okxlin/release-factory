@@ -17,14 +17,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
     OMO_HOME=/home/${USERNAME}/.local/share/oh-my-opencode \
     CONTAINER_WORKSPACE=/workspace
 
-ENV PATH=/opt/bun/bin:/home/${USERNAME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV PATH=/opt/bun/bin:/usr/local/go/bin:/home/${USERNAME}/.cargo/bin:/home/${USERNAME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
         build-essential \
         ca-certificates \
-        cargo \
         clang \
         cmake \
         curl \
@@ -35,7 +34,6 @@ RUN apt-get update \
         gh \
         git \
         gnupg \
-        golang-go \
         jq \
         make \
         node-typescript \
@@ -72,6 +70,16 @@ RUN apt-get update \
         fzf \
         ncdu \
         httpie \
+        tig \
+        zstd \
+        mtr \
+        iotop \
+        nethogs \
+        strace \
+        ltrace \
+        pigz \
+        yq \
+        tldr \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
     && chmod a+r /etc/apt/keyrings/docker.asc \
@@ -119,6 +127,21 @@ RUN if getent group "${USER_GID}" >/dev/null; then \
 RUN curl -fsSL https://bun.sh/install | bash -s -- bun-v${BUN_VERSION} \
     && bun --version
 
+ARG GO_VERSION=1.22.5
+RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tar.gz \
+    && rm -rf /usr/local/go \
+    && tar -C /usr/local -xzf /tmp/go.tar.gz \
+    && rm /tmp/go.tar.gz \
+    && echo 'export PATH=/usr/local/go/bin:$PATH' >> /etc/profile.d/go.sh
+
+ARG RUST_VERSION=1.77.0
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${RUST_VERSION} \
+    && . /home/${USERNAME}/.cargo/env \
+    && echo 'export PATH=/home/${USERNAME}/.cargo/bin:$PATH' >> /etc/profile.d/rust.sh
+
+RUN npm install -g typescript@5 \
+    && tsc --version
+
 WORKDIR /app
 
 COPY scripts /app/scripts
@@ -129,7 +152,7 @@ RUN ln -sf /usr/bin/fdfind /usr/local/bin/fd || true \
     && ln -sf /usr/bin/batcat /usr/local/bin/bat || true
 
 RUN mkdir -p /workspace /config /data /cache \
-    && chown -R ${USER_UID}:${USER_GID} /app /workspace /config /data /cache /opt/bun /home/${USERNAME}
+    && chown -R ${USER_UID}:${USER_GID} /app /workspace /config /data /cache /opt/bun /usr/local/go /home/${USERNAME}
 
 USER ${USERNAME}
 WORKDIR /workspace
