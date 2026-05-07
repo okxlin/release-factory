@@ -88,9 +88,35 @@ def deep_merge(base, overlay):
     return copy.deepcopy(overlay)
 
 
+def detect_provider_id() -> str:
+    """Detect provider ID from environment, matching update_opencode_config.py logic."""
+    provider = os.environ.get('OPENCODE_PROVIDER_ID', '').strip()
+    if provider:
+        return provider
+    for key in ('OMO_AGENT_MODEL', 'OPENCODE_MODEL', 'OMO_CATEGORY_MODEL', 'OPENCODE_SMALL_MODEL'):
+        value = os.environ.get(key, '').strip()
+        if '/' in value:
+            provider_id = value.split('/', 1)[0].strip()
+            if provider_id:
+                return provider_id
+    return ''
+
+
+def ensure_provider_prefix(model: str) -> str:
+    """Ensure model name includes provider prefix (e.g. 'xiaomi/mimo-v2.5-pro')."""
+    if not model or '/' in model:
+        return model
+    provider_id = detect_provider_id()
+    if provider_id:
+        return f'{provider_id}/{model}'
+    return model
+
+
 def sync_models(data):
     model = os.environ.get('OMO_AGENT_MODEL', '').strip() or os.environ.get('OPENCODE_MODEL', '').strip()
     category_model = os.environ.get('OMO_CATEGORY_MODEL', '').strip() or model
+    model = ensure_provider_prefix(model)
+    category_model = ensure_provider_prefix(category_model)
     if model:
         agents = data.get('agents')
         if isinstance(agents, dict):

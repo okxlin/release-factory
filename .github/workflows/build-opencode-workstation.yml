@@ -1,4 +1,4 @@
-name: Build Oh My OpenCode Runtime Image
+name: Build OpenCode Workstation Image
 
 on:
   workflow_dispatch:
@@ -18,11 +18,11 @@ on:
         type: boolean
 
 concurrency:
-  group: build-oh-my-opencode-runtime-${{ github.ref }}
+  group: build-opencode-workstation-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  IMAGE_REPO: oh-my-opencode-runtime
+  IMAGE_REPO: opencode-workstation
 
 jobs:
   build-and-push:
@@ -44,8 +44,8 @@ jobs:
       - name: Resolve build parameters
         id: params
         run: |
-          chmod +x oh-my-opencode-builder/scripts/*.sh
-          bash oh-my-opencode-builder/scripts/resolve-build-params.sh \
+          chmod +x opencode-workstation-builder/scripts/*.sh
+          bash opencode-workstation-builder/scripts/resolve-build-params.sh \
             --image-repo "${IMAGE_REPO}" \
             --platforms "${{ github.event.inputs.platforms || 'linux/amd64,linux/arm64' }}" \
             --image-tag "${{ github.event.inputs.image_tag || 'latest' }}" \
@@ -73,16 +73,16 @@ jobs:
           images: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}
           tags: ${{ steps.params.outputs.tags }}
           labels: |
-            org.opencontainers.image.title=Oh My OpenCode Runtime
-            org.opencontainers.image.description=Persistent OpenCode runtime with oh-my-opencode bootstrap and plugin-friendly storage.
+            org.opencontainers.image.title=OpenCode Workstation
+            org.opencontainers.image.description=Persistent OpenCode workstation with oh-my-opencode bootstrap and plugin-friendly storage.
             org.opencontainers.image.vendor=${{ github.repository_owner }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: ./oh-my-opencode-builder/image
-          file: ./oh-my-opencode-builder/image/Dockerfile
+          context: ./opencode-workstation-builder/image
+          file: ./opencode-workstation-builder/image/Dockerfile
           platforms: ${{ steps.params.outputs.platforms }}
           push: true
           build-args: |
@@ -97,7 +97,7 @@ jobs:
       - name: Emit build summary
         run: |
           {
-            echo "## Oh My OpenCode runtime image build"
+            echo "## OpenCode workstation image build"
             echo ""
             echo "- Image: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}"
             echo "- Published image tag: ${{ steps.params.outputs.image_tag }}"
