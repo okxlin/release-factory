@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$ROOT_DIR/configs/architectures.sh"
 
-IMAGE_REPO="oh-my-opencode-runtime"
+IMAGE_REPO="opencode-workstation"
 DEFAULT_PLATFORMS="linux/amd64,linux/arm64"
 PLATFORMS="$DEFAULT_PLATFORMS"
 IMAGE_TAG=""
@@ -15,10 +15,10 @@ GITHUB_OUTPUT_PATH=""
 
 usage() {
   cat <<USAGE
-用途：解析 oh-my-opencode runtime 镜像构建参数，供 GitHub Actions 调用。
+用途：解析 opencode-workstation 镜像构建参数，供 GitHub Actions 调用。
 
 参数：
-  --image-repo <name>         镜像仓库名（默认 oh-my-opencode-runtime）
+  --image-repo <name>         镜像仓库名（默认 opencode-workstation）
   --platforms <csv>           平台列表（默认 linux/amd64,linux/arm64）
   --image-tag <tag>           显式镜像标签；留空时默认 latest
   --push-latest <bool>        是否附带 latest 别名标签
