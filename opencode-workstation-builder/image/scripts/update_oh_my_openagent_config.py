@@ -132,12 +132,20 @@ def sync_models(data):
     return data
 
 
+def ensure_hashline_default(data):
+    """Enable hashline edit by default when oh-my-openagent config is first generated."""
+    if 'hashline_edit' not in data:
+        data['hashline_edit'] = True
+    return data
+
+
 def main():
     base_path = locate_base_path()
     data = load_json(base_path)
     if not isinstance(data, dict):
         data = {}
     data = sync_models(data)
+    data = ensure_hashline_default(data)
     user_override = locate_user_override(base_path)
     if user_override.exists():
         override_data = load_json(user_override)
