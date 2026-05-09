@@ -1,10 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-CONTAINER_DATA="${CONTAINER_DATA:-/data}"
-OPENCODE_INSTALL_DIR="${OPENCODE_INSTALL_DIR:-${CONTAINER_DATA}/opencode}"
-OPENCODE_NPM_BIN_DIR="${OPENCODE_NPM_BIN_DIR:-${CONTAINER_DATA}/bin}"
-STATE_DIR="${CONTAINER_DATA}/state/oh-my-opencode-bootstrap"
+OPENCODE_INSTALL_DIR="${OPENCODE_INSTALL_DIR:-$HOME/.local/share/opencode}"
+OPENCODE_NPM_BIN_DIR="${OPENCODE_NPM_BIN_DIR:-$HOME/.local/bin}"
+STATE_DIR="$HOME/.local/share/opencode/state/oh-my-opencode-bootstrap"
 BIN_DIR="${OPENCODE_NPM_BIN_DIR}"
 NPM_PREFIX="${OPENCODE_INSTALL_DIR}"
 mkdir -p "$STATE_DIR" "$BIN_DIR" "$NPM_PREFIX"

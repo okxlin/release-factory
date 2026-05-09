@@ -2,9 +2,8 @@
 set -euo pipefail
 
 : "${OPENCODE_NPM_PACKAGE:=opencode-ai}"
-: "${CONTAINER_DATA:=/data}"
-: "${OPENCODE_INSTALL_DIR:=${CONTAINER_DATA}/opencode}"
-: "${OPENCODE_NPM_BIN_DIR:=${CONTAINER_DATA}/bin}"
+: "${OPENCODE_INSTALL_DIR:=$HOME/.local/share/opencode}"
+: "${OPENCODE_NPM_BIN_DIR:=$HOME/.local/bin}"
 
 mkdir -p "${OPENCODE_INSTALL_DIR}" "${OPENCODE_NPM_BIN_DIR}"
 

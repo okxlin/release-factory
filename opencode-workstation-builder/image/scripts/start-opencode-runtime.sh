@@ -5,12 +5,8 @@ if [[ -z "${HOME:-}" ]]; then
   export HOME="$(getent passwd "$(id -u)" | cut -d: -f6 2>/dev/null || true)"
 fi
 
-: "${CONTAINER_DATA:=/data}"
-: "${OPENCODE_NPM_BIN_DIR:=${CONTAINER_DATA}/bin}"
-
-if [[ -n "${HOME:-}" ]]; then
-  export PATH="/opt/bun/bin:${OPENCODE_NPM_BIN_DIR}:${HOME}/.local/bin:${PATH:-/usr/local/bin:/usr/bin:/bin}"
-fi
+: "${OPENCODE_NPM_BIN_DIR:=$HOME/.local/bin}"
+export PATH="/opt/bun/bin:${OPENCODE_NPM_BIN_DIR}:${HOME}/.local/bin:${PATH:-/usr/local/bin:/usr/bin:/bin}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -21,6 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${SERVE_HOST:=0.0.0.0}"
 : "${OPENCODE_BOOTSTRAP:=1}"
 : "${OPENCODE_INSTALL_PLUGINS:=1}"
+: "${OPENCODE_CONFIG_DIR:=$HOME/.config/opencode}"
 
 if [[ "${OPENCODE_BOOTSTRAP}" == "1" ]]; then
   "${SCRIPT_DIR}/bootstrap-opencode-userland.sh"

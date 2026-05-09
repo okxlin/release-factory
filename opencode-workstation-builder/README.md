@@ -23,19 +23,49 @@
 - 默认 tag：`latest`
 - 可选附带 `latest` 别名
 
+## 运行时目录模型
+
+当前工作站镜像已经改为**直接按 OpenCode 官方 HOME 路径运行**，不再以 `/config/opencode` 作为主运行语义。
+
+### 运行时真实目录
+
+- `~/.config/opencode`
+- `~/.agents`
+- `~/.claude`
+- `~/.opencode`
+- `~/.local/share/opencode`
+- `~/.local/share/oh-my-opencode`
+- `/workspace`
+
+### 推荐持久化挂载
+
+- `/home/opencode/.config`
+- `/home/opencode/.agents`
+- `/home/opencode/.claude`
+- `/home/opencode/.opencode`
+- `/home/opencode/.local/share`
+- `/workspace`
+
+这样做的原因：
+
+- 与 OpenCode upstream 源码的目录发现逻辑一致
+- `skills` / `agents` / `claude-compatible` 扩展不需要额外路径翻译
+- 避免 `/config -> HOME` 的单文件同步漂移
+- 后续 upstream 扩展 HOME 目录扫描时兼容风险最低
+
 ## 运行时配置分层
 
-推荐按三层使用，避免“手改一次，重启回滚一次”：
+推荐按三层使用：
 
 1. **部署级环境变量层**
    - 通过 `.env` / CI / 部署平台注入
    - 适合：`OPENCODE_MODEL`、`OPENCODE_SMALL_MODEL`、`OPENCODE_PROVIDER_ID`、`OPENCODE_EXTRA_PLUGINS`、以及各类 `*_BASE_URL` / `*_API_KEY`
 2. **生成配置层**
-   - `/config/opencode/opencode.json`
+   - `~/.config/opencode/opencode.json`
    - 由 `image/scripts/update_opencode_config.py` 在启动/安装阶段更新
    - 这是生成产物，不建议长期手工维护
 3. **用户覆盖层**
-   - `/config/opencode/opencode.user.json` 或 `/config/opencode/opencode.user.jsonc`
+   - `~/.config/opencode/opencode.user.json` 或 `~/.config/opencode/opencode.user.jsonc`
    - 适合手工追加 provider、models、plugin 高级配置、额外 MCP 条目
 
 当前脚本会在写完 `opencode.json` 后再合并用户覆盖层：
@@ -43,6 +73,33 @@
 - `plugin` 数组：追加去重
 - `provider` / `models` / `mcp` 等对象：深度合并
 - 未知键：保留，不主动删除
+
+## Skills / Agents / Claude 兼容目录
+
+### OpenCode skills
+
+- `~/.config/opencode/skills/...`
+
+### agent-compatible skills
+
+- `~/.agents/skills/...`
+
+### claude-compatible skills
+
+- `~/.claude/skills/...`
+
+### agent markdown / command markdown
+
+OpenCode 本身还会读取项目内或兼容目录中的：
+
+- `agents/**/*.md`
+- `agent/**/*.md`
+- `commands/**/*.md`
+- `command/**/*.md`
+- `AGENTS.md`
+- `.opencode/...`
+
+所以 `/workspace` 也应该是长期持久化目录，而不是短暂临时盘。
 
 ## `opencode.user.json` 怎么写
 
@@ -107,11 +164,11 @@
 - 默认主模型仍优先通过 `OPENCODE_MODEL` 设置
 - 对于 `mimo` 这类自定义 provider，推荐在 `opencode.user.json` 中显式声明 `provider.<id>`；环境变量自动写入 `baseURL` 目前只覆盖脚本内置映射的 provider
 - 不要把真实密钥硬编码进 `opencode.user.json`，优先用 `{env:...}`
-- 不要把 `/config/opencode/opencode.json` 当作长期手工配置源
+- 不要把 `~/.config/opencode/opencode.json` 当作长期手工配置源
 
 ## PR reviewer 该看什么
 
 - `build-opencode-workstation.yml`：是否只保留手动触发、tag 规则是否干净
 - `image/Dockerfile`：是否仍然以独立镜像上下文承载运行时依赖
-- `image/scripts/entrypoint.sh`、`image/scripts/bootstrap-opencode-userland.sh`、`image/scripts/install-oh-my-opencode.sh`：是否继续保证 `/data` 与 `/config` 上的持久化语义
+- `image/scripts/entrypoint.sh`、`image/scripts/bootstrap-opencode-userland.sh`、`image/scripts/install-oh-my-opencode.sh`：是否继续保证官方 HOME 路径上的持久化语义
 - `image/scripts/update_opencode_config.py`：是否继续保留用户覆盖层与插件去重合并语义

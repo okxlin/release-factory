@@ -12,23 +12,29 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${ACP_AUTO_START:=0}"
 : "${OPENCODE_RUNTIME_MODE:=acp}"
 : "${CONTAINER_WORKSPACE:=/workspace}"
-: "${CONTAINER_CONFIG:=/config}"
 : "${CONTAINER_CACHE:=/cache}"
-: "${CONTAINER_DATA:=/data}"
 : "${KEEPALIVE_COMMAND:=sleep infinity}"
-: "${OPENCODE_INSTALL_DIR:=${CONTAINER_DATA}/opencode}"
-: "${OPENCODE_NPM_BIN_DIR:=${CONTAINER_DATA}/bin}"
-: "${OPENCODE_CONFIG_DIR:=${CONTAINER_CONFIG}/opencode}"
-: "${OMO_INSTALL_DIR:=${CONTAINER_DATA}/oh-my-opencode}"
+: "${OPENCODE_INSTALL_DIR:=$HOME/.local/share/opencode}"
+: "${OPENCODE_NPM_BIN_DIR:=$HOME/.local/bin}"
+: "${OPENCODE_CONFIG_DIR:=$HOME/.config/opencode}"
+: "${OMO_INSTALL_DIR:=$HOME/.local/share/oh-my-opencode}"
 
-if [[ -n "${HOME:-}" ]]; then
-  export PATH="/opt/bun/bin:${OPENCODE_NPM_BIN_DIR}:${HOME}/.local/bin:${PATH:-/usr/local/bin:/usr/bin:/bin}"
-fi
+export OPENCODE_CONFIG_DIR OPENCODE_INSTALL_DIR OPENCODE_NPM_BIN_DIR OMO_INSTALL_DIR
+export PATH="/opt/bun/bin:${OPENCODE_NPM_BIN_DIR}:${HOME}/.local/bin:${PATH:-/usr/local/bin:/usr/bin:/bin}"
 
-mkdir -p "${CONTAINER_WORKSPACE}" "${CONTAINER_CONFIG}" "${CONTAINER_CACHE}" "${CONTAINER_DATA}" "${OPENCODE_INSTALL_DIR}" "${OPENCODE_NPM_BIN_DIR}" "${OMO_INSTALL_DIR}" "$HOME/.config" "$HOME/.cache" "$HOME/.local/bin"
-mkdir -p "${OPENCODE_CONFIG_DIR}"
+mkdir -p \
+  "${CONTAINER_WORKSPACE}" \
+  "${CONTAINER_CACHE}" \
+  "$HOME/.config/opencode" \
+  "$HOME/.agents" \
+  "$HOME/.claude" \
+  "$HOME/.opencode" \
+  "$HOME/.local/share/opencode" \
+  "$HOME/.local/share/oh-my-opencode" \
+  "$HOME/.local/bin" \
+  "$HOME/.cache"
 
-sample_user_config="${OPENCODE_CONFIG_DIR}/opencode.user.sample.json"
+sample_user_config="$HOME/.config/opencode/opencode.user.sample.json"
 if [[ ! -f "${sample_user_config}" ]]; then
   cat > "${sample_user_config}" <<'EOF'
 {
@@ -58,7 +64,14 @@ log() {
   printf '[entrypoint] %s\n' "$*"
 }
 
-for dir in "${CONTAINER_WORKSPACE}" "${CONTAINER_CONFIG}" "${CONTAINER_CACHE}" "${CONTAINER_DATA}"; do
+for dir in \
+  "${CONTAINER_WORKSPACE}" \
+  "${CONTAINER_CACHE}" \
+  "$HOME/.config" \
+  "$HOME/.agents" \
+  "$HOME/.claude" \
+  "$HOME/.opencode" \
+  "$HOME/.local/share"; do
   if [[ -d "$dir" && ! -w "$dir" ]]; then
     log "mount not writable for current user: $dir"
   fi

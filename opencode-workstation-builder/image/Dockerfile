@@ -150,8 +150,17 @@ RUN ln -sf /usr/bin/fdfind /usr/local/bin/fd || true \
     && ln -sf /usr/bin/vim.tiny /usr/local/bin/vim || true \
     && ln -sf /usr/bin/batcat /usr/local/bin/bat || true
 
-RUN mkdir -p /workspace /config /data /cache \
-    && chown -R ${USER_UID}:${USER_GID} /app /workspace /config /data /cache /opt/bun /usr/local/go /home/${USERNAME}
+RUN mkdir -p \
+      /workspace \
+      /cache \
+      /home/${USERNAME}/.config/opencode \
+      /home/${USERNAME}/.agents \
+      /home/${USERNAME}/.claude \
+      /home/${USERNAME}/.opencode \
+      /home/${USERNAME}/.local/share/opencode \
+      /home/${USERNAME}/.local/share/oh-my-opencode \
+      /home/${USERNAME}/.local/bin \
+    && chown -R ${USER_UID}:${USER_GID} /app /workspace /cache /opt/bun /usr/local/go /home/${USERNAME}
 
 USER ${USERNAME}
 WORKDIR /workspace
