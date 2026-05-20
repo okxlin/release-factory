@@ -7,7 +7,7 @@ omo_package="$(bash "${SCRIPT_DIR}/resolve-omo-package.sh")"
 status=0
 
 printf '[smoke] checking required commands\n'
-for cmd in node npm bun bunx python3 git sqlite3 rg fd gh jq gcc g++ make; do
+for cmd in node npm bun python3 git sqlite3 rg fd gh jq gcc g++ make; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     printf '[smoke] missing command: %s\n' "$cmd" >&2
     status=1
@@ -38,7 +38,7 @@ esac
 
 printf '[smoke] checking oh-my-opencode resolver\n'
 printf '[smoke] selected oh-my-opencode package: %s\n' "${omo_package}"
-if ! bunx --bun "${omo_package}" --help >/dev/null; then
+if ! npm exec --yes --package="${omo_package}" -- oh-my-opencode --help >/dev/null; then
   status=1
 fi
 

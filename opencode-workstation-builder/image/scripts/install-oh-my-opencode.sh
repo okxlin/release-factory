@@ -10,13 +10,13 @@ resolved_omo_package="$(bash "${SCRIPT_DIR}/resolve-omo-package.sh")"
 
 mkdir -p "${OMO_INSTALL_DIR}" "$OPENCODE_CONFIG_DIR"
 
-if ! command -v bunx >/dev/null 2>&1; then
-  echo "[install-oh-my-opencode] bunx not found in PATH" >&2
+if ! command -v npm >/dev/null 2>&1; then
+  echo "[install-oh-my-opencode] npm not found in PATH" >&2
   exit 1
 fi
 
 if [[ -n "${OMO_INSTALL_ARGS}" ]]; then
-  install_cmd=(bunx --bun "${resolved_omo_package}" install --no-tui)
+  install_cmd=(npm exec --yes --package="${resolved_omo_package}" -- oh-my-opencode install --no-tui)
   # shellcheck disable=SC2206
   extra_args=( ${OMO_INSTALL_ARGS} )
   install_cmd+=("${extra_args[@]}")
