@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+omo_package="$(bash "${SCRIPT_DIR}/resolve-omo-package.sh")"
+
 status=0
 
 check() {
@@ -58,7 +61,10 @@ esac
 
 check "oh-my-opencode availability"
 if command -v bunx >/dev/null 2>&1; then
-  bunx --bun oh-my-opencode --help >/dev/null
+  check "oh-my-opencode package ${omo_package}"
+  if ! bunx --bun "${omo_package}" --help >/dev/null; then
+    status=1
+  fi
 else
   echo "[doctor] bunx unavailable" >&2
   status=1
@@ -66,7 +72,7 @@ fi
 
 check "oh-my-opencode doctor"
 if command -v bunx >/dev/null 2>&1; then
-  if ! bunx --bun oh-my-opencode doctor; then
+  if ! bunx --bun "${omo_package}" doctor; then
     status=1
   fi
 fi
