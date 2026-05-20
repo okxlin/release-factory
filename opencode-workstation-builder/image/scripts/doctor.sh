@@ -60,19 +60,19 @@ case "${OPENCODE_RUNTIME_MODE:-acp}" in
 esac
 
 check "oh-my-opencode availability"
-if command -v bunx >/dev/null 2>&1; then
+if command -v npm >/dev/null 2>&1; then
   check "oh-my-opencode package ${omo_package}"
-  if ! bunx --bun "${omo_package}" --help >/dev/null; then
+  if ! npm exec --yes --package="${omo_package}" -- oh-my-opencode --help >/dev/null; then
     status=1
   fi
 else
-  echo "[doctor] bunx unavailable" >&2
+  echo "[doctor] npm unavailable" >&2
   status=1
 fi
 
 check "oh-my-opencode doctor"
-if command -v bunx >/dev/null 2>&1; then
-  if ! bunx --bun "${omo_package}" doctor; then
+if command -v npm >/dev/null 2>&1; then
+  if ! npm exec --yes --package="${omo_package}" -- oh-my-opencode doctor; then
     status=1
   fi
 fi

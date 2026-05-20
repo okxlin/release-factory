@@ -48,6 +48,6 @@ append_if_enabled OMO_VERCEL_AI_GATEWAY --vercel-ai-gateway
 
 package_name="$(bash "${SCRIPT_DIR}/resolve-omo-package.sh")"
 
-printf 'bunx --bun %q' "${package_name}"
+printf 'npm exec --yes --package=%q -- oh-my-opencode' "${package_name}"
 printf ' %q' "${args[@]}"
 printf '\n'
