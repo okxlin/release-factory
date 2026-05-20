@@ -3,7 +3,7 @@ FROM node:20-bookworm-slim
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-ARG BUN_VERSION=1.2.15
+ARG BUN_VERSION=1.3.14
 ARG USERNAME=opencode
 ARG USER_UID=1000
 ARG USER_GID=1000
@@ -127,7 +127,13 @@ RUN curl -fsSL https://bun.sh/install | bash -s -- bun-v${BUN_VERSION} \
     && bun --version
 
 ARG GO_VERSION=1.22.5
-RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tar.gz \
+RUN dpkg_arch="$(dpkg --print-architecture)" \
+    && case "${dpkg_arch}" in \
+         amd64) go_arch='amd64' ;; \
+         arm64) go_arch='arm64' ;; \
+         *) echo "unsupported architecture for Go install: ${dpkg_arch}" >&2; exit 1 ;; \
+       esac \
+    && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz" -o /tmp/go.tar.gz \
     && rm -rf /usr/local/go \
     && tar -C /usr/local -xzf /tmp/go.tar.gz \
     && rm /tmp/go.tar.gz \

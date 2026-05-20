@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 claude_mode="${OMO_CLAUDE_MODE:-no}"
 gemini_mode="${OMO_GEMINI_MODE:-${OMO_GEMINI:-0}}"
 copilot_mode="${OMO_COPILOT_MODE:-${OMO_COPILOT:-0}}"
@@ -44,6 +46,8 @@ append_if_enabled OMO_OPENCODE_GO --opencode-go
 append_if_enabled OMO_OPENCODE_ZEN --opencode-zen
 append_if_enabled OMO_VERCEL_AI_GATEWAY --vercel-ai-gateway
 
-printf 'bunx --bun oh-my-opencode'
+package_name="$(bash "${SCRIPT_DIR}/resolve-omo-package.sh")"
+
+printf 'bunx --bun %q' "${package_name}"
 printf ' %q' "${args[@]}"
 printf '\n'

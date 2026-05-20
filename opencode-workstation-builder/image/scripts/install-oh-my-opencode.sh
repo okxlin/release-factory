@@ -2,11 +2,11 @@
 set -euo pipefail
 
 : "${OMO_INSTALL_DIR:=$HOME/.local/share/oh-my-opencode}"
-: "${OMO_PACKAGE:=oh-my-opencode}"
 : "${OMO_INSTALL_ARGS:=}"
 : "${OPENCODE_CONFIG_DIR:=$HOME/.config/opencode}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+resolved_omo_package="$(bash "${SCRIPT_DIR}/resolve-omo-package.sh")"
 
 mkdir -p "${OMO_INSTALL_DIR}" "$OPENCODE_CONFIG_DIR"
 
@@ -16,7 +16,7 @@ if ! command -v bunx >/dev/null 2>&1; then
 fi
 
 if [[ -n "${OMO_INSTALL_ARGS}" ]]; then
-  install_cmd=(bunx --bun "${OMO_PACKAGE}" install --no-tui)
+  install_cmd=(bunx --bun "${resolved_omo_package}" install --no-tui)
   # shellcheck disable=SC2206
   extra_args=( ${OMO_INSTALL_ARGS} )
   install_cmd+=("${extra_args[@]}")
@@ -26,6 +26,7 @@ else
   install_cmd=( ${rendered_command} )
 fi
 
+echo "[install-oh-my-opencode] selected package: ${resolved_omo_package}"
 echo "[install-oh-my-opencode] running: ${install_cmd[*]}"
 cd "${OMO_INSTALL_DIR}"
 "${install_cmd[@]}"
