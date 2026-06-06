@@ -16,11 +16,10 @@ has_avx2() {
   [[ -r /proc/cpuinfo ]] && grep -qiE '(^|[[:space:]])avx2($|[[:space:]])' /proc/cpuinfo
 }
 
-# When the user explicitly picks a package, trust it and don't force baseline.
+# Honour explicit OMO_PACKAGE but still detect AVX2 for the baseline flag.
+targeted_package='oh-my-opencode'
 if [[ -n "${OMO_PACKAGE}" ]]; then
-  printf '%s\n' "${OMO_PACKAGE}"
-  printf '%s\n' '0'
-  exit 0
+  targeted_package="${OMO_PACKAGE}"
 fi
 
 arch="$(uname -m)"
@@ -39,5 +38,5 @@ elif [[ "${force_baseline}" != "no" ]]; then
   esac
 fi
 
-printf '%s\n' 'oh-my-opencode'
+printf '%s\n' "${targeted_package}"
 printf '%s\n' "${needs_baseline}"
