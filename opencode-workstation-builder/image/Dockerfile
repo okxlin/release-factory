@@ -126,6 +126,8 @@ RUN if getent group "${USER_GID}" >/dev/null; then \
 RUN curl -fsSL https://bun.sh/install | bash -s -- bun-v${BUN_VERSION} \
     && bun --version
 
+ENV BUN_VERSION=${BUN_VERSION}
+
 ARG GO_VERSION=1.22.5
 RUN dpkg_arch="$(dpkg --print-architecture)" \
     && case "${dpkg_arch}" in \

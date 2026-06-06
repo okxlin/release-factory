@@ -10,8 +10,21 @@ mapfile -t _omo_lines < <(bash "${SCRIPT_DIR}/resolve-omo-package.sh")
 resolved_omo_package="${_omo_lines[0]}"
 _needs_baseline="${_omo_lines[1]:-0}"
 unset _omo_lines
+
+# When baseline is needed, the Bun binary baked into the image may SIGILL
+# on non-AVX2 CPUs. Bun's install script auto-detects /proc/cpuinfo and
+# installs the correct baseline variant, so re-run it before npm exec.
 if [[ "${_needs_baseline}" == "1" ]]; then
   export OH_MY_OPENCODE_FORCE_BASELINE=1
+  _bun_bin="${BUN_INSTALL:-/opt/bun}/bin/bun"
+  if ! "${_bun_bin}" --version >/dev/null 2>&1; then
+    echo "[install-oh-my-opencode] reinstalling Bun baseline for non-AVX2 CPU"
+    curl -fsSL https://bun.sh/install | bash -s -- "bun-v${BUN_VERSION:-1.3.14}"
+    if ! "${_bun_bin}" --version >/dev/null 2>&1; then
+      echo "[install-oh-my-opencode] Bun baseline reinstall failed" >&2
+      exit 1
+    fi
+  fi
 fi
 
 mkdir -p "${OMO_INSTALL_DIR}" "$OPENCODE_CONFIG_DIR"
