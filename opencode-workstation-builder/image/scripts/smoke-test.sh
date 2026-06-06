@@ -2,7 +2,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-omo_package="$(bash "${SCRIPT_DIR}/resolve-omo-package.sh")"
+mapfile -t _omo_lines < <(bash "${SCRIPT_DIR}/resolve-omo-package.sh")
+omo_package="${_omo_lines[0]}"
+_needs_baseline="${_omo_lines[1]:-0}"
+unset _omo_lines
+if [[ "${_needs_baseline}" == "1" ]]; then
+  export OH_MY_OPENCODE_FORCE_BASELINE=1
+fi
 
 status=0
 

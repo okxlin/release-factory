@@ -2,9 +2,6 @@
 set -euo pipefail
 
 : "${OMO_PACKAGE:=}"
-: "${OMO_PACKAGE_AMD64:=oh-my-opencode-linux-x64}"
-: "${OMO_PACKAGE_AMD64_BASELINE:=oh-my-opencode-linux-x64-baseline}"
-: "${OMO_PACKAGE_ARM64:=oh-my-opencode-linux-arm64}"
 : "${OMO_FORCE_BASELINE:=auto}"
 
 normalize_bool() {
@@ -19,32 +16,28 @@ has_avx2() {
   [[ -r /proc/cpuinfo ]] && grep -qiE '(^|[[:space:]])avx2($|[[:space:]])' /proc/cpuinfo
 }
 
+# When the user explicitly picks a package, trust it and don't force baseline.
 if [[ -n "${OMO_PACKAGE}" ]]; then
   printf '%s\n' "${OMO_PACKAGE}"
+  printf '%s\n' '0'
   exit 0
 fi
 
 arch="$(uname -m)"
 force_baseline="$(normalize_bool "${OMO_FORCE_BASELINE}")"
+needs_baseline=0
 
-case "${arch}" in
-  x86_64|amd64)
-    if [[ "${force_baseline}" == "yes" ]]; then
-      printf '%s\n' "${OMO_PACKAGE_AMD64_BASELINE}"
-      exit 0
-    fi
+if [[ "${force_baseline}" == "yes" ]]; then
+  needs_baseline=1
+elif [[ "${force_baseline}" != "no" ]]; then
+  case "${arch}" in
+    x86_64|amd64)
+      if ! has_avx2; then
+        needs_baseline=1
+      fi
+      ;;
+  esac
+fi
 
-    if [[ "${force_baseline}" != "no" ]] && ! has_avx2; then
-      printf '%s\n' "${OMO_PACKAGE_AMD64_BASELINE}"
-      exit 0
-    fi
-
-    printf '%s\n' "${OMO_PACKAGE_AMD64}"
-    ;;
-  aarch64|arm64)
-    printf '%s\n' "${OMO_PACKAGE_ARM64}"
-    ;;
-  *)
-    printf '%s\n' 'oh-my-opencode'
-    ;;
-esac
+printf '%s\n' 'oh-my-opencode'
+printf '%s\n' "${needs_baseline}"

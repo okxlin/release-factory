@@ -45,8 +45,9 @@ append_if_enabled OMO_OPENAI --openai
 append_if_enabled OMO_OPENCODE_GO --opencode-go
 append_if_enabled OMO_OPENCODE_ZEN --opencode-zen
 append_if_enabled OMO_VERCEL_AI_GATEWAY --vercel-ai-gateway
-
-package_name="$(bash "${SCRIPT_DIR}/resolve-omo-package.sh")"
+mapfile -t _omo_lines < <(bash "${SCRIPT_DIR}/resolve-omo-package.sh")
+package_name="${_omo_lines[0]}"
+unset _omo_lines
 
 printf 'npm exec --yes --package=%q -- oh-my-opencode' "${package_name}"
 printf ' %q' "${args[@]}"

@@ -6,7 +6,13 @@ set -euo pipefail
 : "${OPENCODE_CONFIG_DIR:=$HOME/.config/opencode}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-resolved_omo_package="$(bash "${SCRIPT_DIR}/resolve-omo-package.sh")"
+mapfile -t _omo_lines < <(bash "${SCRIPT_DIR}/resolve-omo-package.sh")
+resolved_omo_package="${_omo_lines[0]}"
+_needs_baseline="${_omo_lines[1]:-0}"
+unset _omo_lines
+if [[ "${_needs_baseline}" == "1" ]]; then
+  export OH_MY_OPENCODE_FORCE_BASELINE=1
+fi
 
 mkdir -p "${OMO_INSTALL_DIR}" "$OPENCODE_CONFIG_DIR"
 
