@@ -49,6 +49,20 @@ echo "[install-oh-my-opencode] selected package: ${resolved_omo_package}"
 echo "[install-oh-my-opencode] running: ${install_cmd[*]}"
 cd "${OMO_INSTALL_DIR}"
 "${install_cmd[@]}"
+
+# oh-my-opencode >= v4.7 removed the 'mcp start' subcommand; the installer
+# still writes a stale local MCP config entry.  Built-in MCPs (websearch,
+# context7, grep_app, lsp) are remote HTTP servers registered by the plugin.
+python3 - "${OPENCODE_CONFIG_DIR}/opencode.json" <<'PYEOF'
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+mcp = cfg.get("mcp", {})
+if "oh-my-opencode" in mcp:
+    print("[install-oh-my-opencode] removing stale oh-my-opencode MCP entry")
+    del mcp["oh-my-opencode"]
+    json.dump(cfg, open(sys.argv[1], "w"), indent=2)
+PYEOF
+
 python3 /app/scripts/update_opencode_config.py oh-my-opencode register
 python3 /app/scripts/update_oh_my_openagent_config.py
 python3 /app/scripts/update_opencode_config.py plugin opencode-gpt-unlocked@latest
