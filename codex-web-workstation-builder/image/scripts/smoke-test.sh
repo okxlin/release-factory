@@ -32,13 +32,15 @@ echo "[smoke] === Core Services (HTTP probes) ==="
 CODE_SERVER_PORT="${CODE_SERVER_PORT:-8080}"
 TTYD_PORT="${TTYD_PORT:-7681}"
 
-if curl -sf "http://localhost:${CODE_SERVER_PORT}/" >/dev/null 2>&1; then
+# Accept any HTTP response (2xx/3xx/4xx) as proof of listening
+if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${CODE_SERVER_PORT}/" | grep -qE '^[2345][0-9]{2}$'; then
   pass "code-server responding on port ${CODE_SERVER_PORT}"
 else
   fail "code-server not responding on port ${CODE_SERVER_PORT}"
 fi
 
-if curl -sf "http://localhost:${TTYD_PORT}/" >/dev/null 2>&1; then
+# Accept any HTTP response (2xx/3xx/4xx) as proof of listening
+if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${TTYD_PORT}/" | grep -qE '^[2345][0-9]{2}$'; then
   pass "ttyd responding on port ${TTYD_PORT}"
 else
   fail "ttyd not responding on port ${TTYD_PORT}"

@@ -72,7 +72,6 @@ COPY scripts/smoke-test.sh /usr/local/bin/smoke-test.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh /usr/local/bin/configure-provider.sh /usr/local/bin/doctor.sh /usr/local/bin/smoke-test.sh
 
 # ── Runtime ──
-# ── Runtime ──
 USER dev
 WORKDIR /workspace
 

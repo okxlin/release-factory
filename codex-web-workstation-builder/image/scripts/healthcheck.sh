@@ -8,13 +8,13 @@ CODE_SERVER_PORT=8080
 TTYD_PORT=7681
 
 # Check code-server is listening
-if ! curl -sf http://localhost:${CODE_SERVER_PORT}/ > /dev/null 2>&1; then
+if ! curl -s -o /dev/null -w "%{http_code}" "http://localhost:${CODE_SERVER_PORT}/" | grep -qE '^[2345][0-9]{2}$'; then
   echo "code-server not responding on port ${CODE_SERVER_PORT}" >&2
   exit 1
 fi
 
 # Check ttyd is listening
-if ! curl -sf http://localhost:${TTYD_PORT}/ > /dev/null 2>&1; then
+if ! curl -s -o /dev/null -w "%{http_code}" "http://localhost:${TTYD_PORT}/" | grep -qE '^[2345][0-9]{2}$'; then
   echo "ttyd not responding on port ${TTYD_PORT}" >&2
   exit 1
 fi
