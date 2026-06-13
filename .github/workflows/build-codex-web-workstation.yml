@@ -3,7 +3,7 @@ name: Build Codex Web Workstation Image
 on:
   workflow_dispatch:
     inputs:
-      image_tag:
+      image-tag:
         description: "Published image tag; leave empty to use latest"
         required: false
         default: "latest"
@@ -11,7 +11,7 @@ on:
         description: "Comma-separated target platforms"
         required: true
         default: "linux/amd64"
-      push_latest:
+      push-latest:
         description: "Also publish latest tag"
         required: true
         default: false
@@ -48,8 +48,8 @@ jobs:
           bash codex-web-workstation-builder/scripts/resolve-build-params.sh \
             --image-repo "${IMAGE_REPO}" \
             --platforms "${{ github.event.inputs.platforms || 'linux/amd64' }}" \
-            --image-tag "${{ github.event.inputs.image_tag || 'latest' }}" \
-            --push-latest "${{ github.event.inputs.push_latest == true && 'true' || 'false' }}" \
+            --image-tag "${{ github.event.inputs['image-tag'] || 'latest' }}" \
+            --push-latest "${{ github.event.inputs['push-latest'] == 'true' && 'true' || 'false' }}" \
             --latest-tag "latest" \
             --github-output "$GITHUB_OUTPUT"
 
