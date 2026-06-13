@@ -1,6 +1,6 @@
 # codex-web-workstation-builder
 
-Docker image builder for the Codex Web Workstation — a browser-accessible Linux development environment with Codex CLI, code-server (VS Code), and ttyd (web terminal).
+Docker image builder for the Codex Web Workstation — a browser-accessible Linux development environment with Codex CLI and code-server (VS Code).
 
 ## Directory Conventions
 
@@ -13,66 +13,55 @@ codex-web-workstation-builder/
 │   └── resolve-build-params.sh     # CI build parameter resolver
 └── image/
     ├── .dockerignore
-    ├── .env.example                # Runtime env vars reference
+    ├── .env.example                # Build-time args reference
     ├── Dockerfile                  # Ubuntu 24.04 + Node 20 + toolchain
-    ├── docker-compose.yml          # workstation + caddy services
-    ├── Caddyfile                   # HTTPS + Basic Auth + reverse proxy
-    ├── scripts/
-    │   ├── entrypoint.sh           # Container entrypoint (9 steps)
-    │   ├── configure-provider.sh   # Custom provider config generator
-    │   ├── healthcheck.sh          # Docker HEALTHCHECK script
-    │   ├── doctor.sh               # Full diagnostic
-    │   └── smoke-test.sh           # Quick smoke test
-    └── config/
-        ├── codex/                  # Codex CLI config examples
-        └── code-server/            # code-server config example
+    └── scripts/
+        ├── entrypoint.sh           # Container entrypoint (9 steps)
+        ├── configure-provider.sh   # Custom provider config generator
+        ├── healthcheck.sh          # Docker HEALTHCHECK script
+        ├── doctor.sh               # Full diagnostic
+        └── smoke-test.sh           # Quick smoke test
 ```
 
-Build-time code (`configs/`, `scripts/`) stays outside the image. Runtime code (`image/scripts/`, `image/config/`) gets baked into the container.
+Build-time code (`configs/`, `scripts/`) stays outside the image. Runtime code (`image/scripts/`) gets baked into the container.
 
 ## Build
 
 ```bash
-cd image
-docker compose build
+docker build -t codex-web-workstation image/
 ```
 
 The Docker context is `image/`. The Dockerfile expects all COPY paths relative to this directory.
 
 ## Runtime Environment
 
-Copy `image/.env.example` to `image/.env` and fill in real values:
+Copy `image/.env.example` to `.env` and fill in real values:
 
 ```bash
-cp image/.env.example image/.env
-# Edit .env — at minimum set DOMAIN, CODE_SERVER_PASSWORD, and BASIC_AUTH_HASH
+# At minimum set PASSWORD
+# Pass runtime env vars via docker run -e or your deploy system
 ```
 
-Generate Caddy password hash:
+Start with `docker run`:
 
 ```bash
-docker run --rm caddy:2 caddy hash-password --plaintext 'your-password'
+docker run -d -p 8080:8080 \
+  -e PASSWORD=change-me \
+  -e TTYD_USER=dev -e TTYD_PASSWORD=change-me \
+  -v codex-home:/home/dev \
+  codex-web-workstation
 ```
 
-Start:
-
-```bash
-cd image
-docker compose up -d
-```
-
-Services are accessible at:
-- `https://DOMAIN/ide/` — code-server (VS Code)
-- `https://DOMAIN/terminal/` — ttyd web terminal
+Access at `http://host:8080`.
 
 ## Diagnostics
 
 ```bash
 # Full diagnostic report
-docker compose exec workstation doctor.sh
+docker exec <container> doctor.sh
 
 # Quick smoke test
-docker compose exec workstation smoke-test.sh
+docker exec <container> smoke-test.sh
 ```
 
 ## CI Integration
@@ -85,23 +74,22 @@ source scripts/resolve-build-params.sh \
   --github-output "$GITHUB_OUTPUT"
 ```
 
-Outputs `image-repo`, `platforms`, `image-tag` for downstream workflow steps.
+Outputs `image_repo`, `platforms`, `image_tag` for downstream workflow steps.
 
 ## What PR Reviewers Should Check
 
 - **Supported platforms** in `configs/architectures.sh` match the PR scope
 - **Dockerfile** installs no experimental or unreleased packages
 - **entrypoint.sh** does not auto-login, does not print secrets
-- **Caddyfile** correctly handles `/ide/*` and `/terminal/*` path stripping
-- **healthcheck.sh** covers both code-server (8080) and ttyd (7681)
-- **.env.example** documents all runtime environment variables
+- **healthcheck.sh** covers code-server (8080)
+- **.env.example** documents all build-time environment variables
 
 ## Key Design Decisions
 
 - **No Codex App Server** — not started by default; WebSocket transport is experimental
 - **No CodexPlusPlus** — targets Codex Desktop App, CDP injection doesn't work in headless Docker
 - **No Happy CLI by default** — `ENABLE_HAPPY_REMOTE=false`, docs-only
-- **Three-layer auth** — Caddy Basic Auth → code-server password → ttyd credentials
+- **Single-layer auth** — code-server password
 - **Custom provider** — non-interactive `configure-provider.sh`, requires Responses API support
 - **Chat Completions-only APIs** — not supported; provider must implement OpenAI Responses API
 - **Multi-arch** — MVP `linux/amd64` only; `arm64` planned for later release

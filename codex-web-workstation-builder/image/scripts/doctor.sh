@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# doctor.sh — 诊断 codex-web-workstation 运行环境
+# doctor.sh — 诊断 codex-web-workstation v2 运行环境
 set -euo pipefail
 
 status=0
@@ -18,18 +18,18 @@ check "=== Runtime Versions ==="
 
 check "node version"
 if command -v node >/dev/null 2>&1; then
-  node --version
+    node --version
 else
-  warn "node not found"
-  status=1
+    warn "node not found"
+    status=1
 fi
 
 check "npm version"
 if command -v npm >/dev/null 2>&1; then
-  npm --version
+    npm --version
 else
-  warn "npm not found"
-  status=1
+    warn "npm not found"
+    status=1
 fi
 
 check "python3 version"
@@ -40,95 +40,101 @@ check "=== Core Services ==="
 
 check "code-server"
 if command -v code-server >/dev/null 2>&1; then
-  code-server --version 2>/dev/null | head -1 || true
+    code-server --version 2>/dev/null | head -1 || true
 else
-  warn "code-server not installed"
-  status=1
-fi
-
-check "ttyd"
-if command -v ttyd >/dev/null 2>&1; then
-  ttyd --version 2>/dev/null || true
-else
-  warn "ttyd not installed"
-  status=1
+    warn "code-server not installed"
+    status=1
 fi
 
 check "codex"
 if command -v codex >/dev/null 2>&1; then
-  codex --version 2>/dev/null || true
+    codex --version 2>/dev/null || true
 else
-  warn "codex not installed"
-  status=1
+    warn "codex not installed"
+    status=1
+fi
+
+check "claude"
+if command -v claude >/dev/null 2>&1; then
+    claude --version 2>/dev/null || true
+else
+    warn "claude not installed"
+fi
+
+check "supervisord"
+if command -v supervisord >/dev/null 2>&1; then
+    check "supervisord: available"
+else
+    warn "supervisord not installed"
+    status=1
 fi
 
 check ""
 check "=== Development Toolchain ==="
-for cmd in git curl jq rg fd make gcc g++; do
-  if command -v "$cmd" >/dev/null 2>&1; then
-    check "$cmd: available"
-  else
-    warn "$cmd: missing"
-    status=1
-  fi
+for cmd in git curl jq rg fd make gcc g++ docker go rustc bun cargo yq gh supervisorctl; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+        check "$cmd: available"
+    else
+        warn "$cmd: missing"
+        status=1
+    fi
 done
 
 check ""
 check "=== Directories ==="
 for dir in /workspace /home/dev /home/dev/.codex /home/dev/.config/code-server /run/codex; do
-  if [ -d "$dir" ]; then
-    if [ -w "$dir" ]; then
-      check "$dir: exists and writable"
+    if [ -d "$dir" ]; then
+        if [ -w "$dir" ]; then
+            check "$dir: exists and writable"
+        else
+            warn "$dir: exists but NOT writable"
+            status=1
+        fi
     else
-      warn "$dir: exists but NOT writable"
-      status=1
+        warn "$dir: missing"
+        status=1
     fi
-  else
-    warn "$dir: missing"
-    status=1
-  fi
 done
 
 check ""
 check "=== Config Files ==="
 CONFIG_FILES=(
-  "/home/dev/.config/code-server/config.yaml"
-  "/home/dev/.codex/config.toml"
+    "/home/dev/.config/code-server/config.yaml"
+    "/home/dev/.codex/config.toml"
+    "/etc/supervisor/supervisord.conf"
 )
 for f in "${CONFIG_FILES[@]}"; do
-  if [ -f "$f" ]; then
-    check "$f: present"
-  else
-    warn "$f: missing (may be generated at runtime)"
-  fi
+    if [ -f "$f" ]; then
+        check "$f: present"
+    else
+        warn "$f: missing (may be generated at runtime)"
+    fi
 done
 
 check ""
 check "=== Service Ports ==="
-for port in 8080 7681; do
-  if ss -tlnp 2>/dev/null | grep -q ":${port} " || true; then
-    check "port ${port}: listening"
-  else
-    warn "port ${port}: not listening (services may not be started yet)"
-  fi
-done
+if ss -tlnp 2>/dev/null | grep -q ":8080 " || true; then
+    check "port 8080: listening"
+else
+    warn "port 8080: not listening"
+fi
 
 check ""
 check "=== Environment Variables ==="
-for var in PASSWORD CODEX_AUTH_MODE ENABLE_CUSTOM_PROVIDER ENABLE_HAPPY_REMOTE; do
-  val="${!var:-}"
-  if [ -n "$val" ]; then
-    check "${var}=${val}"
-  else
-    check "${var}=<not set>"
-  fi
+for var in PASSWORD ENABLE_CUSTOM_PROVIDER ENABLE_HAPPY_REMOTE ENABLE_DOCKER_SOCK; do
+    val="${!var:-}"
+    if [ -n "$val" ]; then
+        check "${var}=${val}"
+    else
+        check "${var}=<not set>"
+    fi
 done
 
 check ""
 if [ "$status" -eq 0 ]; then
-  check "=== Doctor: ALL CHECKS PASSED ==="
+    check "=== Doctor: ALL CHECKS PASSED ==="
 else
-  warn "=== Doctor: ${status} CHECK(S) FAILED ==="
+    warn "=== Doctor: ${status} CHECK(S) FAILED ==="
 fi
 
 exit "$status"
