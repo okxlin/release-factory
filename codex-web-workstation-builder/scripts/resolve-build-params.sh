@@ -46,18 +46,26 @@ for platform in "${PLATFORM_LIST[@]}"; do
 done
 
 # Write GitHub Actions outputs
-if [ -n "${GITHUB_OUTPUT}" ] && [ "${GITHUB_OUTPUT}" != "/dev/null" ]; then
-  cat >> "${GITHUB_OUTPUT}" <<EOF
-image-repo=${IMAGE_REPO}
-platforms=${PLATFORMS}
-image-tag=${IMAGE_TAG}
-push-latest=${PUSH_LATEST}
-latest-tag=${LATEST_TAG}
-EOF
+# Build tags for docker/metadata-action
+TAGS="type=raw,value=${IMAGE_TAG}"
+if [[ "$PUSH_LATEST" == "true" && "$IMAGE_TAG" != "$LATEST_TAG" ]]; then
+  TAGS+=$'\n'"type=raw,value=${LATEST_TAG}"
 fi
 
-echo "image-repo=${IMAGE_REPO}"
+# Write GitHub Actions outputs (underscore keys required)
+if [ -n "${GITHUB_OUTPUT}" ] && [ "${GITHUB_OUTPUT}" != "/dev/null" ]; then
+  {
+    echo "image_repo=${IMAGE_REPO}"
+    echo "platforms=${PLATFORMS}"
+    echo "image_tag=${IMAGE_TAG}"
+    echo "latest_tag=${LATEST_TAG}"
+    echo "tags<<__EOF__"
+    printf '%s\n' "$TAGS"
+    echo "__EOF__"
+  } >> "${GITHUB_OUTPUT}"
+fi
+
+echo "image_repo=${IMAGE_REPO}"
 echo "platforms=${PLATFORMS}"
-echo "image-tag=${IMAGE_TAG}"
-echo "push-latest=${PUSH_LATEST}"
-echo "latest-tag=${LATEST_TAG}"
+echo "image_tag=${IMAGE_TAG}"
+echo "tags=${TAGS//$'\n'/, }"
