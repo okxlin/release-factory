@@ -115,7 +115,7 @@ RUN npm install -g typescript@5 pnpm yarn @openai/codex @anthropic-ai/claude-cod
 
 # ── User, directories, root password, sudo ──
 ARG ROOT_PASSWORD=root
-RUN useradd -m -s /bin/bash -u 1000 dev \
+RUN useradd -m -s /bin/bash -u 1001 dev \
     && mkdir -p /workspace /run/codex /etc/supervisor/conf.d \
     && chown -R dev:dev /workspace /run/codex /home/dev \
     && echo "root:${ROOT_PASSWORD}" | chpasswd \
