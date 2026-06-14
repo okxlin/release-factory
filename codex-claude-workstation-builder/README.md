@@ -51,10 +51,13 @@ Start with `docker run`:
 
 ```bash
 docker run -d -p 8080:8080 \
+  --hostname workstation \
   -e PASSWORD=change-me \
+  -e ROOT_PASSWORD=codex2024 \
   -v codex-home:/home/dev \
-  codex-claude-workstation
-```
+  ghcr.io/okxlin/codex-claude-workstation:latest
+
+# Run as dev user by default. Use su - root + ROOT_PASSWORD for root.
 
 Access at `http://host:8080`.
 
