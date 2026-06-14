@@ -86,7 +86,6 @@ jobs:
           platforms: ${{ steps.params.outputs.platforms }}
           push: true
           build-args: |
-            TTYD_VERSION=1.7.7
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

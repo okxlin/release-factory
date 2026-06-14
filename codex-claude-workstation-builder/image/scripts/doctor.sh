@@ -121,7 +121,7 @@ fi
 
 check ""
 check "=== Environment Variables ==="
-for var in PASSWORD ENABLE_CUSTOM_PROVIDER ENABLE_HAPPY_REMOTE ENABLE_DOCKER_SOCK; do
+for var in PASSWORD ENABLE_CUSTOM_PROVIDER ENABLE_DOCKER_SOCK; do
     val="${!var:-}"
     if [ -n "$val" ]; then
         check "${var}=${val}"

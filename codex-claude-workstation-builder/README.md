@@ -47,7 +47,6 @@ Start with `docker run`:
 ```bash
 docker run -d -p 8080:8080 \
   -e PASSWORD=change-me \
-  -e TTYD_USER=dev -e TTYD_PASSWORD=change-me \
   -v codex-home:/home/dev \
   codex-claude-workstation
 ```
@@ -88,7 +87,7 @@ Outputs `image_repo`, `platforms`, `image_tag` for downstream workflow steps.
 
 - **No Codex App Server** — not started by default; WebSocket transport is experimental
 - **No CodexPlusPlus** — targets Codex Desktop App, CDP injection doesn't work in headless Docker
-- **No Happy CLI by default** — `ENABLE_HAPPY_REMOTE=false`, docs-only
+- **Custom provider** — non-interactive `configure-provider.sh`, requires Responses API support
 - **Single-layer auth** — code-server password
 - **Custom provider** — non-interactive `configure-provider.sh`, requires Responses API support
 - **Chat Completions-only APIs** — not supported; provider must implement OpenAI Responses API
