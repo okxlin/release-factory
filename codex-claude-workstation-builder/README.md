@@ -1,11 +1,11 @@
-# codex-web-workstation-builder
+# codex-claude-workstation-builder
 
-Docker image builder for the Codex Web Workstation — a browser-accessible Linux development environment with Codex CLI and code-server (VS Code).
+Docker image builder for the Codex Claude Workstation — a browser-accessible Linux development environment with Codex CLI and code-server (VS Code).
 
 ## Directory Conventions
 
 ```
-codex-web-workstation-builder/
+codex-claude-workstation-builder/
 ├── README.md                       # This file
 ├── configs/
 │   └── architectures.sh            # Supported build platforms
@@ -28,7 +28,7 @@ Build-time code (`configs/`, `scripts/`) stays outside the image. Runtime code (
 ## Build
 
 ```bash
-docker build -t codex-web-workstation image/
+docker build -t codex-claude-workstation image/
 ```
 
 The Docker context is `image/`. The Dockerfile expects all COPY paths relative to this directory.
@@ -49,7 +49,7 @@ docker run -d -p 8080:8080 \
   -e PASSWORD=change-me \
   -e TTYD_USER=dev -e TTYD_PASSWORD=change-me \
   -v codex-home:/home/dev \
-  codex-web-workstation
+  codex-claude-workstation
 ```
 
 Access at `http://host:8080`.
@@ -68,7 +68,7 @@ docker exec <container> smoke-test.sh
 
 ```bash
 source scripts/resolve-build-params.sh \
-  --image-repo ghcr.io/org/codex-web-workstation \
+  --image-repo ghcr.io/org/codex-claude-workstation \
   --platforms linux/amd64 \
   --image-tag v1.0.0 \
   --github-output "$GITHUB_OUTPUT"

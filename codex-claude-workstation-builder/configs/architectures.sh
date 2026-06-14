@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# architectures.sh — supported build platforms for codex-web-workstation
+# architectures.sh — supported build platforms for codex-claude-workstation
 # Sourced by scripts/resolve-build-params.sh
 
 SUPPORTED_PLATFORMS=(

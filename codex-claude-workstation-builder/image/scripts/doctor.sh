@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# doctor.sh — 诊断 codex-web-workstation v2 运行环境
+# doctor.sh — 诊断 codex-claude-workstation v2 运行环境
 set -euo pipefail
 
 status=0

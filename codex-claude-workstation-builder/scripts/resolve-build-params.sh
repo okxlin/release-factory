@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../configs/architectures.sh"
 
 # Defaults
-IMAGE_REPO="codex-web-workstation"
+IMAGE_REPO="codex-claude-workstation"
 PLATFORMS="linux/amd64"
 IMAGE_TAG="latest"
 PUSH_LATEST="false"

@@ -1,4 +1,4 @@
-# codex-web-workstation Dockerfile v2
+# codex-claude-workstation Dockerfile v2
 # Ubuntu 24.04 base, amd64 only for MVP
 FROM ubuntu:24.04
 
@@ -84,8 +84,8 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g npm@latest
 
-# ── Go 1.22.5 ──
-RUN curl -fsSL https://go.dev/dl/go1.22.5.linux-amd64.tar.gz | tar -C /usr/local -xzf - \
+# ── Go 1.25.11 ──
+RUN curl -fsSL https://go.dev/dl/go1.25.11.linux-amd64.tar.gz | tar -C /usr/local -xzf - \
     && echo 'export PATH=/usr/local/go/bin:$PATH' > /etc/profile.d/go.sh
 
 # ── Rust 1.77.0 ──
@@ -103,6 +103,8 @@ RUN curl -fsSL https://bun.sh/install | bash -s -- bun-v1.3.14 \
 RUN curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq \
     && chmod +x /usr/local/bin/yq
 
+# ── Proxy cores: Clash.Meta (mihomo), sing-box, Xray ──
+RUN curl -fsSL https://github.com/MetaCubeX/mihomo/releases/download/v1.19.27/mihomo-linux-amd64-v3-v1.19.27.gz -o /tmp/mihomo.gz &&  gunzip /tmp/mihomo.gz &&  mv /tmp/mihomo /usr/local/bin/mihomo &&  chmod +x /usr/local/bin/mihomo &&  curl -fsSL https://github.com/SagerNet/sing-box/releases/download/v1.13.13/sing-box-1.13.13-linux-amd64-glibc.tar.gz -o /tmp/sing-box.tgz &&  tar xzf /tmp/sing-box.tgz -C /usr/local/bin/ --strip-components=1 sing-box-1.13.13-linux-amd64-glibc/sing-box &&  chmod +x /usr/local/bin/sing-box &&  curl -fsSL https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip -o /tmp/xray.zip &&  unzip -o /tmp/xray.zip xray -d /usr/local/bin/ &&  chmod +x /usr/local/bin/xray &&  rm -f /tmp/mihomo.gz /tmp/sing-box.tgz /tmp/xray.zip
 # ── code-server ──
 RUN curl -fsSL https://code-server.dev/install.sh | sh
 
@@ -119,6 +121,9 @@ RUN useradd -m -s /bin/bash -u 1000 dev \
     && echo "dev ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev
 
 # ── Preinstall code-server extensions ──
+RUN sudo -u dev code-server --install-extension anthropic.claude-code \
+    && sudo -u dev code-server --install-extension openai.chatgpt \
+    && sudo -u dev code-server --install-extension ms-ceintl.vscode-language-pack-zh-hans
 # ── Supervisord config ──
 COPY config/supervisord/supervisord.conf /etc/supervisor/supervisord.conf
 COPY config/supervisord/conf.d/ /etc/supervisor/conf.d/

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# entrypoint.sh — codex-web-workstation v2 容器入口
+# entrypoint.sh — codex-claude-workstation v2 容器入口
 set -euo pipefail
 
 CODEX_HOME="/home/dev"
@@ -48,7 +48,7 @@ echo "code-server started (PID ${CODE_SERVER_PID}) on port ${CODE_SERVER_PORT}"
 
 # ── 7. 初始化提示 ──
 echo "============================================================"
-echo " codex-web-workstation is ready."
+echo " codex-claude-workstation is ready."
 echo ""
 echo " Access code-server: http://<host>:${CODE_SERVER_PORT}"
 echo " Password: ${CODE_SERVER_PASSWORD}"

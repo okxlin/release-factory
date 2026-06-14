@@ -1,4 +1,4 @@
-name: Build Codex Web Workstation Image
+name: Build Codex Claude Workstation Image
 
 on:
   workflow_dispatch:
@@ -18,11 +18,11 @@ on:
         type: boolean
 
 concurrency:
-  group: build-codex-web-workstation-${{ github.ref }}
+  group: build-codex-claude-workstation-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  IMAGE_REPO: codex-web-workstation
+  IMAGE_REPO: codex-claude-workstation
 
 jobs:
   build-and-push:
@@ -44,8 +44,8 @@ jobs:
       - name: Resolve build parameters
         id: params
         run: |
-          chmod +x codex-web-workstation-builder/scripts/*.sh
-          bash codex-web-workstation-builder/scripts/resolve-build-params.sh \
+          chmod +x codex-claude-workstation-builder/scripts/*.sh
+          bash codex-claude-workstation-builder/scripts/resolve-build-params.sh \
             --image-repo "${IMAGE_REPO}" \
             --platforms "${{ github.event.inputs.platforms || 'linux/amd64' }}" \
             --image-tag "${{ github.event.inputs.image_tag || 'latest' }}" \
@@ -73,16 +73,16 @@ jobs:
           images: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}
           tags: ${{ steps.params.outputs.tags }}
           labels: |
-            org.opencontainers.image.title=Codex Web Workstation
-            org.opencontainers.image.description=Browser-accessible workstation with Codex CLI and code-server (VS Code) in a single Docker image.
+            org.opencontainers.image.title=Codex Claude Workstation
+            org.opencontainers.image.description=Browser-accessible AI workstation with Codex CLI, Claude Code, and code-server (VS Code) in a single Docker image.
             org.opencontainers.image.vendor=${{ github.repository_owner }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
-          context: ./codex-web-workstation-builder/image
-          file: ./codex-web-workstation-builder/image/Dockerfile
+          context: ./codex-claude-workstation-builder/image
+          file: ./codex-claude-workstation-builder/image/Dockerfile
           platforms: ${{ steps.params.outputs.platforms }}
           push: true
           build-args: |
@@ -95,7 +95,7 @@ jobs:
       - name: Emit build summary
         run: |
           {
-            echo "## Codex Web Workstation image build"
+            echo "## Codex Claude Workstation image build"
             echo ""
             echo "- Image: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}"
             echo "- Published image tag: ${{ steps.params.outputs.image_tag }}"
