@@ -61,7 +61,7 @@ done
 
 echo ""
 echo "[smoke] === Scripts Installed ==="
-for script in entrypoint.sh healthcheck.sh configure-provider.sh doctor.sh smoke-test.sh; do
+for script in entrypoint.sh healthcheck.sh doctor.sh smoke-test.sh; do
     if [ -x "/usr/local/bin/${script}" ]; then
         pass "${script} installed and executable"
     else

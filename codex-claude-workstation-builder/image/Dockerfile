@@ -132,10 +132,9 @@ COPY config/supervisord/conf.d/ /etc/supervisor/conf.d/
 # ── Scripts ──
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY scripts/healthcheck.sh /usr/local/bin/healthcheck.sh
-COPY scripts/configure-provider.sh /usr/local/bin/configure-provider.sh
 COPY scripts/doctor.sh /usr/local/bin/doctor.sh
 COPY scripts/smoke-test.sh /usr/local/bin/smoke-test.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh /usr/local/bin/configure-provider.sh /usr/local/bin/doctor.sh /usr/local/bin/smoke-test.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh /usr/local/bin/doctor.sh /usr/local/bin/smoke-test.sh
 
 # ── Environment ──
 ENV USER=dev

@@ -17,7 +17,6 @@ codex-claude-workstation-builder/
     ├── Dockerfile                  # Ubuntu 24.04 + Node 20 + toolchain
     └── scripts/
         ├── entrypoint.sh           # Container entrypoint (9 steps)
-        ├── configure-provider.sh   # Custom provider config generator
         ├── healthcheck.sh          # Docker HEALTHCHECK script
         ├── doctor.sh               # Full diagnostic
         └── smoke-test.sh           # Quick smoke test
@@ -87,8 +86,7 @@ Outputs `image_repo`, `platforms`, `image_tag` for downstream workflow steps.
 
 - **No Codex App Server** — not started by default; WebSocket transport is experimental
 - **No CodexPlusPlus** — targets Codex Desktop App, CDP injection doesn't work in headless Docker
-- **Custom provider** — non-interactive `configure-provider.sh`, requires Responses API support
 - **Single-layer auth** — code-server password
-- **Custom provider** — non-interactive `configure-provider.sh`, requires Responses API support
+- **Single-layer auth** — code-server password
 - **Chat Completions-only APIs** — not supported; provider must implement OpenAI Responses API
 - **Multi-arch** — MVP `linux/amd64` only; `arm64` planned for later release

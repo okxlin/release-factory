@@ -29,24 +29,18 @@ if [ -f /etc/supervisor/supervisord.conf ]; then
     echo "supervisord started (PID ${SUPERVISOR_PID})"
 fi
 
-# ── 4. 自定义 Provider 配置 ──
-export ENABLE_CUSTOM_PROVIDER
-export CUSTOM_PROVIDER_NAME CUSTOM_PROVIDER_BASE_URL CUSTOM_PROVIDER_MODEL CUSTOM_PROVIDER_ENV_KEY
-if [ "${ENABLE_CUSTOM_PROVIDER:-false}" = "true" ]; then
-    /usr/local/bin/configure-provider.sh
-fi
 
-# ── 5. 权限修复 ──
+# ── 4. 权限修复 ──
 if [ "$(id -u)" = "0" ]; then
     chown -R dev:dev "${CODEX_HOME}" /workspace /run/codex 2>/dev/null || true
 fi
 
-# ── 6. 启动 code-server ──
+# ── 5. 启动 code-server ──
 code-server /workspace > /tmp/code-server.log 2>&1 &
 CODE_SERVER_PID=$!
 echo "code-server started (PID ${CODE_SERVER_PID}) on port ${CODE_SERVER_PORT}"
 
-# ── 7. 初始化提示 ──
+# ── 6. 初始化提示 ──
 echo "============================================================"
 echo " codex-claude-workstation is ready."
 echo ""
@@ -56,8 +50,7 @@ echo ""
 echo " In the code-server terminal, run 'codex login' to authenticate."
 echo "============================================================"
 
-
-# ── 8. 等待任意进程退出 ──
+# ── 7. 等待任意进程退出 ──
 echo "All services started. Waiting..."
 wait -n
 echo "A service process exited. Shutting down..."
