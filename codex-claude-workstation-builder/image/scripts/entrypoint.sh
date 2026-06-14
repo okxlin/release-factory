@@ -30,17 +30,9 @@ if [ -f /etc/supervisor/supervisord.conf ]; then
 fi
 
 
-# ── 4. 权限修复 ──
-if [ "$(id -u)" = "0" ]; then
-    chown -R dev:dev "${CODEX_HOME}" /workspace /run/codex 2>/dev/null || true
-fi
+# ── 4. 启动 code-server ──
 
-# ── 5. 启动 code-server ──
-code-server /workspace > /tmp/code-server.log 2>&1 &
-CODE_SERVER_PID=$!
-echo "code-server started (PID ${CODE_SERVER_PID}) on port ${CODE_SERVER_PORT}"
-
-# ── 6. 初始化提示 ──
+# ── 5. 初始化提示 ──
 echo "============================================================"
 echo " codex-claude-workstation is ready."
 echo ""
@@ -50,7 +42,7 @@ echo ""
 echo " In the code-server terminal, run 'codex login' to authenticate."
 echo "============================================================"
 
-# ── 7. 等待任意进程退出 ──
+# ── 6. 等待任意进程退出 ──
 echo "All services started. Waiting..."
 wait -n
 echo "A service process exited. Shutting down..."

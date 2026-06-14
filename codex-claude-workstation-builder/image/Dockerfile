@@ -113,12 +113,10 @@ RUN curl -fsSL https://code-server.dev/install.sh | sh
 RUN npm install -g typescript@5 pnpm yarn @openai/codex @anthropic-ai/claude-code oh-my-codex \
     && corepack enable
 
-# ── User, directories, root password, sudo ──
-ARG ROOT_PASSWORD=root
+# ── User, directories, sudo ──
 RUN useradd -m -s /bin/bash -u 1001 dev \
     && mkdir -p /workspace /run/codex /etc/supervisor/conf.d \
     && chown -R dev:dev /workspace /run/codex /home/dev \
-    && echo "root:${ROOT_PASSWORD}" | chpasswd \
     && echo "dev ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev
 
 # ── Preinstall code-server extensions ──
@@ -129,6 +127,7 @@ RUN sudo -u dev code-server --install-extension anthropic.claude-code \
 COPY config/supervisord/supervisord.conf /etc/supervisor/supervisord.conf
 COPY config/supervisord/conf.d/ /etc/supervisor/conf.d/
 
+USER dev
 # ── Scripts ──
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY scripts/healthcheck.sh /usr/local/bin/healthcheck.sh
