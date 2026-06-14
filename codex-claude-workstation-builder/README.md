@@ -14,13 +14,19 @@ codex-claude-workstation-builder/
 └── image/
     ├── .dockerignore
     ├── .env.example                # Build-time args reference
+    └── image/
+    ├── .dockerignore
+    ├── .env.example                # Build-time args reference
     ├── Dockerfile                  # Ubuntu 24.04 + Node 20 + toolchain
+    ├── config/
+    │   ├── codex/                  # config.toml + providers.toml examples
+    │   ├── code-server/            # config.yaml example
+    │   └── supervisord/            # supervisor + clash/sing-box/xray confs
     └── scripts/
-        ├── entrypoint.sh           # Container entrypoint (9 steps)
+        ├── entrypoint.sh           # Container entrypoint (7 steps)
         ├── healthcheck.sh          # Docker HEALTHCHECK script
         ├── doctor.sh               # Full diagnostic
         └── smoke-test.sh           # Quick smoke test
-```
 
 Build-time code (`configs/`, `scripts/`) stays outside the image. Runtime code (`image/scripts/`) gets baked into the container.
 
@@ -85,8 +91,6 @@ Outputs `image_repo`, `platforms`, `image_tag` for downstream workflow steps.
 ## Key Design Decisions
 
 - **No Codex App Server** — not started by default; WebSocket transport is experimental
-- **No CodexPlusPlus** — targets Codex Desktop App, CDP injection doesn't work in headless Docker
-- **Single-layer auth** — code-server password
 - **Single-layer auth** — code-server password
 - **Chat Completions-only APIs** — not supported; provider must implement OpenAI Responses API
 - **Multi-arch** — MVP `linux/amd64` only; `arm64` planned for later release
