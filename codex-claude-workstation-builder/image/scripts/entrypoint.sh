@@ -56,17 +56,8 @@ echo ""
 echo " In the code-server terminal, run 'codex login' to authenticate."
 echo "============================================================"
 
-# ── 8. Happy 远程控制提示 ──
-export ENABLE_HAPPY_REMOTE="${ENABLE_HAPPY_REMOTE:-false}"
-HAPPY_SERVER_URL="${HAPPY_SERVER_URL:-}"
-if [ "${ENABLE_HAPPY_REMOTE}" = "true" ] && [ -n "${HAPPY_SERVER_URL}" ]; then
-    echo "============================================================"
-    echo " Happy remote control is enabled."
-    echo " HAPPY_SERVER_URL=${HAPPY_SERVER_URL}"
-    echo "============================================================"
-fi
 
-# ── 9. 等待任意进程退出 ──
+# ── 8. 等待任意进程退出 ──
 echo "All services started. Waiting..."
 wait -n
 echo "A service process exited. Shutting down..."
