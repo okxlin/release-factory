@@ -11,6 +11,8 @@ mkdir -p "${CODEX_HOME}/.codex"
 mkdir -p "${CODEX_HOME}/.config/code-server"
 mkdir -p /run/codex
 mkdir -p "${CODEX_HOME}/proxy"
+# ── 1.5. 应用 ROOT_PASSWORD（运行时覆盖） ──
+echo "root:${ROOT_PASSWORD:-codex2024}" | sudo chpasswd
 
 # ── 2. 写入 code-server 配置（中文界面） ──
 CODE_SERVER_PASSWORD="${PASSWORD:-change-me}"
