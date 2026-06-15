@@ -121,7 +121,7 @@ fi
 
 check ""
 check "=== Environment Variables ==="
-for var in PASSWORD ENABLE_CUSTOM_PROVIDER ENABLE_DOCKER_SOCK; do
+for var in PASSWORD ROOT_PASSWORD DOCKER_SOCK_SRC; do
     val="${!var:-}"
     if [ -n "$val" ]; then
         check "${var}=${val}"
@@ -129,7 +129,6 @@ for var in PASSWORD ENABLE_CUSTOM_PROVIDER ENABLE_DOCKER_SOCK; do
         check "${var}=<not set>"
     fi
 done
-
 check ""
 if [ "$status" -eq 0 ]; then
     check "=== Doctor: ALL CHECKS PASSED ==="
