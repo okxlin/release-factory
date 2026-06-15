@@ -31,7 +31,8 @@ fi
 
 
 # ── 4. 启动 code-server ──
-
+code-server --bind-addr 0.0.0.0:${CODE_SERVER_PORT} &
+CODE_SERVER_PID=$!
 # ── 5. 初始化提示 ──
 echo "============================================================"
 echo " codex-claude-workstation is ready."
