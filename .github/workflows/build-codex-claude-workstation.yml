@@ -22,6 +22,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  IMAGE_REPO: codex-claude-workstation
   IMAGE_REPO: codex-claude-workstation
 
 jobs:

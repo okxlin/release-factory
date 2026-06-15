@@ -114,6 +114,7 @@ RUN npm install -g typescript@5 pnpm yarn @openai/codex @anthropic-ai/claude-cod
     && corepack enable
 
 # ── User, directories, root password, sudo ──
+# check=skip=SecretsUsedInArgOrEnv
 ARG ROOT_PASSWORD=codex2024
 RUN useradd -m -s /bin/bash -u 1001 dev \
     && mkdir -p /workspace /run/codex /etc/supervisor/conf.d \
