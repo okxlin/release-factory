@@ -4,7 +4,7 @@
 
 SUPPORTED_PLATFORMS=(
   "linux/amd64"
-  # "linux/arm64"  # Future: enable after multi-arch support
+  "linux/arm64"
 )
 
 is_supported_platform() {

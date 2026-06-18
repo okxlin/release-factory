@@ -1,9 +1,10 @@
 # codex-claude-workstation Dockerfile v2
-# Ubuntu 24.04 base, amd64 only for MVP
+# Ubuntu 24.04 base, linux/amd64 and linux/arm64
 FROM ubuntu:24.04
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+ARG TARGETARCH=amd64
 ARG DEBIAN_FRONTEND=noninteractive
 ARG NODE_MAJOR=24
 ARG NPM_VERSION=latest
@@ -123,12 +124,18 @@ RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
     && npm install -g "npm@${NPM_VERSION}"
 
 # ── Go ──
-RUN if [ "${GO_VERSION}" = "latest" ]; then \
+RUN dpkg_arch="$(dpkg --print-architecture)" \
+    && case "${dpkg_arch}" in \
+        amd64) go_arch="amd64" ;; \
+        arm64) go_arch="arm64" ;; \
+        *) echo "unsupported architecture for Go install: ${dpkg_arch}" >&2; exit 1 ;; \
+    esac \
+    && if [ "${GO_VERSION}" = "latest" ]; then \
         go_version="$(curl -fsSL 'https://go.dev/VERSION?m=text' | sed -n '1p')"; \
     else \
         go_version="go${GO_VERSION#go}"; \
     fi \
-    && curl -fsSL "https://go.dev/dl/${go_version}.linux-amd64.tar.gz" | tar -C /usr/local -xzf - \
+    && curl -fsSL "https://go.dev/dl/${go_version}.linux-${go_arch}.tar.gz" | tar -C /usr/local -xzf - \
     && echo 'export PATH=/usr/local/go/bin:$PATH' > /etc/profile.d/go.sh
 
 # ── Rust ──
@@ -171,22 +178,46 @@ RUN install_pipx_tool() { \
     && install_pipx_tool mypy "${MYPY_VERSION}"
 
 # ── yq ──
-RUN curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq \
+RUN dpkg_arch="$(dpkg --print-architecture)" \
+    && case "${dpkg_arch}" in \
+        amd64) yq_arch="amd64" ;; \
+        arm64) yq_arch="arm64" ;; \
+        *) echo "unsupported architecture for yq install: ${dpkg_arch}" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${yq_arch}" -o /usr/local/bin/yq \
     && chmod +x /usr/local/bin/yq
 
 # ── Proxy cores: Clash.Meta (mihomo), sing-box, Xray ──
-RUN curl -fsSL https://github.com/MetaCubeX/mihomo/releases/download/v1.19.27/mihomo-linux-amd64-compatible-v1.19.27.gz -o /tmp/mihomo.gz \
-    && gunzip /tmp/mihomo.gz \
-    && mv /tmp/mihomo /usr/local/bin/mihomo \
+RUN dpkg_arch="$(dpkg --print-architecture)" \
+    && case "${dpkg_arch}" in \
+        amd64) \
+            mihomo_arch="amd64-compatible"; \
+            sing_box_arch="amd64-glibc"; \
+            xray_arch="64"; \
+            ;; \
+        arm64) \
+            mihomo_arch="arm64"; \
+            sing_box_arch="arm64-glibc"; \
+            xray_arch="arm64-v8a"; \
+            ;; \
+        *) echo "unsupported architecture for proxy core install: ${dpkg_arch}" >&2; exit 1 ;; \
+    esac \
+    && mihomo_version="1.19.27" \
+    && sing_box_version="1.13.13" \
+    && xray_version="26.3.27" \
+    && sing_box_dir="sing-box-${sing_box_version}-linux-${sing_box_arch}" \
+    && curl -fsSL "https://github.com/MetaCubeX/mihomo/releases/download/v${mihomo_version}/mihomo-linux-${mihomo_arch}-v${mihomo_version}.gz" -o /tmp/mihomo.gz \
+    && gunzip -c /tmp/mihomo.gz > /usr/local/bin/mihomo \
     && chmod +x /usr/local/bin/mihomo \
     && ln -sf /usr/local/bin/mihomo /usr/local/bin/clash-meta \
-    && curl -fsSL https://github.com/SagerNet/sing-box/releases/download/v1.13.13/sing-box-1.13.13-linux-amd64-glibc.tar.gz -o /tmp/sing-box.tgz \
-    && tar xzf /tmp/sing-box.tgz -C /usr/local/bin/ --strip-components=1 sing-box-1.13.13-linux-amd64-glibc/sing-box \
+    && curl -fsSL "https://github.com/SagerNet/sing-box/releases/download/v${sing_box_version}/${sing_box_dir}.tar.gz" -o /tmp/sing-box.tgz \
+    && tar xzf /tmp/sing-box.tgz -C /tmp \
+    && mv "/tmp/${sing_box_dir}/sing-box" /usr/local/bin/sing-box \
     && chmod +x /usr/local/bin/sing-box \
-    && curl -fsSL https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip -o /tmp/xray.zip \
+    && curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/v${xray_version}/Xray-linux-${xray_arch}.zip" -o /tmp/xray.zip \
     && unzip -o /tmp/xray.zip xray -d /usr/local/bin/ \
     && chmod +x /usr/local/bin/xray \
-    && rm -f /tmp/mihomo.gz /tmp/sing-box.tgz /tmp/xray.zip
+    && rm -rf /tmp/mihomo.gz /tmp/sing-box.tgz "/tmp/${sing_box_dir}" /tmp/xray.zip
 # ── code-server ──
 RUN curl -fsSL https://code-server.dev/install.sh | sh
 
@@ -253,7 +284,7 @@ ENV CARGO_HOME=/home/dev/.cargo
 ENV DENO_INSTALL=/home/dev/.deno
 ENV COREPACK_HOME=/opt/corepack
 ENV GOPATH=/home/dev/go
-ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-${TARGETARCH}
 ENV NPM_CONFIG_CACHE=/home/dev/.cache/npm
 ENV NPM_CONFIG_PREFIX=/home/dev/.local
 ENV PIPX_BIN_DIR=/home/dev/.local/bin

@@ -12,7 +12,7 @@ source "${SCRIPT_DIR}/../configs/architectures.sh"
 
 # Defaults
 IMAGE_REPO="codex-claude-workstation"
-PLATFORMS="linux/amd64"
+PLATFORMS="linux/amd64,linux/arm64"
 IMAGE_TAG="latest"
 PUSH_LATEST="false"
 LATEST_TAG="latest"
@@ -63,6 +63,7 @@ fi
 
 # Validate platforms
 IFS=',' read -ra PLATFORM_LIST <<< "$PLATFORMS"
+NORMALIZED_PLATFORMS=()
 for platform in "${PLATFORM_LIST[@]}"; do
   platform="$(echo "$platform" | xargs)"
   if ! is_supported_platform "$platform"; then
@@ -70,7 +71,9 @@ for platform in "${PLATFORM_LIST[@]}"; do
     echo "Supported: ${SUPPORTED_PLATFORMS[*]}" >&2
     exit 1
   fi
+  NORMALIZED_PLATFORMS+=("$platform")
 done
+PLATFORMS="$(IFS=,; echo "${NORMALIZED_PLATFORMS[*]}")"
 
 # Write GitHub Actions outputs
 # Build tags for docker/metadata-action
