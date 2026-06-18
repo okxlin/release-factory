@@ -35,22 +35,33 @@ jobs:
     steps:
       - name: Normalize repository owner
         id: owner
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
         run: |
-          LOWER_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          echo "lower_owner=$LOWER_OWNER" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          lower_owner="$(printf '%s' "${REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          if [[ ! "${lower_owner}" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+            echo "ERROR: Invalid repository owner: ${REPOSITORY_OWNER}" >&2
+            exit 1
+          fi
+          echo "lower_owner=${lower_owner}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Resolve build parameters
         id: params
+        env:
+          INPUT_PLATFORMS: ${{ inputs.platforms || 'linux/amd64,linux/arm64' }}
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag || 'latest' }}
+          INPUT_PUSH_LATEST: ${{ inputs.push_latest && 'true' || 'false' }}
         run: |
           chmod +x opencode-workstation-builder/scripts/*.sh
           bash opencode-workstation-builder/scripts/resolve-build-params.sh \
             --image-repo "${IMAGE_REPO}" \
-            --platforms "${{ github.event.inputs.platforms || 'linux/amd64,linux/arm64' }}" \
-            --image-tag "${{ github.event.inputs.image_tag || 'latest' }}" \
-            --push-latest "${{ github.event.inputs.push_latest == true && 'true' || 'false' }}" \
+            --platforms "${INPUT_PLATFORMS}" \
+            --image-tag "${INPUT_IMAGE_TAG}" \
+            --push-latest "${INPUT_PUSH_LATEST}" \
             --latest-tag "latest" \
             --github-output "$GITHUB_OUTPUT"
 
@@ -87,6 +98,15 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=opencode-workstation
           cache-to: type=gha,mode=min,scope=opencode-workstation
+
+      - name: Free build cache before smoke tests
+        run: |
+          set -euo pipefail
+          docker system df || true
+          df -h / /tmp || true
+          docker buildx prune --all --force || true
+          docker system df || true
+          df -h / /tmp || true
 
       - name: Run container smoke tests
         env:
@@ -174,7 +194,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=opencode-workstation
-          cache-to: type=gha,mode=max,scope=opencode-workstation
+          cache-to: type=gha,mode=min,scope=opencode-workstation
 
       - name: Emit build summary
         run: |
@@ -185,5 +205,6 @@ jobs:
             echo "- Published image tag: ${{ steps.params.outputs.image_tag }}"
             echo "- Tags: ${{ steps.meta.outputs.tags }}"
             echo "- Platforms: ${{ steps.params.outputs.platforms }}"
-            echo "- Smoke tests: linux/amd64 image required before push"
+            echo "- Smoke tests: linux/amd64 image required before multi-platform push"
+            echo "- Cache policy: gha mode=min"
           } >> "$GITHUB_STEP_SUMMARY"
