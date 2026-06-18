@@ -8,8 +8,9 @@ TARGET_PLATFORMS=(
 
 is_supported_platform() {
   local platform="${1:-}"
-  for item in "${TARGET_PLATFORMS[@]}"; do
-    if [[ "$item" == "$platform" ]]; then
+  local supported
+  for supported in "${TARGET_PLATFORMS[@]}"; do
+    if [[ "$supported" == "$platform" ]]; then
       return 0
     fi
   done

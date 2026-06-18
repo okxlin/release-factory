@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=opencode-workstation-builder/configs/architectures.sh
 source "$ROOT_DIR/configs/architectures.sh"
 
 IMAGE_REPO="opencode-workstation"
@@ -45,6 +46,27 @@ done
 [[ -n "$PLATFORMS" ]] || { echo '[resolve][ERROR] --platforms 不能为空' >&2; exit 2; }
 [[ -n "$GITHUB_OUTPUT_PATH" ]] || { echo '[resolve][ERROR] --github-output 不能为空' >&2; exit 2; }
 
+if [[ ! "${IMAGE_REPO}" =~ ^[a-z0-9]+([._/-][a-z0-9]+)*$ ]]; then
+  echo "[resolve][ERROR] 镜像仓库名非法: ${IMAGE_REPO}" >&2
+  echo '[resolve][ERROR] 镜像仓库名必须为小写，可使用点、下划线、短横线或斜线分隔' >&2
+  exit 2
+fi
+
+case "${PUSH_LATEST}" in
+  true|false) ;;
+  *)
+    echo "[resolve][ERROR] --push-latest 必须是 true 或 false: ${PUSH_LATEST}" >&2
+    exit 2
+    ;;
+esac
+
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
 sanitize_tag() {
   local raw="$1"
   raw="${raw#refs/tags/}"
@@ -56,14 +78,31 @@ IMAGE_TAG="$(sanitize_tag "$IMAGE_TAG")"
 if [[ -z "$IMAGE_TAG" ]]; then
   IMAGE_TAG="latest"
 fi
+if [[ ! "${IMAGE_TAG}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+  echo "[resolve][ERROR] 镜像 tag 非法: ${IMAGE_TAG}" >&2
+  exit 2
+fi
+if [[ ! "${LATEST_TAG}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+  echo "[resolve][ERROR] latest tag 非法: ${LATEST_TAG}" >&2
+  exit 2
+fi
 
 IFS=',' read -r -a platform_items <<< "$PLATFORMS"
+normalized_platforms=()
 for item in "${platform_items[@]}"; do
-  if ! is_supported_platform "$item"; then
-    echo "[resolve][ERROR] 平台不在允许列表内: $item" >&2
+  item="$(trim "$item")"
+  if [[ -z "$item" ]]; then
+    echo '[resolve][ERROR] 平台列表包含空项' >&2
     exit 2
   fi
+  if ! is_supported_platform "$item"; then
+    echo "[resolve][ERROR] 平台不在允许列表内: $item" >&2
+    echo "[resolve][ERROR] 支持平台: ${TARGET_PLATFORMS[*]}" >&2
+    exit 2
+  fi
+  normalized_platforms+=("$item")
 done
+PLATFORMS="$(IFS=,; echo "${normalized_platforms[*]}")"
 
 TAGS="type=raw,value=${IMAGE_TAG}"
 if [[ "$PUSH_LATEST" == "true" && "$IMAGE_TAG" != "$LATEST_TAG" ]]; then

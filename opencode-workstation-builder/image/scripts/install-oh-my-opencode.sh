@@ -40,7 +40,7 @@ if [[ -n "${OMO_INSTALL_ARGS}" ]]; then
   extra_args=( ${OMO_INSTALL_ARGS} )
   install_cmd+=("${extra_args[@]}")
 else
-  rendered_command="$(${SCRIPT_DIR}/render-install-command.sh)"
+  rendered_command="$("${SCRIPT_DIR}/render-install-command.sh")"
   # shellcheck disable=SC2206
   install_cmd=( ${rendered_command} )
 fi

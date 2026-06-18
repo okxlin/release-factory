@@ -23,6 +23,7 @@ concurrency:
 
 env:
   IMAGE_REPO: opencode-workstation
+  TEST_IMAGE: opencode-workstation:ci-test
 
 jobs:
   build-and-push:
@@ -34,22 +35,33 @@ jobs:
     steps:
       - name: Normalize repository owner
         id: owner
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
         run: |
-          LOWER_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          echo "lower_owner=$LOWER_OWNER" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          lower_owner="$(printf '%s' "${REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          if [[ ! "${lower_owner}" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+            echo "ERROR: Invalid repository owner: ${REPOSITORY_OWNER}" >&2
+            exit 1
+          fi
+          echo "lower_owner=${lower_owner}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Resolve build parameters
         id: params
+        env:
+          INPUT_PLATFORMS: ${{ inputs.platforms || 'linux/amd64,linux/arm64' }}
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag || 'latest' }}
+          INPUT_PUSH_LATEST: ${{ inputs.push_latest && 'true' || 'false' }}
         run: |
           chmod +x opencode-workstation-builder/scripts/*.sh
           bash opencode-workstation-builder/scripts/resolve-build-params.sh \
             --image-repo "${IMAGE_REPO}" \
-            --platforms "${{ github.event.inputs.platforms || 'linux/amd64,linux/arm64' }}" \
-            --image-tag "${{ github.event.inputs.image_tag || 'latest' }}" \
-            --push-latest "${{ github.event.inputs.push_latest == true && 'true' || 'false' }}" \
+            --platforms "${INPUT_PLATFORMS}" \
+            --image-tag "${INPUT_IMAGE_TAG}" \
+            --push-latest "${INPUT_PUSH_LATEST}" \
             --latest-tag "latest" \
             --github-output "$GITHUB_OUTPUT"
 
@@ -58,13 +70,6 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata for Docker
         id: meta
@@ -77,6 +82,103 @@ jobs:
             org.opencontainers.image.description=Persistent OpenCode workstation with oh-my-opencode bootstrap and plugin-friendly storage.
             org.opencontainers.image.vendor=${{ github.repository_owner }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Build local image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./opencode-workstation-builder/image
+          file: ./opencode-workstation-builder/image/Dockerfile
+          platforms: linux/amd64
+          load: true
+          build-args: |
+            USER_UID=1000
+            USER_GID=1000
+            HOST_DOCKER_GID=997
+          tags: ${{ env.TEST_IMAGE }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=opencode-workstation
+          cache-to: type=gha,mode=min,scope=opencode-workstation
+
+      - name: Free build cache before smoke tests
+        run: |
+          set -euo pipefail
+          docker system df || true
+          df -h / /tmp || true
+          docker buildx prune --all --force || true
+          docker system df || true
+          df -h / /tmp || true
+
+      - name: Run container smoke tests
+        env:
+          CI_CONTAINER: opencode-workstation-ci-${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          workspace_dir="$(mktemp -d "/tmp/opencode-workstation-ci-${RUN_ID}-workspace.XXXXXX")"
+          cache_dir="$(mktemp -d "/tmp/opencode-workstation-ci-${RUN_ID}-cache.XXXXXX")"
+          config_dir="$(mktemp -d "/tmp/opencode-workstation-ci-${RUN_ID}-config.XXXXXX")"
+          share_dir="$(mktemp -d "/tmp/opencode-workstation-ci-${RUN_ID}-share.XXXXXX")"
+          agents_dir="$(mktemp -d "/tmp/opencode-workstation-ci-${RUN_ID}-agents.XXXXXX")"
+          claude_dir="$(mktemp -d "/tmp/opencode-workstation-ci-${RUN_ID}-claude.XXXXXX")"
+          opencode_dir="$(mktemp -d "/tmp/opencode-workstation-ci-${RUN_ID}-opencode.XXXXXX")"
+          {
+            echo "CI_CONTAINER=${CI_CONTAINER}"
+            echo "CI_WORKSPACE_DIR=${workspace_dir}"
+            echo "CI_CACHE_DIR=${cache_dir}"
+            echo "CI_CONFIG_DIR=${config_dir}"
+            echo "CI_SHARE_DIR=${share_dir}"
+            echo "CI_AGENTS_DIR=${agents_dir}"
+            echo "CI_CLAUDE_DIR=${claude_dir}"
+            echo "CI_OPENCODE_DIR=${opencode_dir}"
+          } >> "$GITHUB_ENV"
+
+          docker run --rm \
+            --name "${CI_CONTAINER}" \
+            -e OPENCODE_BOOTSTRAP=1 \
+            -e OMO_AUTO_INSTALL=0 \
+            -e DCP_INSTALL=0 \
+            -e GPT_UNLOCKED_INSTALL=0 \
+            -e OPENCODE_RUNTIME_MODE=acp \
+            -e FIX_WORKSPACE_OWNERSHIP_RECURSIVE=true \
+            -v "${workspace_dir}:/workspace" \
+            -v "${cache_dir}:/cache" \
+            -v "${config_dir}:/home/opencode/.config" \
+            -v "${share_dir}:/home/opencode/.local/share" \
+            -v "${agents_dir}:/home/opencode/.agents" \
+            -v "${claude_dir}:/home/opencode/.claude" \
+            -v "${opencode_dir}:/home/opencode/.opencode" \
+            "${TEST_IMAGE}" smoke
+
+      - name: Clean smoke test resources
+        if: always()
+        run: |
+          docker rm -f "${CI_CONTAINER:-opencode-workstation-ci-${{ github.run_id }}}" >/dev/null 2>&1 || true
+          for dir in \
+            "${CI_WORKSPACE_DIR:-}" \
+            "${CI_CACHE_DIR:-}" \
+            "${CI_CONFIG_DIR:-}" \
+            "${CI_SHARE_DIR:-}" \
+            "${CI_AGENTS_DIR:-}" \
+            "${CI_CLAUDE_DIR:-}" \
+            "${CI_OPENCODE_DIR:-}"; do
+            case "${dir}" in
+              /tmp/opencode-workstation-ci-*-workspace.*|/tmp/opencode-workstation-ci-*-cache.*|/tmp/opencode-workstation-ci-*-config.*|/tmp/opencode-workstation-ci-*-share.*|/tmp/opencode-workstation-ci-*-agents.*|/tmp/opencode-workstation-ci-*-claude.*|/tmp/opencode-workstation-ci-*-opencode.*)
+                rm -rf "${dir}"
+                ;;
+              "")
+                ;;
+              *)
+                echo "WARN: refusing to remove unexpected temp dir: ${dir}" >&2
+                ;;
+            esac
+          done
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
@@ -91,8 +193,8 @@ jobs:
             HOST_DOCKER_GID=997
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=opencode-workstation
+          cache-to: type=gha,mode=min,scope=opencode-workstation
 
       - name: Emit build summary
         run: |
@@ -103,4 +205,6 @@ jobs:
             echo "- Published image tag: ${{ steps.params.outputs.image_tag }}"
             echo "- Tags: ${{ steps.meta.outputs.tags }}"
             echo "- Platforms: ${{ steps.params.outputs.platforms }}"
+            echo "- Smoke tests: linux/amd64 image required before multi-platform push"
+            echo "- Cache policy: gha mode=min"
           } >> "$GITHUB_STEP_SUMMARY"
