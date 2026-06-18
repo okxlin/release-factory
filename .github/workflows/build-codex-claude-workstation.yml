@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Published image tag; leave empty to use latest"
+        description: "Published image tag; leave empty to use UTC date tag YYYYMMDD"
         required: false
-        default: "latest"
+        default: ""
       platforms:
         description: "Comma-separated target platforms"
         required: true
@@ -14,16 +14,20 @@ on:
       push_latest:
         description: "Also publish latest tag"
         required: true
-        default: false
+        default: true
         type: boolean
+  schedule:
+    # Weekly refresh: Sunday 03:17 UTC. Keeps AI tooling fresh without daily churn.
+    - cron: "17 3 * * 0"
 
 concurrency:
-  group: build-codex-claude-workstation-${{ github.ref }}
+  group: build-codex-claude-workstation-${{ github.ref || github.run_id }}
   cancel-in-progress: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   IMAGE_REPO: codex-claude-workstation
+  TEST_IMAGE: codex-claude-workstation:ci-test
 
 jobs:
   build-and-push:
@@ -35,37 +39,77 @@ jobs:
     steps:
       - name: Normalize repository owner
         id: owner
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
         run: |
-          LOWER_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          echo "lower_owner=$LOWER_OWNER" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          lower_owner="$(printf '%s' "${REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          if [[ ! "${lower_owner}" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+            echo "ERROR: Invalid repository owner: ${REPOSITORY_OWNER}" >&2
+            exit 1
+          fi
+          echo "lower_owner=${lower_owner}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Resolve release policy
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
+          INPUT_PUSH_LATEST: ${{ inputs.push_latest }}
+        run: |
+          set -euo pipefail
+          date_tag="$(date -u +%Y%m%d)"
+
+          if [ "${EVENT_NAME}" = "schedule" ]; then
+            image_tag="${date_tag}"
+            push_latest="true"
+          else
+            image_tag="${INPUT_IMAGE_TAG:-${date_tag}}"
+            image_tag="${image_tag#refs/tags/}"
+            image_tag="${image_tag#v}"
+            push_latest="${INPUT_PUSH_LATEST:-true}"
+          fi
+
+          if [[ ! "${image_tag}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "ERROR: Invalid image tag: ${image_tag}" >&2
+            exit 1
+          fi
+
+          case "${push_latest}" in
+            true|false) ;;
+            *)
+              echo "ERROR: push_latest must be true or false, got: ${push_latest}" >&2
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "date_tag=${date_tag}"
+            echo "image_tag=${image_tag}"
+            echo "push_latest=${push_latest}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Resolve build parameters
         id: params
+        env:
+          INPUT_PLATFORMS: ${{ inputs.platforms || 'linux/amd64' }}
+          RELEASE_IMAGE_TAG: ${{ steps.release.outputs.image_tag }}
+          RELEASE_PUSH_LATEST: ${{ steps.release.outputs.push_latest }}
         run: |
           chmod +x codex-claude-workstation-builder/scripts/*.sh
           bash codex-claude-workstation-builder/scripts/resolve-build-params.sh \
             --image-repo "${IMAGE_REPO}" \
-            --platforms "${{ github.event.inputs.platforms || 'linux/amd64' }}" \
-            --image-tag "${{ github.event.inputs.image_tag || 'latest' }}" \
-            --push-latest "${{ github.event.inputs.push_latest == true && 'true' || 'false' }}" \
+            --platforms "${INPUT_PLATFORMS}" \
+            --image-tag "${RELEASE_IMAGE_TAG}" \
+            --push-latest "${RELEASE_PUSH_LATEST}" \
             --latest-tag "latest" \
             --github-output "$GITHUB_OUTPUT"
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata for Docker
         id: meta
@@ -79,26 +123,122 @@ jobs:
             org.opencontainers.image.vendor=${{ github.repository_owner }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
-      - name: Build and push Docker image
+      - name: Build local image
         uses: docker/build-push-action@v6
         with:
           context: ./codex-claude-workstation-builder/image
           file: ./codex-claude-workstation-builder/image/Dockerfile
-          platforms: ${{ steps.params.outputs.platforms }}
-          push: true
-          build-args: |
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.TEST_IMAGE }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=codex-claude-workstation
+          cache-to: type=gha,mode=min,scope=codex-claude-workstation
+
+      - name: Run container smoke tests
+        env:
+          CI_CONTAINER: codex-workstation-ci-${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          workspace_dir="$(mktemp -d "/tmp/codex-workstation-ci-${RUN_ID}-workspace.XXXXXX")"
+          home_dir="$(mktemp -d "/tmp/codex-workstation-ci-${RUN_ID}-home.XXXXXX")"
+          {
+            echo "CI_CONTAINER=${CI_CONTAINER}"
+            echo "CI_WORKSPACE_DIR=${workspace_dir}"
+            echo "CI_HOME_DIR=${home_dir}"
+          } >> "$GITHUB_ENV"
+
+          docker run -d \
+            --name "${CI_CONTAINER}" \
+            --hostname workstation \
+            --security-opt seccomp=unconfined \
+            --security-opt apparmor=unconfined \
+            -e PASSWORD=ci-password \
+            -e ROOT_PASSWORD=ci-root-password \
+            -e FIX_WORKSPACE_OWNERSHIP_RECURSIVE=true \
+            -v "${workspace_dir}:/workspace" \
+            -v "${home_dir}:/home/dev" \
+            "${TEST_IMAGE}"
+
+          healthy="false"
+          for _ in $(seq 1 30); do
+            if docker exec "${CI_CONTAINER}" healthcheck.sh >/tmp/codex-healthcheck.log 2>&1; then
+              healthy="true"
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "${healthy}" != "true" ]; then
+            cat /tmp/codex-healthcheck.log || true
+            docker logs "${CI_CONTAINER}" || true
+            exit 1
+          fi
+
+          docker exec "${CI_CONTAINER}" doctor.sh
+          docker exec "${CI_CONTAINER}" smoke-test.sh
+
+      - name: Clean smoke test resources
+        if: always()
+        run: |
+          docker rm -f "${CI_CONTAINER:-codex-workstation-ci-${{ github.run_id }}}" >/dev/null 2>&1 || true
+          for dir in "${CI_WORKSPACE_DIR:-}" "${CI_HOME_DIR:-}"; do
+            case "${dir}" in
+              /tmp/codex-workstation-ci-*-workspace.*|/tmp/codex-workstation-ci-*-home.*)
+                rm -rf "${dir}"
+                ;;
+              "")
+                ;;
+              *)
+                echo "WARN: refusing to remove unexpected temp dir: ${dir}" >&2
+                ;;
+            esac
+          done
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push tested Docker image
+        env:
+          PARAM_PLATFORMS: ${{ steps.params.outputs.platforms }}
+          META_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          if [ "${PARAM_PLATFORMS}" != "linux/amd64" ]; then
+            echo "ERROR: pushing the tested local image only supports linux/amd64 today." >&2
+            exit 1
+          fi
+
+          while IFS= read -r tag; do
+            [ -n "${tag}" ] || continue
+            docker tag "${TEST_IMAGE}" "${tag}"
+            docker push "${tag}"
+          done <<< "${META_TAGS}"
 
       - name: Emit build summary
+        env:
+          IMAGE_NAME: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}
+          DATE_TAG: ${{ steps.release.outputs.date_tag }}
+          IMAGE_TAG: ${{ steps.params.outputs.image_tag }}
+          META_TAGS: ${{ steps.meta.outputs.tags }}
+          PARAM_PLATFORMS: ${{ steps.params.outputs.platforms }}
         run: |
           {
             echo "## Codex Claude Workstation image build"
             echo ""
-            echo "- Image: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}"
-            echo "- Published image tag: ${{ steps.params.outputs.image_tag }}"
-            echo "- Tags: ${{ steps.meta.outputs.tags }}"
-            echo "- Platforms: ${{ steps.params.outputs.platforms }}"
+            echo "- Image: ${IMAGE_NAME}"
+            echo "- Date tag: ${DATE_TAG}"
+            echo "- Published image tag: ${IMAGE_TAG}"
+            echo "- Tags:"
+            while IFS= read -r tag; do
+              [ -n "${tag}" ] && echo "  - ${tag}"
+            done <<< "${META_TAGS}"
+            echo "- Platforms: ${PARAM_PLATFORMS}"
+            echo "- Smoke tests: required before push"
+            echo "- Cache policy: gha mode=min"
           } >> "$GITHUB_STEP_SUMMARY"
