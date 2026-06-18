@@ -120,6 +120,8 @@ sudo sysctl -w kernel.unprivileged_userns_clone=1
 sudo sysctl -w user.max_user_namespaces=15000
 ```
 
+Some Docker hosts still block the runtime user namespace probe even when those sysctls look correct. `doctor.sh` reports that as a warning by default because it is a host/container runtime restriction rather than a missing image dependency. Set `CODEX_SANDBOX_STRICT=true` when you want `doctor.sh` to fail on that condition.
+
 ## Diagnostics
 
 ```bash

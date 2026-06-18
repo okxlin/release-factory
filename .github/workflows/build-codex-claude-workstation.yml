@@ -166,6 +166,7 @@ jobs:
             -e PASSWORD=ci-password \
             -e ROOT_PASSWORD=ci-root-password \
             -e FIX_WORKSPACE_OWNERSHIP_RECURSIVE=true \
+            -e CODEX_SANDBOX_STRICT=false \
             -v "${workspace_dir}:/workspace" \
             -v "${home_dir}:/home/dev" \
             "${TEST_IMAGE}" || {

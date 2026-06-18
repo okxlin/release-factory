@@ -6,6 +6,12 @@ status=0
 
 check() { printf '[doctor] %s\n' "$*"; }
 warn()  { printf '[doctor] WARN: %s\n' "$*" >&2; }
+is_true() {
+    case "${1:-}" in
+        true|TRUE|True|1|yes|YES|Yes|on|ON|On) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 mask_value() {
     local name="$1"
     local value="$2"
@@ -227,7 +233,10 @@ if command -v unshare >/dev/null 2>&1; then
         check "unprivileged user namespace: available"
     else
         warn "unprivileged user namespace failed: ${userns_error}"
-        status=1
+        warn "set CODEX_SANDBOX_STRICT=true to fail doctor on this host runtime limitation"
+        if is_true "${CODEX_SANDBOX_STRICT:-false}"; then
+            status=1
+        fi
     fi
 fi
 
@@ -287,7 +296,7 @@ fi
 
 check ""
 check "=== Environment Variables ==="
-for var in PASSWORD ROOT_PASSWORD DOCKER_SOCK_SRC CONTAINER_WORKSPACE FIX_WORKSPACE_OWNERSHIP_RECURSIVE BUN_INSTALL CARGO_HOME DENO_INSTALL COREPACK_HOME GOPATH JAVA_HOME NPM_CONFIG_CACHE NPM_CONFIG_PREFIX PIPX_BIN_DIR RUSTUP_HOME; do
+for var in PASSWORD ROOT_PASSWORD DOCKER_SOCK_SRC CONTAINER_WORKSPACE FIX_WORKSPACE_OWNERSHIP_RECURSIVE CODEX_SANDBOX_STRICT BUN_INSTALL CARGO_HOME DENO_INSTALL COREPACK_HOME GOPATH JAVA_HOME NPM_CONFIG_CACHE NPM_CONFIG_PREFIX PIPX_BIN_DIR RUSTUP_HOME; do
     val="${!var:-}"
     if [ -n "$val" ]; then
         check "${var}=$(mask_value "$var" "$val")"
