@@ -6,13 +6,22 @@ status=0
 
 pass() { printf '[smoke] PASS: %s\n' "$*"; }
 fail() { printf '[smoke] FAIL: %s\n' "$*" >&2; status=1; }
+version_check() {
+    local label="$1"
+    shift
+    if command -v "$1" >/dev/null 2>&1 && "$@"; then
+        pass "${label}"
+    else
+        fail "${label}"
+    fi
+}
 
 echo "[smoke] codex-claude-workstation smoke test"
 echo "[smoke] $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 echo ""
 echo "[smoke] === Required Commands ==="
-REQUIRED_CMDS=(node npm code-server codex git curl jq rg fd python3 make gcc g++ docker go rustc bun cargo yq gh supervisorctl claude)
+REQUIRED_CMDS=(node npm pnpm yarn corepack code-server codex git curl jq rg fd python3 pytest uv uvx pipx ruff black mypy pre-commit yamllint direnv make gcc g++ docker go rustc bun deno cargo java mvn yq gh supervisorctl claude bwrap unshare mihomo clash-meta sing-box xray dig nc lsof file)
 for cmd in "${REQUIRED_CMDS[@]}"; do
     if command -v "$cmd" >/dev/null 2>&1; then
         pass "$cmd available"
@@ -23,12 +32,43 @@ done
 
 echo ""
 echo "[smoke] === Command Versions ==="
-command -v node >/dev/null && node --version && pass "node" || fail "node"
-command -v codex >/dev/null && codex --version && pass "codex" || fail "codex"
-command -v go >/dev/null && go version && pass "go" || fail "go"
-command -v rustc >/dev/null && rustc --version && pass "rustc" || fail "rustc"
-command -v bun >/dev/null && bun --version && pass "bun" || fail "bun"
-command -v docker >/dev/null && docker --version && pass "docker" || fail "docker"
+version_check "node" node --version
+version_check "npm" npm --version
+if [ "$(npm config get prefix)" = "/home/dev/.local" ]; then
+    pass "npm global prefix persistent"
+else
+    fail "npm global prefix should be /home/dev/.local"
+fi
+version_check "pnpm" pnpm --version
+version_check "yarn" yarn --version
+version_check "corepack" corepack --version
+version_check "uv" uv --version
+version_check "pytest" pytest --version
+version_check "ruff" ruff --version
+version_check "black" black --version
+version_check "mypy" mypy --version
+version_check "codex" codex --version
+version_check "go" go version
+if [ "$(go env GOPATH 2>/dev/null || true)" = "/home/dev/go" ]; then
+    pass "go GOPATH persistent"
+else
+    fail "go GOPATH should be /home/dev/go"
+fi
+version_check "rustc" rustc --version
+version_check "bun" bun --version
+version_check "deno" deno --version
+version_check "java" java -version
+version_check "maven" mvn --version
+version_check "docker" docker --version
+if [ -S /var/run/docker.sock ]; then
+    version_check "docker daemon" docker info --format '{{.ServerVersion}}'
+else
+    pass "docker daemon skipped (socket not mounted)"
+fi
+version_check "bwrap" bwrap --version
+version_check "mihomo" mihomo -v
+version_check "sing-box" sing-box version
+version_check "xray" xray version
 
 echo ""
 echo "[smoke] === Core Services (HTTP probes) ==="
@@ -41,6 +81,30 @@ else
 fi
 
 echo ""
+echo "[smoke] === Code-server Extensions ==="
+REQUIRED_EXTENSIONS=(
+    "anthropic.claude-code"
+    "openai.chatgpt"
+    "ms-python.python"
+    "charliermarsh.ruff"
+    "redhat.vscode-yaml"
+    "tamasfe.even-better-toml"
+    "editorconfig.editorconfig"
+    "esbenp.prettier-vscode"
+    "dbaeumer.vscode-eslint"
+    "ms-azuretools.vscode-docker"
+    "ms-ceintl.vscode-language-pack-zh-hans"
+)
+extension_list="$(code-server --list-extensions 2>/dev/null || true)"
+for extension in "${REQUIRED_EXTENSIONS[@]}"; do
+    if grep -Fxq "$extension" <<< "$extension_list"; then
+        pass "${extension} installed"
+    else
+        fail "${extension} missing"
+    fi
+done
+
+echo ""
 echo "[smoke] === Workspace Directory ==="
 WORKSPACE="${CONTAINER_WORKSPACE:-/workspace}"
 if [ -d "$WORKSPACE" ] && [ -w "$WORKSPACE" ]; then
@@ -51,7 +115,19 @@ fi
 
 echo ""
 echo "[smoke] === Persistence Check ==="
-for dir in /home/dev/.codex /home/dev/.config/code-server; do
+for dir in \
+    /home/dev/.bun \
+    /home/dev/.cache/npm \
+    /home/dev/.cargo/bin \
+    /home/dev/.claude \
+    /home/dev/.codex \
+    /home/dev/.config/code-server \
+    /home/dev/.deno \
+    /home/dev/.local/bin \
+    /home/dev/.local/share/code-server/extensions \
+    /home/dev/.npm \
+    /home/dev/go/bin \
+    /home/dev/proxy; do
     if [ -d "$dir" ]; then
         pass "${dir} present"
     else

@@ -7,6 +7,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=codex-claude-workstation-builder/configs/architectures.sh
 source "${SCRIPT_DIR}/../configs/architectures.sh"
 
 # Defaults
@@ -30,9 +31,35 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ ! "${IMAGE_REPO}" =~ ^[a-z0-9]+([._/-][a-z0-9]+)*$ ]]; then
+  echo "ERROR: Invalid image repo: ${IMAGE_REPO}" >&2
+  echo "Docker repository names must be lowercase and may use dot, underscore, dash, or slash separators." >&2
+  exit 1
+fi
+
+case "${PUSH_LATEST}" in
+  true|false) ;;
+  *)
+    echo "ERROR: push-latest must be true or false, got: ${PUSH_LATEST}" >&2
+    exit 1
+    ;;
+esac
+
 # Sanitize tag: strip refs/tags/ and leading 'v'
 IMAGE_TAG="${IMAGE_TAG#refs/tags/}"
 IMAGE_TAG="${IMAGE_TAG#v}"
+if [ -z "${IMAGE_TAG}" ]; then
+  IMAGE_TAG="${LATEST_TAG}"
+fi
+if [[ ! "${IMAGE_TAG}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+  echo "ERROR: Invalid image tag: ${IMAGE_TAG}" >&2
+  echo "Docker tags must be 1-128 chars and use only letters, numbers, underscore, dot, and dash." >&2
+  exit 1
+fi
+if [[ ! "${LATEST_TAG}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+  echo "ERROR: Invalid latest tag: ${LATEST_TAG}" >&2
+  exit 1
+fi
 
 # Validate platforms
 IFS=',' read -ra PLATFORM_LIST <<< "$PLATFORMS"

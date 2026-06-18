@@ -12,9 +12,9 @@ if ! curl -s -o /dev/null -w "%{http_code}" http://localhost:${CODE_SERVER_PORT}
     exit 1
 fi
 
-# Check workspace directory is accessible
-if [ ! -d /workspace ]; then
-    echo "/workspace directory not found" >&2
+# Check workspace directory is accessible and writable by dev
+if [ ! -d /workspace ] || [ ! -w /workspace ]; then
+    echo "/workspace directory not found or not writable" >&2
     exit 1
 fi
 
