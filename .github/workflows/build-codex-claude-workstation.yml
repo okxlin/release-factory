@@ -135,6 +135,15 @@ jobs:
           cache-from: type=gha,scope=codex-claude-workstation
           cache-to: type=gha,mode=min,scope=codex-claude-workstation
 
+      - name: Free build cache before smoke tests
+        run: |
+          set -euo pipefail
+          docker system df || true
+          df -h / /tmp || true
+          docker buildx prune --all --force || true
+          docker system df || true
+          df -h / /tmp || true
+
       - name: Run container smoke tests
         env:
           CI_CONTAINER: codex-workstation-ci-${{ github.run_id }}
@@ -159,7 +168,12 @@ jobs:
             -e FIX_WORKSPACE_OWNERSHIP_RECURSIVE=true \
             -v "${workspace_dir}:/workspace" \
             -v "${home_dir}:/home/dev" \
-            "${TEST_IMAGE}"
+            "${TEST_IMAGE}" || {
+              docker system df || true
+              df -h / /tmp || true
+              docker image inspect "${TEST_IMAGE}" || true
+              exit 1
+            }
 
           healthy="false"
           for _ in $(seq 1 30); do
