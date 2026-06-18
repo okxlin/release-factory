@@ -3,7 +3,7 @@
 # Parses workflow inputs, validates platforms, sanitizes tags,
 # and writes outputs for downstream workflow steps.
 #
-# Usage: source scripts/resolve-build-params.sh [--image-repo REPO] [--platforms LIST] [--image-tag TAG] [--push-latest BOOL] [--latest-tag TAG] [--github-output FILE]
+# Usage: bash scripts/resolve-build-params.sh [--image-repo REPO] [--platforms LIST] [--image-tag TAG] [--push-latest BOOL] [--latest-tag TAG] [--github-output FILE]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

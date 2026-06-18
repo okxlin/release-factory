@@ -147,7 +147,7 @@ Default release policy:
 - BuildKit cache uses GitHub Actions cache with `mode=min` to reduce cache storage pressure.
 
 ```bash
-source scripts/resolve-build-params.sh \
+bash scripts/resolve-build-params.sh \
   --image-repo ghcr.io/org/codex-claude-workstation \
   --platforms linux/amd64,linux/arm64 \
   --image-tag v1.0.0 \
