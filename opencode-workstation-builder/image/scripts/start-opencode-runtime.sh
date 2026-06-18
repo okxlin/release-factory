@@ -2,11 +2,12 @@
 set -euo pipefail
 
 if [[ -z "${HOME:-}" ]]; then
-  export HOME="$(getent passwd "$(id -u)" | cut -d: -f6 2>/dev/null || true)"
+  runtime_home="$(getent passwd "$(id -u)" | cut -d: -f6 2>/dev/null || true)"
+  export HOME="${runtime_home}"
 fi
 
 : "${OPENCODE_NPM_BIN_DIR:=$HOME/.local/bin}"
-export PATH="/opt/bun/bin:${OPENCODE_NPM_BIN_DIR}:${HOME}/.local/bin:${PATH:-/usr/local/bin:/usr/bin:/bin}"
+export PATH="/opt/bun/bin:/usr/local/go/bin:${HOME}/.cargo/bin:${OPENCODE_NPM_BIN_DIR}:${HOME}/.local/bin:${PATH:-/usr/local/bin:/usr/bin:/bin}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

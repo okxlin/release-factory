@@ -22,6 +22,18 @@
 - workflow 只保留手动触发
 - 默认 tag：`latest`
 - 可选附带 `latest` 别名
+- workflow 会先构建并加载 `linux/amd64` 本地测试镜像，跑过容器 smoke test 后才登录 GHCR 并推送目标平台镜像
+
+## 运行时权限模型
+
+镜像默认仍以 `opencode` 用户运行。入口脚本会先准备 `/workspace`、`/cache` 和官方 HOME 持久化目录，并在检测到 `/var/run/docker.sock` 时按宿主 socket 的 GID 动态创建/加入容器内用户组，然后刷新到普通用户会话。
+
+如果部署系统临时以 root 启动容器，入口脚本完成目录准备后也会降权回 `opencode` 用户继续运行，避免长期以 root 写入持久化数据。
+
+可选修复开关：
+
+- `FIX_WORKSPACE_OWNERSHIP_RECURSIVE=true`：递归修复 `/workspace` ownership
+- `FIX_CACHE_OWNERSHIP_RECURSIVE=true`：递归修复 `/cache` ownership
 
 ## 运行时目录模型
 
