@@ -16,28 +16,68 @@ check() {
   printf '[doctor] %s\n' "$*"
 }
 
-run_optional() {
-  if "$@"; then
-    return 0
-  fi
-  status=$?
-  return 0
-}
+check "runtime identity"
+check "user: $(id -un)"
+check "uid:gid: $(id -u):$(id -g)"
+check "home: ${HOME}"
+if [[ "$(id -u)" == "0" ]]; then
+  echo "[doctor] runtime should not continue as root" >&2
+  status=1
+fi
 
 check "node version"
 node --version
 check "npm version"
 npm --version
+check "npm global prefix"
+npm config get prefix
 check "bun version"
 bun --version
+check "go version"
+go version
+check "rust version"
+rustc --version
+cargo --version
 
 check "common coding toolchain"
-for cmd in python3 git sqlite3 rg fd gh jq gcc g++ make; do
+for cmd in python3 git sqlite3 rg fd gh jq gcc g++ make docker docker-compose pnpm yarn tsc comment-checker sudo; do
   if command -v "$cmd" >/dev/null 2>&1; then
     check "$cmd available"
     "$cmd" --version >/dev/null 2>&1 || true
   else
     echo "[doctor] missing tool: $cmd" >&2
+    status=1
+  fi
+done
+
+check "docker daemon"
+if [[ -S /var/run/docker.sock ]]; then
+  if ! docker info --format '{{.ServerVersion}}'; then
+    echo "[doctor] docker socket is mounted but docker daemon is not reachable" >&2
+    status=1
+  fi
+else
+  check "docker socket not mounted"
+fi
+
+check "persistent directories"
+for dir in \
+  "${CONTAINER_WORKSPACE:-/workspace}" \
+  "${CONTAINER_CACHE:-/cache}" \
+  "$HOME/.config/opencode" \
+  "$HOME/.agents" \
+  "$HOME/.cache/npm" \
+  "$HOME/.cargo/bin" \
+  "$HOME/.claude" \
+  "$HOME/.opencode" \
+  "$HOME/.local/bin" \
+  "$HOME/.local/share/opencode" \
+  "$HOME/.local/share/oh-my-opencode" \
+  "$HOME/.npm"; do
+  if [[ -d "$dir" && -w "$dir" ]]; then
+    check "$dir writable"
+  else
+    echo "[doctor] $dir missing or not writable" >&2
     status=1
   fi
 done
@@ -78,9 +118,7 @@ fi
 
 check "oh-my-opencode doctor"
 if command -v npm >/dev/null 2>&1; then
-  if ! npm exec --yes --package="${omo_package}" -- oh-my-opencode doctor; then
-    status=1
-  fi
+  npm exec --yes --package="${omo_package}" -- oh-my-opencode doctor || check "oh-my-opencode doctor reported runtime issues"
 fi
 
 exit "${status}"

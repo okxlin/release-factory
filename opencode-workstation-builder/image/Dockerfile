@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:20-bookworm-slim
+FROM node:24-bookworm-slim
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -13,9 +13,13 @@ ENV USER=${USERNAME}
 ENV HOME=/home/${USERNAME}
 ENV DEBIAN_FRONTEND=noninteractive \
     BUN_INSTALL=/opt/bun \
+    CARGO_HOME=/home/${USERNAME}/.cargo \
+    CONTAINER_CACHE=/cache \
     OPENCODE_HOME=/home/${USERNAME}/.local/share/opencode \
     OMO_HOME=/home/${USERNAME}/.local/share/oh-my-opencode \
-    CONTAINER_WORKSPACE=/workspace
+    CONTAINER_WORKSPACE=/workspace \
+    RUSTUP_HOME=/home/${USERNAME}/.rustup \
+    XDG_DATA_HOME=/home/${USERNAME}/.local/share
 
 ENV PATH=/opt/bun/bin:/usr/local/go/bin:/home/${USERNAME}/.cargo/bin:/home/${USERNAME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
@@ -45,6 +49,7 @@ RUN apt-get update \
         ripgrep \
         rsync \
         sqlite3 \
+        sudo \
         tini \
         unzip \
         xz-utils \
@@ -90,12 +95,14 @@ RUN apt-get update \
         docker-buildx-plugin \
         docker-compose-plugin \
     && npm install -g @code-yeongyu/comment-checker corepack npm pnpm yarn \
-    && ln -sf /usr/local/lib/node_modules/@code-yeongyu/comment-checker/bin/comment-checker /usr/local/bin/comment-checker \
+    && ln -sf /usr/local/lib/node_modules/@code-yeongyu/comment-checker/cli.js /usr/local/bin/comment-checker \
     && mkdir -p /usr/local/lib/docker/cli-plugins \
     && ln -sf /usr/libexec/docker/cli-plugins/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose \
     && ln -sf /usr/libexec/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose \
     && ln -sf /usr/libexec/docker/cli-plugins/docker-buildx /usr/local/lib/docker/cli-plugins/docker-buildx \
     && corepack enable \
+    && corepack prepare pnpm@latest --activate \
+    && corepack prepare yarn@stable --activate \
     && rm -rf /var/lib/apt/lists/*
 
 RUN if getent group "${USER_GID}" >/dev/null; then \
@@ -121,30 +128,38 @@ RUN if getent group "${USER_GID}" >/dev/null; then \
          docker_group="hostdocker"; \
          groupadd --gid "${HOST_DOCKER_GID}" "${docker_group}"; \
        fi \
-    && usermod -aG "${docker_group}" "${USERNAME}"
+    && usermod -aG "${docker_group}" "${USERNAME}" \
+    && chown -R "${USER_UID}:${USER_GID}" "/home/${USERNAME}"
 
 RUN curl -fsSL https://bun.sh/install | bash -s -- bun-v${BUN_VERSION} \
     && bun --version
 
 ENV BUN_VERSION=${BUN_VERSION}
 
-ARG GO_VERSION=1.22.5
+ARG GO_VERSION=latest
 RUN dpkg_arch="$(dpkg --print-architecture)" \
     && case "${dpkg_arch}" in \
          amd64) go_arch='amd64' ;; \
          arm64) go_arch='arm64' ;; \
          *) echo "unsupported architecture for Go install: ${dpkg_arch}" >&2; exit 1 ;; \
        esac \
-    && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz" -o /tmp/go.tar.gz \
+    && if [ "${GO_VERSION}" = "latest" ]; then \
+         go_version="$(curl -fsSL 'https://go.dev/VERSION?m=text' | sed -n '1p')"; \
+       else \
+         go_version="go${GO_VERSION#go}"; \
+       fi \
+    && curl -fsSL "https://go.dev/dl/${go_version}.linux-${go_arch}.tar.gz" -o /tmp/go.tar.gz \
     && rm -rf /usr/local/go \
     && tar -C /usr/local -xzf /tmp/go.tar.gz \
     && rm /tmp/go.tar.gz \
     && echo 'export PATH=/usr/local/go/bin:$PATH' >> /etc/profile.d/go.sh
 
-ARG RUST_VERSION=1.77.0
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain ${RUST_VERSION} \
-    && . /home/${USERNAME}/.cargo/env \
-    && echo 'export PATH=/home/${USERNAME}/.cargo/bin:$PATH' >> /etc/profile.d/rust.sh
+ARG RUST_VERSION=stable
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh \
+    && chmod +x /tmp/rustup-init.sh \
+    && sudo -u "${USERNAME}" env HOME="/home/${USERNAME}" CARGO_HOME="/home/${USERNAME}/.cargo" RUSTUP_HOME="/home/${USERNAME}/.rustup" /tmp/rustup-init.sh -y --default-toolchain "${RUST_VERSION}" \
+    && rm /tmp/rustup-init.sh \
+    && echo "export PATH=/home/${USERNAME}/.cargo/bin:\$PATH" >> /etc/profile.d/rust.sh
 
 RUN npm install -g typescript@5 \
     && tsc --version
@@ -163,12 +178,21 @@ RUN mkdir -p \
       /cache \
       /home/${USERNAME}/.config/opencode \
       /home/${USERNAME}/.agents \
+      /home/${USERNAME}/.cache/npm \
       /home/${USERNAME}/.claude \
+      /home/${USERNAME}/.cargo/bin \
       /home/${USERNAME}/.opencode \
       /home/${USERNAME}/.local/share/opencode \
       /home/${USERNAME}/.local/share/oh-my-opencode \
       /home/${USERNAME}/.local/bin \
-    && chown -R ${USER_UID}:${USER_GID} /app /workspace /cache /opt/bun /usr/local/go /home/${USERNAME}
+      /home/${USERNAME}/.npm \
+      /home/${USERNAME}/.rustup \
+    && chown -R ${USER_UID}:${USER_GID} /app /workspace /cache /opt/bun /usr/local/go /home/${USERNAME} \
+    && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
+    && chmod 0440 /etc/sudoers.d/${USERNAME}
+
+ENV NPM_CONFIG_CACHE=/home/${USERNAME}/.cache/npm
+ENV NPM_CONFIG_PREFIX=/home/${USERNAME}/.local
 
 USER ${USERNAME}
 WORKDIR /workspace

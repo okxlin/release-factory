@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+: "${OPENCODE_NPM_BIN_DIR:=$HOME/.local/bin}"
 mapfile -t _omo_lines < <(bash "${SCRIPT_DIR}/resolve-omo-package.sh")
 omo_package="${_omo_lines[0]}"
 _needs_baseline="${_omo_lines[1]:-0}"
@@ -12,45 +13,115 @@ fi
 
 status=0
 
+pass() { printf '[smoke] PASS: %s\n' "$*"; }
+fail() {
+  printf '[smoke] FAIL: %s\n' "$*" >&2
+  status=1
+}
+
 printf '[smoke] checking required commands\n'
-for cmd in node npm bun python3 git sqlite3 rg fd gh jq gcc g++ make; do
+for cmd in node npm pnpm yarn bun python3 git sqlite3 rg fd gh jq gcc g++ make docker docker-compose go rustc cargo tsc comment-checker sudo; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
-    printf '[smoke] missing command: %s\n' "$cmd" >&2
-    status=1
+    fail "missing command: $cmd"
+  else
+    pass "$cmd available"
   fi
 done
+
+printf '[smoke] checking runtime identity\n'
+if [[ "$(id -u)" == "0" ]]; then
+  fail "runtime should not continue as root"
+else
+  pass "runtime user $(id -un)"
+fi
+
+printf '[smoke] checking versions\n'
+node --version
+npm --version
+pnpm --version
+yarn --version
+bun --version
+go version
+rustc --version
+cargo --version
+
+expected_npm_prefix="${NPM_CONFIG_PREFIX:-${OPENCODE_NPM_BIN_DIR%/bin}}"
+if [[ "$(npm config get prefix)" == "${expected_npm_prefix}" ]]; then
+  pass "npm global prefix persistent"
+else
+  fail "npm global prefix should be ${expected_npm_prefix}"
+fi
+
+printf '[smoke] checking persistent directories\n'
+for dir in \
+  "${CONTAINER_WORKSPACE:-/workspace}" \
+  "${CONTAINER_CACHE:-/cache}" \
+  "$HOME/.config/opencode" \
+  "$HOME/.agents" \
+  "$HOME/.cache/npm" \
+  "$HOME/.cargo/bin" \
+  "$HOME/.claude" \
+  "$HOME/.opencode" \
+  "$HOME/.local/bin" \
+  "$HOME/.local/share/opencode" \
+  "$HOME/.local/share/oh-my-opencode" \
+  "$HOME/.npm"; do
+  if [[ -d "$dir" && -w "$dir" ]]; then
+    pass "$dir writable"
+  else
+    fail "$dir missing or not writable"
+  fi
+done
+
+printf '[smoke] checking Docker daemon access\n'
+if [[ -S /var/run/docker.sock ]]; then
+  if docker info --format '{{.ServerVersion}}'; then
+    pass "docker daemon reachable"
+  else
+    fail "docker socket mounted but daemon not reachable"
+  fi
+else
+  pass "docker daemon skipped (socket not mounted)"
+fi
 
 printf '[smoke] checking OpenCode\n'
 if command -v opencode >/dev/null 2>&1; then
   opencode --version
+  pass "opencode available"
 else
-  printf '[smoke] opencode not installed yet; run bootstrap script\n' >&2
-  status=1
+  fail "opencode not installed yet; run bootstrap script"
 fi
 
 printf '[smoke] checking runtime mode\n'
 case "${OPENCODE_RUNTIME_MODE:-acp}" in
   acp)
     printf '[smoke] runtime=acp target=%s:%s\n' "${ACP_HOST:-0.0.0.0}" "${ACP_PORT:-8765}"
+    pass "runtime mode acp"
     ;;
   serve)
     printf '[smoke] runtime=serve target=%s:%s\n' "${SERVE_HOST:-0.0.0.0}" "${SERVE_PORT:-4096}"
+    pass "runtime mode serve"
     ;;
   *)
-    printf '[smoke] unsupported OPENCODE_RUNTIME_MODE: %s\n' "${OPENCODE_RUNTIME_MODE}" >&2
-    status=1
+    fail "unsupported OPENCODE_RUNTIME_MODE: ${OPENCODE_RUNTIME_MODE}"
     ;;
 esac
 
 printf '[smoke] checking oh-my-opencode resolver\n'
 printf '[smoke] selected oh-my-opencode package: %s\n' "${omo_package}"
 if ! npm exec --yes --package="${omo_package}" -- oh-my-opencode --help >/dev/null; then
-  status=1
+  fail "oh-my-opencode help failed"
+else
+  pass "oh-my-opencode help"
 fi
 
 printf '[smoke] checking runtime scripts\n'
 for script in /app/scripts/entrypoint.sh /app/scripts/bootstrap-opencode-userland.sh /app/scripts/install-oh-my-opencode.sh /app/scripts/doctor.sh /app/scripts/start-opencode-runtime.sh; do
-  [[ -f "$script" ]] || { printf '[smoke] missing %s\n' "$script" >&2; status=1; }
+  if [[ -f "$script" ]]; then
+    pass "$script present"
+  else
+    fail "missing $script"
+  fi
 done
 
 exit "${status}"

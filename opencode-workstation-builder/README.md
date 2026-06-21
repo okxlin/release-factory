@@ -22,6 +22,19 @@
 - workflow 只保留手动触发
 - 默认 tag：`latest`
 - 可选附带 `latest` 别名
+- workflow 会先构建并加载 `linux/amd64` 本地测试镜像，跑过容器 smoke test 后才登录 GHCR 并推送目标平台镜像
+- workflow 输入会先校验 tag、平台列表和镜像仓库名；BuildKit cache 使用 GitHub Actions cache 的 `mode=min`，减少缓存空间压力
+
+## 运行时权限模型
+
+镜像默认仍以 `opencode` 用户运行。入口脚本会先准备 `/workspace`、`/cache` 和官方 HOME 持久化目录，并在检测到 `/var/run/docker.sock` 时按宿主 socket 的 GID 动态创建/加入容器内用户组，然后刷新到普通用户会话。
+
+如果部署系统临时以 root 启动容器，入口脚本完成目录准备后也会降权回 `opencode` 用户继续运行，避免长期以 root 写入持久化数据。
+
+可选修复开关：
+
+- `FIX_WORKSPACE_OWNERSHIP_RECURSIVE=true`：递归修复 `/workspace` ownership
+- `FIX_CACHE_OWNERSHIP_RECURSIVE=true`：递归修复 `/cache` ownership
 
 ## 运行时目录模型
 
@@ -168,7 +181,7 @@ OpenCode 本身还会读取项目内或兼容目录中的：
 
 ## PR reviewer 该看什么
 
-- `build-opencode-workstation.yml`：是否只保留手动触发、tag 规则是否干净
+- `build-opencode-workstation.yml`：是否只保留手动触发、tag / 平台输入规则是否干净
 - `image/Dockerfile`：是否仍然以独立镜像上下文承载运行时依赖
 - `image/scripts/entrypoint.sh`、`image/scripts/bootstrap-opencode-userland.sh`、`image/scripts/install-oh-my-opencode.sh`：是否继续保证官方 HOME 路径上的持久化语义
 - `image/scripts/update_opencode_config.py`：是否继续保留用户覆盖层与插件去重合并语义
