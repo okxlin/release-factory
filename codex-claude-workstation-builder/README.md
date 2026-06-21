@@ -120,6 +120,8 @@ sudo sysctl -w kernel.unprivileged_userns_clone=1
 sudo sysctl -w user.max_user_namespaces=15000
 ```
 
+Some Docker hosts still block the runtime user namespace probe even when those sysctls look correct. `doctor.sh` reports that as a warning by default because it is a host/container runtime restriction rather than a missing image dependency. Set `CODEX_SANDBOX_STRICT=true` when you want `doctor.sh` to fail on that condition.
+
 ## Diagnostics
 
 ```bash
@@ -139,15 +141,15 @@ Default release policy:
 - Scheduled builds publish only `YYYYMMDD` and `latest`.
 - Manual builds use the provided tag, or `YYYYMMDD` when the tag is left empty.
 - `sha-*` tags are intentionally not published by default to avoid long-lived tag sprawl.
-- The workflow builds a local test image first, runs `healthcheck.sh`, `doctor.sh`, and `smoke-test.sh`, then pushes only after tests pass.
+- The workflow builds a local `linux/amd64` test image first, runs `healthcheck.sh`, `doctor.sh`, and `smoke-test.sh`, then builds and pushes the requested platforms after tests pass.
 - The CI test container intentionally does not mount `/var/run/docker.sock`, and GHCR login happens only after tests pass.
 - Manual workflow inputs are validated before they are written to GitHub Actions outputs.
 - BuildKit cache uses GitHub Actions cache with `mode=min` to reduce cache storage pressure.
 
 ```bash
-source scripts/resolve-build-params.sh \
+bash scripts/resolve-build-params.sh \
   --image-repo ghcr.io/org/codex-claude-workstation \
-  --platforms linux/amd64 \
+  --platforms linux/amd64,linux/arm64 \
   --image-tag v1.0.0 \
   --github-output "$GITHUB_OUTPUT"
 ```
@@ -169,4 +171,4 @@ For GHCR storage, tags themselves are small; the real cost is retained image ver
 - **No Codex App Server** — not started by default; WebSocket transport is experimental
 - **Single-layer auth** — code-server password
 - **Chat Completions-only APIs** — not supported; provider must implement OpenAI Responses API
-- **Multi-arch** — MVP `linux/amd64` only; `arm64` planned for later release
+- **Multi-arch** — `linux/amd64` and `linux/arm64` are supported; CI smoke tests `linux/amd64` before publishing the multi-platform image
