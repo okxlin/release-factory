@@ -168,7 +168,7 @@ fi
 
 check ""
 check "=== Development Toolchain ==="
-for cmd in git curl jq rg fd make gcc g++ docker go rustc bun deno cargo java mvn yq gh supervisorctl bwrap unshare corepack uv uvx pipx pytest ruff black mypy pre-commit yamllint direnv dig nc lsof file; do
+for cmd in git curl jq rg fd make gcc g++ docker go rustc bun deno cargo java mvn yq actionlint gh supervisorctl bwrap unshare corepack uv uvx pipx pytest ruff black mypy pre-commit yamllint direnv dig nc lsof file; do
     if command -v "$cmd" >/dev/null 2>&1; then
         check "$cmd: available"
     else
