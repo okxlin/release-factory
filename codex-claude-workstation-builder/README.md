@@ -64,7 +64,7 @@ docker build \
 - JavaScript/TypeScript: Node.js 24, npm latest, pnpm latest and Yarn stable via Corepack, TypeScript 5, Bun latest, Deno latest
 - Python: Python 3, venv, pip, pipx, pytest, uv/uvx, ruff, black, mypy, Python build headers
 - Systems: Go latest stable, Rust stable, Java 21 LTS, Maven, Docker CLI, Buildx, Compose plugin
-- Tooling: git, gh, ripgrep, fd, jq, yq, shellcheck, shfmt, pre-commit, yamllint, direnv
+- Tooling: git, gh, ripgrep, fd, jq, yq, shellcheck, shfmt, actionlint, pre-commit, yamllint, direnv
 - Debugging: curl, httpie, dig, nc, lsof, strace, htop, iotop, nethogs, ncdu
 - Proxy cores: mihomo/clash-meta, sing-box, Xray managed by supervisord
 

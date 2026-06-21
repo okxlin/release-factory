@@ -11,6 +11,7 @@ ARG GO_VERSION=latest
 ARG RUST_VERSION=stable
 ARG BUN_VERSION=latest
 ARG DENO_VERSION=latest
+ARG ACTIONLINT_VERSION=1.7.12
 ARG PNPM_VERSION=latest
 ARG YARN_VERSION=stable
 ARG RUFF_VERSION=latest
@@ -173,6 +174,24 @@ RUN install_pipx_tool() { \
 # ── yq ──
 RUN curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq \
     && chmod +x /usr/local/bin/yq
+
+# ── actionlint ──
+RUN dpkg_arch="$(dpkg --print-architecture)" \
+    && case "${dpkg_arch}" in \
+         amd64) actionlint_arch='amd64' ;; \
+         arm64) actionlint_arch='arm64' ;; \
+         *) echo "unsupported architecture for actionlint install: ${dpkg_arch}" >&2; exit 1 ;; \
+       esac \
+    && actionlint_version="${ACTIONLINT_VERSION#v}" \
+    && actionlint_asset="actionlint_${actionlint_version}_linux_${actionlint_arch}.tar.gz" \
+    && curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/${actionlint_asset}" -o "/tmp/${actionlint_asset}" \
+    && curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/actionlint_${actionlint_version}_checksums.txt" -o /tmp/actionlint_checksums.txt \
+    && grep "  ${actionlint_asset}$" /tmp/actionlint_checksums.txt > /tmp/actionlint.sha256 \
+    && (cd /tmp && sha256sum -c /tmp/actionlint.sha256) \
+    && tar -xzf "/tmp/${actionlint_asset}" -C /tmp actionlint \
+    && install -m 0755 /tmp/actionlint /usr/local/bin/actionlint \
+    && actionlint --version \
+    && rm -f "/tmp/${actionlint_asset}" /tmp/actionlint_checksums.txt /tmp/actionlint.sha256 /tmp/actionlint
 
 # ── Proxy cores: Clash.Meta (mihomo), sing-box, Xray ──
 RUN curl -fsSL https://github.com/MetaCubeX/mihomo/releases/download/v1.19.27/mihomo-linux-amd64-compatible-v1.19.27.gz -o /tmp/mihomo.gz \

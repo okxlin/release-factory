@@ -21,7 +21,7 @@ echo "[smoke] $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 echo ""
 echo "[smoke] === Required Commands ==="
-REQUIRED_CMDS=(node npm pnpm yarn corepack code-server codex git curl jq rg fd python3 pytest uv uvx pipx ruff black mypy pre-commit yamllint direnv make gcc g++ docker go rustc bun deno cargo java mvn yq gh supervisorctl claude bwrap unshare mihomo clash-meta sing-box xray dig nc lsof file)
+REQUIRED_CMDS=(node npm pnpm yarn corepack code-server codex git curl jq rg fd python3 pytest uv uvx pipx ruff black mypy pre-commit yamllint direnv make gcc g++ docker go rustc bun deno cargo java mvn yq actionlint gh supervisorctl claude bwrap unshare mihomo clash-meta sing-box xray dig nc lsof file)
 for cmd in "${REQUIRED_CMDS[@]}"; do
     if command -v "$cmd" >/dev/null 2>&1; then
         pass "$cmd available"
@@ -60,6 +60,7 @@ version_check "deno" deno --version
 version_check "java" java -version
 version_check "maven" mvn --version
 version_check "docker" docker --version
+version_check "actionlint" actionlint --version
 if [ -S /var/run/docker.sock ]; then
     version_check "docker daemon" docker info --format '{{.ServerVersion}}'
 else
