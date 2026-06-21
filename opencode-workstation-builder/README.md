@@ -24,6 +24,7 @@
 - 可选附带 `latest` 别名
 - workflow 会先构建并加载 `linux/amd64` 本地测试镜像，跑过容器 smoke test 后才登录 GHCR 并推送目标平台镜像
 - workflow 输入会先校验 tag、平台列表和镜像仓库名；BuildKit cache 使用 GitHub Actions cache 的 `mode=min`，减少缓存空间压力
+- Tooling: git, gh, ripgrep, fd, jq, yq, shellcheck, shfmt, actionlint, comment-checker, Docker CLI, Go, Rust, Bun, pnpm, yarn
 
 ## 运行时权限模型
 

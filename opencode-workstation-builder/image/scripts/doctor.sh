@@ -40,7 +40,7 @@ rustc --version
 cargo --version
 
 check "common coding toolchain"
-for cmd in python3 git sqlite3 rg fd gh jq gcc g++ make docker docker-compose pnpm yarn tsc comment-checker sudo; do
+for cmd in python3 git sqlite3 rg fd gh jq gcc g++ make docker docker-compose pnpm yarn tsc comment-checker actionlint sudo; do
   if command -v "$cmd" >/dev/null 2>&1; then
     check "$cmd available"
     "$cmd" --version >/dev/null 2>&1 || true

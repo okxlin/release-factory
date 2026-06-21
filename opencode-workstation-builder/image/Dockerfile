@@ -4,6 +4,7 @@ FROM node:24-bookworm-slim
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG BUN_VERSION=1.3.14
+ARG ACTIONLINT_VERSION=1.7.12
 ARG USERNAME=opencode
 ARG USER_UID=1000
 ARG USER_GID=1000
@@ -135,6 +136,23 @@ RUN curl -fsSL https://bun.sh/install | bash -s -- bun-v${BUN_VERSION} \
     && bun --version
 
 ENV BUN_VERSION=${BUN_VERSION}
+
+RUN dpkg_arch="$(dpkg --print-architecture)" \
+    && case "${dpkg_arch}" in \
+         amd64) actionlint_arch='amd64' ;; \
+         arm64) actionlint_arch='arm64' ;; \
+         *) echo "unsupported architecture for actionlint install: ${dpkg_arch}" >&2; exit 1 ;; \
+       esac \
+    && actionlint_version="${ACTIONLINT_VERSION#v}" \
+    && actionlint_asset="actionlint_${actionlint_version}_linux_${actionlint_arch}.tar.gz" \
+    && curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/${actionlint_asset}" -o "/tmp/${actionlint_asset}" \
+    && curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/actionlint_${actionlint_version}_checksums.txt" -o /tmp/actionlint_checksums.txt \
+    && grep "  ${actionlint_asset}$" /tmp/actionlint_checksums.txt > /tmp/actionlint.sha256 \
+    && (cd /tmp && sha256sum -c /tmp/actionlint.sha256) \
+    && tar -xzf "/tmp/${actionlint_asset}" -C /tmp actionlint \
+    && install -m 0755 /tmp/actionlint /usr/local/bin/actionlint \
+    && actionlint --version \
+    && rm -f "/tmp/${actionlint_asset}" /tmp/actionlint_checksums.txt /tmp/actionlint.sha256 /tmp/actionlint
 
 ARG GO_VERSION=latest
 RUN dpkg_arch="$(dpkg --print-architecture)" \

@@ -20,7 +20,7 @@ fail() {
 }
 
 printf '[smoke] checking required commands\n'
-for cmd in node npm pnpm yarn bun python3 git sqlite3 rg fd gh jq gcc g++ make docker docker-compose go rustc cargo tsc comment-checker sudo; do
+for cmd in node npm pnpm yarn bun python3 git sqlite3 rg fd gh jq gcc g++ make docker docker-compose go rustc cargo tsc comment-checker actionlint sudo; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     fail "missing command: $cmd"
   else
