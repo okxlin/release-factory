@@ -152,6 +152,18 @@ jobs:
       - name: Clean smoke test resources
         if: always()
         run: |
+          set -euo pipefail
+
+          remove_temp_dir() {
+            local dir="$1"
+            if [[ ! -d "${dir}" ]]; then
+              return 0
+            fi
+
+            sudo chown -R "$(id -u):$(id -g)" "${dir}" 2>/dev/null || true
+            rm -rf "${dir}" || sudo rm -rf "${dir}"
+          }
+
           docker rm -f "${CI_CONTAINER:-opencode-workstation-ci-${{ github.run_id }}}" >/dev/null 2>&1 || true
           for dir in \
             "${CI_WORKSPACE_DIR:-}" \
@@ -163,7 +175,7 @@ jobs:
             "${CI_OPENCODE_DIR:-}"; do
             case "${dir}" in
               /tmp/opencode-workstation-ci-*-workspace.*|/tmp/opencode-workstation-ci-*-cache.*|/tmp/opencode-workstation-ci-*-config.*|/tmp/opencode-workstation-ci-*-share.*|/tmp/opencode-workstation-ci-*-agents.*|/tmp/opencode-workstation-ci-*-claude.*|/tmp/opencode-workstation-ci-*-opencode.*)
-                rm -rf "${dir}"
+                remove_temp_dir "${dir}"
                 ;;
               "")
                 ;;
