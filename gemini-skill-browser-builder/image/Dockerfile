@@ -18,6 +18,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     DAEMON_TTL_MS=1800000
 
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends curl ca-certificates git dumb-init \
     && curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \

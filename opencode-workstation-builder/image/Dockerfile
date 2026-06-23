@@ -25,6 +25,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 ENV PATH=/opt/bun/bin:/usr/local/go/bin:/home/${USERNAME}/.cargo/bin:/home/${USERNAME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         bash \
         build-essential \
