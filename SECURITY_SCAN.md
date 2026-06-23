@@ -9,6 +9,8 @@ when fixable vulnerabilities exceed the configured thresholds:
 - `TRIVY_MAX_FIXABLE_CRITICAL`: defaults to `0`
 - `TRIVY_MAX_FIXABLE_HIGH`: defaults to a high compatibility value and should be
   set per workflow
+- `TRIVY_TIMEOUT`: defaults to `20m` so larger workstation images can complete
+  analysis instead of failing on Trivy's shorter default timeout
 
 Current workflow thresholds:
 
@@ -22,6 +24,12 @@ Current workflow thresholds:
 
 The Dockerfiles maintained in this repository run `apt-get upgrade -y` during
 build to pick up base image security fixes before installing additional tools.
+Browser images hold browser and locale packages during that upgrade so rebuilds
+do not silently change the browser version advertised by the image tag or spend
+minutes regenerating every locale.
+The OpenClaw upstream workflow passes `OPENCLAW_IMAGE_APT_PACKAGES=libgnutls30`
+so the upstream Dockerfile refreshes the runtime GnuTLS package before the
+vulnerability gate runs.
 When the host does not provide `trivy`, the gate uses the pinned
 `aquasec/trivy:0.63.0` container image. Set `TRIVY_DOCKER_IMAGE` when bumping
 Trivy intentionally.

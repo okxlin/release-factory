@@ -7,6 +7,8 @@ Usage: trivy-image-gate.sh --image IMAGE [--output PATH] [--max-fixable-critical
 
 Scans a container image with Trivy and fails when fixable HIGH/CRITICAL
 vulnerabilities exceed the configured thresholds.
+
+Set TRIVY_TIMEOUT to override the default image analysis timeout.
 EOF
 }
 
@@ -15,6 +17,7 @@ output=""
 max_fixable_critical="${TRIVY_MAX_FIXABLE_CRITICAL:-0}"
 max_fixable_high="${TRIVY_MAX_FIXABLE_HIGH:-999999}"
 severity="${TRIVY_SEVERITY:-HIGH,CRITICAL}"
+timeout="${TRIVY_TIMEOUT:-20m}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -70,23 +73,23 @@ if command -v trivy >/dev/null 2>&1; then
     --output "${output}" \
     --severity "${severity}" \
     --scanners vuln \
+    --skip-version-check \
+    --timeout "${timeout}" \
     "${image}"
 else
   trivy_image="${TRIVY_DOCKER_IMAGE:-aquasec/trivy:0.63.0}"
   cache_dir="${TRIVY_CACHE_DIR:-/tmp/trivy-cache}"
   mkdir -p "${cache_dir}"
-  output_dir="$(cd "$(dirname "${output}")" && pwd)"
-  output_file="$(basename "${output}")"
   docker run --rm \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v "${cache_dir}:/root/.cache/" \
-    -v "${output_dir}:/out" \
     "${trivy_image}" image \
       --format json \
-      --output "/out/${output_file}" \
       --severity "${severity}" \
       --scanners vuln \
-      "${image}"
+      --skip-version-check \
+      --timeout "${timeout}" \
+      "${image}" > "${output}"
 fi
 
 set +e

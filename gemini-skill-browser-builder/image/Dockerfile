@@ -18,6 +18,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     DAEMON_TTL_MS=1800000
 
 RUN apt-get update \
+    && for package in microsoft-edge-stable locales; do apt-mark hold "$package" 2>/dev/null || true; done \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends curl ca-certificates git dumb-init \
     && curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \

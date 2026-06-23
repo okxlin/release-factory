@@ -200,11 +200,23 @@ jobs:
       - name: Clean smoke test resources
         if: always()
         run: |
+          set -euo pipefail
+
+          remove_temp_dir() {
+            local dir="$1"
+            if [[ ! -d "${dir}" ]]; then
+              return 0
+            fi
+
+            sudo chown -R "$(id -u):$(id -g)" "${dir}" 2>/dev/null || true
+            rm -rf "${dir}" || sudo rm -rf "${dir}"
+          }
+
           docker rm -f "${CI_CONTAINER:-codex-workstation-ci-${{ github.run_id }}}" >/dev/null 2>&1 || true
           for dir in "${CI_WORKSPACE_DIR:-}" "${CI_HOME_DIR:-}"; do
             case "${dir}" in
               /tmp/codex-workstation-ci-*-workspace.*|/tmp/codex-workstation-ci-*-home.*)
-                rm -rf "${dir}"
+                remove_temp_dir "${dir}"
                 ;;
               "")
                 ;;

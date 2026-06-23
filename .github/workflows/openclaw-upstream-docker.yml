@@ -92,6 +92,7 @@ jobs:
           context: ./openclaw-src
           build-args: |
             OPENCLAW_INSTALL_DOCKER_CLI=1
+            OPENCLAW_IMAGE_APT_PACKAGES=libgnutls30
             OPENCLAW_PREFER_PNPM=1
           load: true
           tags: ${{ env.TEST_IMAGE }}
@@ -128,6 +129,7 @@ jobs:
           context: ./openclaw-src
           build-args: |
             OPENCLAW_INSTALL_DOCKER_CLI=1
+            OPENCLAW_IMAGE_APT_PACKAGES=libgnutls30
             OPENCLAW_PREFER_PNPM=1
           push: true
           tags: ${{ steps.meta.outputs.tags }}
