@@ -200,11 +200,23 @@ jobs:
       - name: Clean smoke test resources
         if: always()
         run: |
+          set -euo pipefail
+
+          remove_temp_dir() {
+            local dir="$1"
+            if [[ ! -d "${dir}" ]]; then
+              return 0
+            fi
+
+            sudo chown -R "$(id -u):$(id -g)" "${dir}" 2>/dev/null || true
+            rm -rf "${dir}" || sudo rm -rf "${dir}"
+          }
+
           docker rm -f "${CI_CONTAINER:-codex-workstation-ci-${{ github.run_id }}}" >/dev/null 2>&1 || true
           for dir in "${CI_WORKSPACE_DIR:-}" "${CI_HOME_DIR:-}"; do
             case "${dir}" in
               /tmp/codex-workstation-ci-*-workspace.*|/tmp/codex-workstation-ci-*-home.*)
-                rm -rf "${dir}"
+                remove_temp_dir "${dir}"
                 ;;
               "")
                 ;;
@@ -213,6 +225,19 @@ jobs:
                 ;;
             esac
           done
+
+      - name: Run Trivy vulnerability gate
+        env:
+          TRIVY_MAX_FIXABLE_CRITICAL: "0"
+          TRIVY_MAX_FIXABLE_HIGH: "150"
+        run: |
+          set -euo pipefail
+          chmod +x scripts/trivy-image-gate.sh
+          scripts/trivy-image-gate.sh \
+            --image "${TEST_IMAGE}" \
+            --output "${RUNNER_TEMP}/codex-claude-workstation.trivy.json" \
+            --max-fixable-critical "${TRIVY_MAX_FIXABLE_CRITICAL}" \
+            --max-fixable-high "${TRIVY_MAX_FIXABLE_HIGH}"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3

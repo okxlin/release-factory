@@ -82,7 +82,7 @@ jobs:
           mv "$ORIGINAL_PKG" "$NEW_PKG"
           test -f "$NEW_PKG"
           
-          tar -tzf "$NEW_PKG" | egrep '(^\./1panel-core$|^\./1panel-agent$|^\./1pctl$|^\./install.sh$|^\./initscript/|^\./lang/)' >/dev/null
+          tar -tzf "$NEW_PKG" | grep -E '(^\./1panel-core$|^\./1panel-agent$|^\./1pctl$|^\./install.sh$|^\./initscript/|^\./lang/)' >/dev/null
           sha256sum "$NEW_PKG" | tee "./output/package/${ARCH}/1panel-${ACTOR}-${VERSION}-${ARCH}.sha256"
 
       - name: Upload package artifacts

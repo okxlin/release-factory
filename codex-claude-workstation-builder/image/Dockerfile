@@ -33,7 +33,9 @@ RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /
     | tee /etc/apt/sources.list.d/docker.list > /dev/null
 
 # ── System packages ──
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
     bat \
     bash \
     bind9-dnsutils \

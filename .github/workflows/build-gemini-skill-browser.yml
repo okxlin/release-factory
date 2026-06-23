@@ -28,6 +28,7 @@ concurrency:
 env:
   IMAGE_REPO: gemini-skill-browser
   DEFAULT_PLATFORM: linux/amd64
+  TEST_IMAGE: gemini-skill-browser:kasm-ci-test
 
 jobs:
   build-and-push:
@@ -66,13 +67,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Extract metadata for Docker
         id: meta
         uses: docker/metadata-action@v5
@@ -86,6 +80,41 @@ jobs:
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.base.name=kasmweb/edge:${{ steps.params.outputs.browser_base_tag }}
 
+      - name: Build local image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./gemini-skill-browser-builder/image
+          file: ./gemini-skill-browser-builder/image/Dockerfile
+          platforms: linux/amd64
+          load: true
+          build-args: |
+            BASE_IMAGE_TAG=${{ steps.params.outputs.browser_base_tag }}
+            GEMINI_SKILL_REF=${{ steps.params.outputs.gemini_skill_ref }}
+          tags: ${{ env.TEST_IMAGE }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=gemini-skill-browser-kasm
+          cache-to: type=gha,mode=min,scope=gemini-skill-browser-kasm
+
+      - name: Run Trivy vulnerability gate
+        env:
+          TRIVY_MAX_FIXABLE_CRITICAL: "0"
+          TRIVY_MAX_FIXABLE_HIGH: "30"
+        run: |
+          set -euo pipefail
+          chmod +x scripts/trivy-image-gate.sh
+          scripts/trivy-image-gate.sh \
+            --image "${TEST_IMAGE}" \
+            --output "${RUNNER_TEMP}/gemini-skill-browser-kasm.trivy.json" \
+            --max-fixable-critical "${TRIVY_MAX_FIXABLE_CRITICAL}" \
+            --max-fixable-high "${TRIVY_MAX_FIXABLE_HIGH}"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
@@ -98,8 +127,8 @@ jobs:
             GEMINI_SKILL_REF=${{ steps.params.outputs.gemini_skill_ref }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=gemini-skill-browser-kasm
+          cache-to: type=gha,mode=min,scope=gemini-skill-browser-kasm
 
       - name: Emit build summary
         run: |
