@@ -29,12 +29,36 @@ jobs:
 
       - name: Get latest OpenClaw release tag
         id: get_release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          LATEST_TAG=$(curl -s https://api.github.com/repos/openclaw/openclaw/releases/latest | jq -r .tag_name)
-          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" == "null" ]; then
-            echo "Failed to get latest release tag"
+          set -euo pipefail
+          RELEASE_JSON="$(mktemp)"
+          trap 'rm -f "$RELEASE_JSON"' EXIT
+
+          curl --fail --show-error --silent --location \
+            --retry 4 \
+            --retry-all-errors \
+            --retry-delay 2 \
+            --retry-max-time 60 \
+            --connect-timeout 10 \
+            --max-time 30 \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -o "$RELEASE_JSON" \
+            https://api.github.com/repos/openclaw/openclaw/releases/latest
+
+          if ! LATEST_TAG="$(jq -er '.tag_name | select(type == "string" and length > 0)' "$RELEASE_JSON")"; then
+            echo "::error::OpenClaw latest release response did not contain a valid tag_name"
             exit 1
           fi
+
+          if [[ ! "$LATEST_TAG" =~ ^v?[0-9][A-Za-z0-9._-]{0,127}$ ]]; then
+            echo "::error::OpenClaw release tag failed validation"
+            exit 1
+          fi
+
           echo "tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Check if image already exists in GHCR
