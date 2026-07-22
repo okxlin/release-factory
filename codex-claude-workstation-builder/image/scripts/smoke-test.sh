@@ -21,7 +21,7 @@ echo "[smoke] $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 echo ""
 echo "[smoke] === Required Commands ==="
-REQUIRED_CMDS=(node npm pnpm yarn corepack code-server codex git curl jq rg fd python3 pytest uv uvx pipx ruff black mypy pre-commit yamllint direnv make gcc g++ docker go rustc bun deno cargo java mvn yq actionlint gh supervisorctl claude bwrap unshare mihomo clash-meta sing-box xray dig nc lsof file)
+REQUIRED_CMDS=(node npm pnpm yarn corepack code-server codex claude omx git curl jq rg fd python3 pytest uv uvx pipx ruff black mypy pre-commit yamllint direnv make gcc g++ docker go rustc bun deno cargo java mvn yq actionlint gh supervisorctl bwrap unshare mihomo clash-meta sing-box xray dig nc lsof file)
 for cmd in "${REQUIRED_CMDS[@]}"; do
     if command -v "$cmd" >/dev/null 2>&1; then
         pass "$cmd available"
@@ -48,6 +48,8 @@ version_check "ruff" ruff --version
 version_check "black" black --version
 version_check "mypy" mypy --version
 version_check "codex" codex --version
+version_check "claude" claude --version
+version_check "oh-my-codex" omx --version
 version_check "go" go version
 if [ "$(go env GOPATH 2>/dev/null || true)" = "/home/dev/go" ]; then
     pass "go GOPATH persistent"
