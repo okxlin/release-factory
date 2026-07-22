@@ -13,9 +13,11 @@ diff --git a/Dockerfile b/Dockerfile
 index 4282aff5..927daaf9 100644
 --- a/Dockerfile
 +++ b/Dockerfile
-@@ -178,0 +179,5 @@ ARG OPENCLAW_BUNDLED_PLUGIN_DIR
+@@ -180,1 +180,7 @@
 +ARG OPENCLAW_NPM_VERSION=11.18.0
 +
 +# Keep npm's bundled tar dependency at a version with the current security fix.
 +RUN npm install --global "npm@${OPENCLAW_NPM_VERSION}" \
 +    && npm cache clean --force
++
+ # OCI base-image metadata for downstream image consumers.
