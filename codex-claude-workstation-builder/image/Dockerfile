@@ -13,6 +13,7 @@ ARG RUST_VERSION=stable
 ARG BUN_VERSION=latest
 ARG DENO_VERSION=latest
 ARG ACTIONLINT_VERSION=1.7.12
+ARG CODE_SERVER_TAR_VERSION=7.5.21
 ARG PNPM_VERSION=latest
 ARG YARN_VERSION=stable
 ARG RUFF_VERSION=latest
@@ -213,37 +214,66 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
     && case "${dpkg_arch}" in \
         amd64) \
             mihomo_arch="amd64-compatible"; \
+            mihomo_sha256="5612e698e96c8b8ad15abc4c0a4f098eba9234354b4f248cb97f2528e215b094"; \
             sing_box_arch="amd64-glibc"; \
+            sing_box_sha256="aae9172317c61760aae3dafcde889b2e51b7ea590c40d2b3c7ccdeae14b361b6"; \
             xray_arch="64"; \
+            xray_sha256="23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae"; \
             ;; \
         arm64) \
             mihomo_arch="arm64"; \
+            mihomo_sha256="9a868b5e4e0ad91d9d71e1b41b0cfce78aaba44360c30df74a723f8e3926a86c"; \
             sing_box_arch="arm64-glibc"; \
+            sing_box_sha256="08d37b2bf12145ec44307333490cecca4c917df054cd8e27a210f8d9cdbe0fd9"; \
             xray_arch="arm64-v8a"; \
+            xray_sha256="4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c"; \
             ;; \
         *) echo "unsupported architecture for proxy core install: ${dpkg_arch}" >&2; exit 1 ;; \
     esac \
-    && mihomo_version="1.19.27" \
-    && sing_box_version="1.13.13" \
+    && mihomo_version="1.19.29" \
+    && sing_box_version="1.13.14" \
     && xray_version="26.3.27" \
+    && mihomo_asset="mihomo-linux-${mihomo_arch}-v${mihomo_version}.gz" \
     && sing_box_dir="sing-box-${sing_box_version}-linux-${sing_box_arch}" \
-    && curl -fsSL "https://github.com/MetaCubeX/mihomo/releases/download/v${mihomo_version}/mihomo-linux-${mihomo_arch}-v${mihomo_version}.gz" -o /tmp/mihomo.gz \
+    && sing_box_asset="${sing_box_dir}.tar.gz" \
+    && xray_asset="Xray-linux-${xray_arch}.zip" \
+    && curl -fsSL "https://github.com/MetaCubeX/mihomo/releases/download/v${mihomo_version}/${mihomo_asset}" -o /tmp/mihomo.gz \
+    && printf '%s  %s\n' "${mihomo_sha256}" /tmp/mihomo.gz | sha256sum -c - \
     && gunzip -c /tmp/mihomo.gz > /usr/local/bin/mihomo \
     && chmod +x /usr/local/bin/mihomo \
     && ln -sf /usr/local/bin/mihomo /usr/local/bin/clash-meta \
-    && curl -fsSL "https://github.com/SagerNet/sing-box/releases/download/v${sing_box_version}/${sing_box_dir}.tar.gz" -o /tmp/sing-box.tgz \
+    && curl -fsSL "https://github.com/SagerNet/sing-box/releases/download/v${sing_box_version}/${sing_box_asset}" -o /tmp/sing-box.tgz \
+    && printf '%s  %s\n' "${sing_box_sha256}" /tmp/sing-box.tgz | sha256sum -c - \
     && tar xzf /tmp/sing-box.tgz -C /tmp \
     && mv "/tmp/${sing_box_dir}/sing-box" /usr/local/bin/sing-box \
     && chmod +x /usr/local/bin/sing-box \
-    && curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/v${xray_version}/Xray-linux-${xray_arch}.zip" -o /tmp/xray.zip \
+    && curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/v${xray_version}/${xray_asset}" -o /tmp/xray.zip \
+    && printf '%s  %s\n' "${xray_sha256}" /tmp/xray.zip | sha256sum -c - \
     && unzip -o /tmp/xray.zip xray -d /usr/local/bin/ \
     && chmod +x /usr/local/bin/xray \
     && rm -rf /tmp/mihomo.gz /tmp/sing-box.tgz "/tmp/${sing_box_dir}" /tmp/xray.zip
 # ── code-server ──
 RUN curl -fsSL https://code-server.dev/install.sh | sh
 
+# Keep code-server's bundled tar within its declared ^7.5.9 range while
+# upstream release artifacts catch up with security fixes.
+RUN [[ "${CODE_SERVER_TAR_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+    && code_server_tar_dir="/usr/lib/code-server/lib/vscode/node_modules/tar" \
+    && tarball="$(npm pack --silent --pack-destination /tmp "tar@${CODE_SERVER_TAR_VERSION}")" \
+    && [[ "${tarball}" == "tar-${CODE_SERVER_TAR_VERSION}.tgz" ]] \
+    && find "${code_server_tar_dir}" -mindepth 1 -delete \
+    && tar -xzf "/tmp/${tarball}" --strip-components=1 -C "${code_server_tar_dir}" \
+    && node -e 'const [path, expected] = process.argv.slice(1); const actual = require(path).version; if (actual !== expected) throw new Error(`expected tar ${expected}, got ${actual}`)' \
+        "${code_server_tar_dir}/package.json" "${CODE_SERVER_TAR_VERSION}" \
+    && find /tmp -maxdepth 1 -name "${tarball}" -delete
+
 # ── npm globals and Corepack package managers ──
-RUN npm install -g typescript@5 @openai/codex @anthropic-ai/claude-code oh-my-codex \
+# Claude's audited postinstall links its platform-native optional dependency.
+# Keep lifecycle scripts from all other global packages blocked by npm 12.
+RUN npm install -g --allow-scripts=@anthropic-ai/claude-code typescript@5 @openai/codex @anthropic-ai/claude-code oh-my-codex \
+    && codex --version \
+    && claude --version \
+    && omx --version \
     && mkdir -p /opt/corepack \
     && corepack enable \
     && COREPACK_HOME=/opt/corepack corepack prepare "pnpm@${PNPM_VERSION}" --activate \

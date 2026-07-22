@@ -98,7 +98,10 @@ check "=== Core Services ==="
 
 check "code-server"
 if command -v code-server >/dev/null 2>&1; then
-    code-server --version 2>/dev/null | head -1 || true
+    if ! code-server --version 2>/dev/null | head -1; then
+        warn "code-server is installed but failed to run"
+        status=1
+    fi
 else
     warn "code-server not installed"
     status=1
@@ -106,7 +109,10 @@ fi
 
 check "codex"
 if command -v codex >/dev/null 2>&1; then
-    codex --version 2>/dev/null || true
+    if ! codex --version 2>/dev/null; then
+        warn "codex is installed but failed to run"
+        status=1
+    fi
 else
     warn "codex not installed"
     status=1
@@ -114,9 +120,24 @@ fi
 
 check "claude"
 if command -v claude >/dev/null 2>&1; then
-    claude --version 2>/dev/null || true
+    if ! claude --version 2>/dev/null; then
+        warn "claude is installed but failed to run"
+        status=1
+    fi
 else
     warn "claude not installed"
+    status=1
+fi
+
+check "oh-my-codex"
+if command -v omx >/dev/null 2>&1; then
+    if ! omx --version 2>/dev/null; then
+        warn "oh-my-codex is installed but failed to run"
+        status=1
+    fi
+else
+    warn "oh-my-codex not installed"
+    status=1
 fi
 
 check "supervisord"
