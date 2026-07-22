@@ -10,9 +10,18 @@ index df1205bb..0649bae4 100644
 +  "packageManager": "pnpm@11.15.1+sha512.81350b07e53c9538a02f1f2303b4290fa2d7be04e56e2a970c4cc4b417dc761de196edabd49d55c7dc9580db81007c44143e4e3d7e462b3000d23c255122d065"
  }
 diff --git a/Dockerfile b/Dockerfile
-index 4282aff5..927daaf9 100644
+index 4282aff5..2cd62037 100644
 --- a/Dockerfile
 +++ b/Dockerfile
+@@ -162,6 +162,8 @@ RUN --mount=type=cache,id=openclaw-pnpm-store,target=/root/.local/share/pnpm/sto
+       rmdir "$ai_runtime_tmp"; \
+     fi && \
+     rm -rf \
++      /app/node_modules/@vitest \
++      /app/node_modules/vitest \
+       /app/node_modules/openclaw \
+       /app/node_modules/.bin/openclaw \
+       /app/node_modules/.pnpm/openclaw@*/node_modules/openclaw && \
 @@ -180,1 +180,7 @@
 +ARG OPENCLAW_NPM_VERSION=11.18.0
 +
