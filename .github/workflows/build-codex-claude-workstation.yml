@@ -107,6 +107,11 @@ jobs:
             --latest-tag "latest" \
             --github-output "$GITHUB_OUTPUT"
 
+      - name: Validate Paseo supply-chain and proxy contract
+        run: |
+          set -euo pipefail
+          bash codex-claude-workstation-builder/scripts/test-paseo-contract.sh
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
 
@@ -121,7 +126,7 @@ jobs:
           tags: ${{ steps.params.outputs.tags }}
           labels: |
             org.opencontainers.image.title=Codex Claude Workstation
-            org.opencontainers.image.description=Browser-accessible AI workstation with Codex CLI, Claude Code, and code-server (VS Code) in a single Docker image.
+            org.opencontainers.image.description=Browser-accessible AI workstation with Codex CLI, Claude Code, code-server, and a hardened Paseo mobile web endpoint.
             org.opencontainers.image.vendor=${{ github.repository_owner }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
