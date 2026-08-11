@@ -2,6 +2,10 @@
 # doctor.sh — 诊断 codex-claude-workstation v2 运行环境
 set -euo pipefail
 
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=paseo-password.sh
+source /usr/local/lib/codex-workstation/paseo-password.sh
+
 status=0
 
 check() { printf '[doctor] %s\n' "$*"; }
@@ -20,6 +24,14 @@ mask_value() {
     else
         printf '%s' "$value"
     fi
+}
+http_code() {
+    curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+        --connect-timeout 2 --max-time 5 "$@" 2>/dev/null || true
+}
+is_listening_port() {
+    local port="$1"
+    ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)${port}$"
 }
 
 check "=== System Environment ==="
@@ -140,6 +152,19 @@ else
     status=1
 fi
 
+check "paseo"
+if command -v paseo >/dev/null 2>&1; then
+    paseo_version="$(paseo --version 2>/dev/null || true)"
+    check "paseo version: ${paseo_version:-unknown}"
+    if [ "${paseo_version}" != "${PASEO_VERSION:-0.3.1}" ]; then
+        warn "paseo version should be ${PASEO_VERSION:-0.3.1}"
+        status=1
+    fi
+else
+    warn "paseo not installed"
+    status=1
+fi
+
 check "supervisord"
 if command -v supervisord >/dev/null 2>&1; then
     check "supervisord: available"
@@ -189,7 +214,7 @@ fi
 
 check ""
 check "=== Development Toolchain ==="
-for cmd in git curl jq rg fd make gcc g++ docker go rustc bun deno cargo java mvn yq actionlint gh supervisorctl bwrap unshare corepack uv uvx pipx pytest ruff black mypy pre-commit yamllint direnv dig nc lsof file; do
+for cmd in git curl jq rg fd make gcc g++ docker go rustc bun deno cargo java mvn yq actionlint gh supervisorctl bwrap unshare corepack uv uvx pipx pytest ruff black mypy pre-commit yamllint direnv dig nc lsof file paseo; do
     if command -v "$cmd" >/dev/null 2>&1; then
         check "$cmd: available"
     else
@@ -276,6 +301,7 @@ for dir in \
     /home/dev/.local/bin \
     /home/dev/.local/share/code-server/extensions \
     /home/dev/.npm \
+    /home/dev/.paseo \
     /home/dev/go/bin \
     /home/dev/proxy \
     /run/codex; do
@@ -298,6 +324,8 @@ CONFIG_FILES=(
     "/home/dev/.config/code-server/config.yaml"
     "/home/dev/.codex/config.toml"
     "/etc/supervisor/supervisord.conf"
+    "/usr/share/doc/paseo/LICENSE"
+    "/usr/share/doc/paseo/UPSTREAM.md"
 )
 for f in "${CONFIG_FILES[@]}"; do
     if [ -f "$f" ]; then
@@ -309,15 +337,67 @@ done
 
 check ""
 check "=== Service Ports ==="
-if ss -tlnp 2>/dev/null | grep -q ":8080 " || true; then
+if is_listening_port 8080; then
     check "port 8080: listening"
 else
     warn "port 8080: not listening"
+    status=1
+fi
+
+if is_listening_port 6767; then
+    check "port 6767: Paseo daemon listening"
+else
+    warn "port 6767: Paseo daemon not listening"
+    status=1
+fi
+
+if ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq '^(0\.0\.0\.0|\*):6767$'; then
+    check "Paseo daemon container listener: 0.0.0.0:6767"
+else
+    warn "Paseo daemon is not bound to container port 6767"
+    status=1
+fi
+
+if supervisorctl status paseo 2>/dev/null | grep -q 'RUNNING'; then
+    check "supervisor paseo: RUNNING"
+else
+    warn "supervisor paseo: not RUNNING"
+    status=1
+fi
+
+if [ "$(http_code -H 'Host: paseo.internal' http://127.0.0.1:6767/api/health)" = "200" ]; then
+    check "Paseo health: OK"
+else
+    warn "Paseo health failed"
+    status=1
+fi
+
+paseo_password="${PASEO_PASSWORD:-${PASSWORD:-change-me}}"
+if [[ -z "${paseo_password//[[:space:]]/}" ]]; then
+    paseo_password="change-me"
+fi
+if paseo_password_is_websocket_token "${paseo_password}"; then
+    check "Paseo password WebSocket token format: valid"
+    if paseo_password_has_recommended_length "${paseo_password}"; then
+        check "Paseo password length: recommended minimum met"
+    else
+        warn "Paseo password is shorter than the recommended 20 characters"
+    fi
+else
+    warn "Paseo password cannot be used by the browser WebSocket client; set a separate token-safe PASEO_PASSWORD"
+    status=1
+    paseo_password="invalid-password-placeholder"
+fi
+if [ "$(http_code -H 'Host: paseo.internal' -H "Authorization: Bearer ${paseo_password}" http://127.0.0.1:6767/api/status)" = "200" ]; then
+    check "Paseo authenticated status: OK"
+else
+    warn "Paseo authenticated status failed"
+    status=1
 fi
 
 check ""
 check "=== Environment Variables ==="
-for var in PASSWORD ROOT_PASSWORD DOCKER_SOCK_SRC CONTAINER_WORKSPACE FIX_WORKSPACE_OWNERSHIP_RECURSIVE CODEX_SANDBOX_STRICT BUN_INSTALL CARGO_HOME DENO_INSTALL COREPACK_HOME GOPATH JAVA_HOME NPM_CONFIG_CACHE NPM_CONFIG_PREFIX PIPX_BIN_DIR RUSTUP_HOME; do
+for var in PASSWORD PASEO_PASSWORD ROOT_PASSWORD DOCKER_SOCK_SRC CONTAINER_WORKSPACE FIX_WORKSPACE_OWNERSHIP_RECURSIVE CODEX_SANDBOX_STRICT BUN_INSTALL CARGO_HOME DENO_INSTALL COREPACK_HOME GOPATH JAVA_HOME NPM_CONFIG_CACHE NPM_CONFIG_PREFIX PASEO_HOME PASEO_LISTEN PASEO_HOSTNAMES PASEO_RELAY_ENABLED PASEO_SERVICE_PROXY_ENABLED PASEO_TRUSTED_PROXIES PASEO_WEB_UI_ENABLED PASEO_VOICE_MODE_ENABLED PASEO_DICTATION_ENABLED PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD PASEO_VERSION PIPX_BIN_DIR RUSTUP_HOME; do
     val="${!var:-}"
     if [ -n "$val" ]; then
         check "${var}=$(mask_value "$var" "$val")"

@@ -1,0 +1,10 @@
+{
+  "name": "codex-claude-workstation-paseo-runtime",
+  "version": "0.3.1",
+  "private": true,
+  "description": "Pinned Paseo runtime for the Codex Claude Workstation image",
+  "license": "AGPL-3.0-or-later",
+  "dependencies": {
+    "@getpaseo/cli": "0.3.1"
+  }
+}

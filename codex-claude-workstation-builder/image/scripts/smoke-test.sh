@@ -2,6 +2,10 @@
 # smoke-test.sh — 冒烟测试 v2：快速验证核心服务可用性
 set -euo pipefail
 
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=paseo-password.sh
+source /usr/local/lib/codex-workstation/paseo-password.sh
+
 status=0
 
 pass() { printf '[smoke] PASS: %s\n' "$*"; }
@@ -15,13 +19,17 @@ version_check() {
         fail "${label}"
     fi
 }
+http_code() {
+    curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+        --connect-timeout 2 --max-time 5 "$@" 2>/dev/null || true
+}
 
 echo "[smoke] codex-claude-workstation smoke test"
 echo "[smoke] $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 echo ""
 echo "[smoke] === Required Commands ==="
-REQUIRED_CMDS=(node npm pnpm yarn corepack code-server codex claude omx git curl jq rg fd python3 pytest uv uvx pipx ruff black mypy pre-commit yamllint direnv make gcc g++ docker go rustc bun deno cargo java mvn yq actionlint gh supervisorctl bwrap unshare mihomo clash-meta sing-box xray dig nc lsof file)
+REQUIRED_CMDS=(node npm pnpm yarn corepack code-server codex claude omx paseo git curl jq rg fd python3 pytest uv uvx pipx ruff black mypy pre-commit yamllint direnv make gcc g++ docker go rustc bun deno cargo java mvn yq actionlint gh supervisorctl bwrap unshare mihomo clash-meta sing-box xray dig nc lsof file)
 for cmd in "${REQUIRED_CMDS[@]}"; do
     if command -v "$cmd" >/dev/null 2>&1; then
         pass "$cmd available"
@@ -50,6 +58,12 @@ version_check "mypy" mypy --version
 version_check "codex" codex --version
 version_check "claude" claude --version
 version_check "oh-my-codex" omx --version
+version_check "paseo" paseo --version
+if [ "$(paseo --version 2>/dev/null || true)" = "${PASEO_VERSION:-0.3.1}" ]; then
+    pass "paseo version pinned to ${PASEO_VERSION:-0.3.1}"
+else
+    fail "paseo version mismatch"
+fi
 version_check "go" go version
 if [ "$(go env GOPATH 2>/dev/null || true)" = "/home/dev/go" ]; then
     pass "go GOPATH persistent"
@@ -76,11 +90,62 @@ version_check "xray" xray version
 echo ""
 echo "[smoke] === Core Services (HTTP probes) ==="
 CODE_SERVER_PORT="${CODE_SERVER_PORT:-8080}"
+PASEO_PORT="${PASEO_PORT:-6767}"
 
-if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${CODE_SERVER_PORT}/" | grep -qE '^[2345][0-9]{2}$'; then
+if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${CODE_SERVER_PORT}/" | grep -qE '^[234][0-9]{2}$'; then
     pass "code-server responding on port ${CODE_SERVER_PORT}"
 else
     fail "code-server not responding on port ${CODE_SERVER_PORT}"
+fi
+
+if [ "$(http_code -H 'Host: paseo.internal' "http://127.0.0.1:${PASEO_PORT}/api/health")" = "200" ]; then
+    pass "Paseo health responding on port ${PASEO_PORT}"
+else
+    fail "Paseo health not responding on port ${PASEO_PORT}"
+fi
+
+paseo_password="${PASEO_PASSWORD:-${PASSWORD:-change-me}}"
+if [[ -z "${paseo_password//[[:space:]]/}" ]]; then
+    paseo_password="change-me"
+fi
+if paseo_password_is_websocket_token "${paseo_password}"; then
+    pass "Paseo password is browser WebSocket-token-safe"
+else
+    fail "Paseo password is not browser WebSocket-token-safe"
+    paseo_password="invalid-password-placeholder"
+fi
+if [ "$(http_code -H 'Host: paseo.internal' -H "Authorization: Bearer ${paseo_password}" "http://127.0.0.1:${PASEO_PORT}/api/status")" = "200" ]; then
+    pass "Paseo authenticated status responding"
+else
+    fail "Paseo authenticated status failed"
+fi
+
+websocket_code="$(curl --http1.1 --silent --show-error --output /dev/null --write-out '%{http_code}' \
+    --connect-timeout 2 --max-time 1 \
+    -H 'Host: paseo.internal' \
+    -H 'Origin: http://paseo.internal' \
+    -H 'Connection: Upgrade' \
+    -H 'Upgrade: websocket' \
+    -H 'Sec-WebSocket-Version: 13' \
+    -H 'Sec-WebSocket-Key: SGVsbG9QYXNlbzEyMzQ1Ng==' \
+    -H "Sec-WebSocket-Protocol: paseo.bearer.${paseo_password}" \
+    "http://127.0.0.1:${PASEO_PORT}/ws" 2>/dev/null || true)"
+if [ "${websocket_code}" = "101" ]; then
+    pass "Paseo authenticated WebSocket accepts the configured origin"
+else
+    fail "Paseo authenticated WebSocket failed"
+fi
+
+if ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq "^(0\\.0\\.0\\.0|\\*):${PASEO_PORT}$"; then
+    pass "Paseo daemon listening on container port ${PASEO_PORT}"
+else
+    fail "Paseo daemon is not listening on container port ${PASEO_PORT}"
+fi
+
+if supervisorctl status paseo 2>/dev/null | grep -q 'RUNNING'; then
+    pass "supervisor service paseo running"
+else
+    fail "supervisor service paseo not running"
 fi
 
 echo ""
@@ -129,6 +194,7 @@ for dir in \
     /home/dev/.local/bin \
     /home/dev/.local/share/code-server/extensions \
     /home/dev/.npm \
+    /home/dev/.paseo \
     /home/dev/go/bin \
     /home/dev/proxy; do
     if [ -d "$dir" ]; then
@@ -137,6 +203,12 @@ for dir in \
         fail "${dir} missing"
     fi
 done
+
+if [ -f /usr/share/doc/paseo/LICENSE ] && [ -f /usr/share/doc/paseo/UPSTREAM.md ]; then
+    pass "Paseo license and exact upstream source notice present"
+else
+    fail "Paseo license or upstream source notice missing"
+fi
 
 echo ""
 echo "[smoke] === Scripts Installed ==="

@@ -7,7 +7,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG TARGETARCH=amd64
 ARG DEBIAN_FRONTEND=noninteractive
 ARG NODE_MAJOR=24
-ARG NPM_VERSION=latest
+ARG NPM_VERSION=12.0.1
 ARG GO_VERSION=latest
 ARG RUST_VERSION=stable
 ARG BUN_VERSION=latest
@@ -279,6 +279,22 @@ RUN npm install -g --allow-scripts=@anthropic-ai/claude-code typescript@5 @opena
     && COREPACK_HOME=/opt/corepack corepack prepare "pnpm@${PNPM_VERSION}" --activate \
     && COREPACK_HOME=/opt/corepack corepack prepare "yarn@${YARN_VERSION}" --activate
 
+# ── Paseo mobile/web remote control ──
+# The complete production dependency graph is pinned in package-lock.json.
+# Lifecycle scripts stay disabled; the reviewed native packages ship usable
+# prebuilt artifacts for supported architectures and are probed below.
+COPY paseo-runtime/package.json paseo-runtime/package-lock.json /opt/paseo/
+RUN cd /opt/paseo \
+    && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+    && npm audit signatures \
+    && npm audit --omit=dev --audit-level=high \
+    && node -e "require('node-pty'); require('@parcel/watcher'); require('sherpa-onnx-node')" \
+    && paseo_version="$(./node_modules/.bin/paseo --version)" \
+    && [ "${paseo_version}" = "0.3.1" ] \
+    && ln -s /opt/paseo/node_modules/.bin/paseo /usr/local/bin/paseo \
+    && paseo --version
+COPY paseo-runtime/LICENSE paseo-runtime/UPSTREAM.md /usr/share/doc/paseo/
+
 # ── User, directories, root password, sudo ──
 # check=skip=SecretsUsedInArgOrEnv
 ARG ROOT_PASSWORD=codex2024
@@ -297,6 +313,7 @@ RUN useradd -m -s /bin/bash -u 1001 dev \
         /home/dev/.local/bin \
         /home/dev/.local/share/code-server/extensions \
         /home/dev/.npm \
+        /home/dev/.paseo \
         /home/dev/go/bin \
         /home/dev/proxy \
     && chown -R dev:dev /workspace /run/codex /home/dev /opt/corepack \
@@ -320,7 +337,9 @@ COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY scripts/healthcheck.sh /usr/local/bin/healthcheck.sh
 COPY scripts/doctor.sh /usr/local/bin/doctor.sh
 COPY scripts/smoke-test.sh /usr/local/bin/smoke-test.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh /usr/local/bin/doctor.sh /usr/local/bin/smoke-test.sh
+COPY scripts/paseo-password.sh /usr/local/lib/codex-workstation/paseo-password.sh
+RUN chmod 0644 /usr/local/lib/codex-workstation/paseo-password.sh \
+    && chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh /usr/local/bin/doctor.sh /usr/local/bin/smoke-test.sh
 
 USER dev
 
@@ -338,12 +357,23 @@ ENV GOPATH=/home/dev/go
 ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-${TARGETARCH}
 ENV NPM_CONFIG_CACHE=/home/dev/.cache/npm
 ENV NPM_CONFIG_PREFIX=/home/dev/.local
+ENV PASEO_HOME=/home/dev/.paseo
+ENV PASEO_LISTEN=0.0.0.0:6767
+ENV PASEO_HOSTNAMES=paseo.internal
+ENV PASEO_RELAY_ENABLED=false
+ENV PASEO_SERVICE_PROXY_ENABLED=false
+ENV PASEO_TRUSTED_PROXIES=loopback
+ENV PASEO_WEB_UI_ENABLED=true
+ENV PASEO_VOICE_MODE_ENABLED=false
+ENV PASEO_DICTATION_ENABLED=false
+ENV PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD=false
+ENV PASEO_VERSION=0.3.1
 ENV PIPX_BIN_DIR=/home/dev/.local/bin
 ENV RUSTUP_HOME=/opt/rust/rustup
 ENV PATH=/home/dev/.local/bin:/home/dev/go/bin:/home/dev/.cargo/bin:/home/dev/.bun/bin:/home/dev/.deno/bin:/opt/bun/bin:/opt/deno/bin:/usr/local/go/bin:/opt/rust/cargo/bin:${PATH}
 
 # ── Runtime ──
-EXPOSE 8080
+EXPOSE 8080 6767
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/usr/local/bin/entrypoint.sh"]
