@@ -15,20 +15,32 @@ require_file() {
   [ -f "$1" ] || fail "missing required file: $1"
 }
 
+require_absent_file() {
+  [ ! -e "$1" ] || fail "unexpected file: $1"
+}
+
 require_text() {
   local file="$1"
   local text="$2"
   grep -Fq -- "$text" "$file" || fail "${file} is missing: ${text}"
 }
 
+reject_text() {
+  local file="$1"
+  local text="$2"
+  if grep -Fq -- "$text" "$file"; then
+    fail "${file} unexpectedly contains: ${text}"
+  fi
+}
+
 require_file "${RUNTIME_DIR}/package.json"
 require_file "${RUNTIME_DIR}/package-lock.json"
 require_file "${RUNTIME_DIR}/LICENSE"
 require_file "${RUNTIME_DIR}/UPSTREAM.md"
-require_file "${IMAGE_DIR}/config/nginx/nginx.conf"
 require_file "${IMAGE_DIR}/config/supervisord/conf.d/paseo.conf"
-require_file "${IMAGE_DIR}/config/supervisord/conf.d/paseo-nginx.conf"
 require_file "${IMAGE_DIR}/scripts/paseo-password.sh"
+require_absent_file "${IMAGE_DIR}/config/nginx/nginx.conf"
+require_absent_file "${IMAGE_DIR}/config/supervisord/conf.d/paseo-nginx.conf"
 
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=../image/scripts/paseo-password.sh
@@ -101,16 +113,13 @@ require_text "${IMAGE_DIR}/Dockerfile" 'npm ci --omit=dev --ignore-scripts'
 require_text "${IMAGE_DIR}/Dockerfile" 'npm audit signatures'
 require_text "${IMAGE_DIR}/Dockerfile" 'npm audit --omit=dev --audit-level=high'
 require_text "${IMAGE_DIR}/Dockerfile" 'paseo --version'
-require_text "${IMAGE_DIR}/Dockerfile" 'rm -f /run/codex/nginx.pid'
 require_text "${IMAGE_DIR}/Dockerfile" 'COPY scripts/paseo-password.sh /usr/local/lib/codex-workstation/paseo-password.sh'
+require_text "${IMAGE_DIR}/Dockerfile" 'ENV PASEO_LISTEN=0.0.0.0:6767'
+reject_text "${IMAGE_DIR}/Dockerfile" "    nginx \\"
+reject_text "${IMAGE_DIR}/Dockerfile" 'COPY config/nginx/'
+reject_text "${IMAGE_DIR}/Dockerfile" '/tmp/codex-nginx'
 
-require_text "${IMAGE_DIR}/config/nginx/nginx.conf" 'listen 6767;'
-require_text "${IMAGE_DIR}/config/nginx/nginx.conf" 'proxy_pass http://127.0.0.1:6768;'
-require_text "${IMAGE_DIR}/config/nginx/nginx.conf" 'proxy_set_header Host paseo.internal;'
-require_text "${IMAGE_DIR}/config/nginx/nginx.conf" 'proxy_set_header Origin http://paseo.internal;'
-require_text "${IMAGE_DIR}/config/nginx/nginx.conf" 'proxy_hide_header X-Powered-By;'
-
-require_text "${IMAGE_DIR}/config/supervisord/conf.d/paseo.conf" '--listen 127.0.0.1:6768'
+require_text "${IMAGE_DIR}/config/supervisord/conf.d/paseo.conf" '--listen 0.0.0.0:6767'
 require_text "${IMAGE_DIR}/config/supervisord/conf.d/paseo.conf" '--no-relay'
 require_text "${IMAGE_DIR}/config/supervisord/conf.d/paseo.conf" '--web-ui'
 require_text "${IMAGE_DIR}/config/supervisord/conf.d/paseo.conf" '--hostnames paseo.internal'
@@ -121,11 +130,22 @@ require_text "${IMAGE_DIR}/scripts/entrypoint.sh" 'PASEO_PASSWORD="${PASEO_PASSW
 require_text "${IMAGE_DIR}/scripts/entrypoint.sh" 'PASEO_VOICE_MODE_ENABLED=false'
 require_text "${IMAGE_DIR}/scripts/entrypoint.sh" 'PASEO_DICTATION_ENABLED=false'
 require_text "${IMAGE_DIR}/scripts/entrypoint.sh" 'PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD=false'
-require_text "${IMAGE_DIR}/scripts/entrypoint.sh" 'fixed-Host Nginx listener on 6767'
+# This is an exact source-code contract, not an expression to expand here.
+# shellcheck disable=SC2016
+require_text "${IMAGE_DIR}/scripts/entrypoint.sh" 'PASEO_LISTEN="0.0.0.0:${PASEO_PORT}"'
 require_text "${IMAGE_DIR}/scripts/entrypoint.sh" 'paseo_password_is_websocket_token'
-require_text "${IMAGE_DIR}/scripts/healthcheck.sh" 'fake--route.localhost'
 require_text "${IMAGE_DIR}/scripts/healthcheck.sh" 'Paseo password is not browser WebSocket-token-safe'
-require_text "${IMAGE_DIR}/scripts/smoke-test.sh" 'Paseo proxy hides the upstream X-Powered-By header'
+reject_text "${IMAGE_DIR}/scripts/entrypoint.sh" '/tmp/codex-nginx'
+reject_text "${IMAGE_DIR}/scripts/entrypoint.sh" 'Nginx'
+reject_text "${IMAGE_DIR}/scripts/healthcheck.sh" 'fake--route.localhost'
+reject_text "${IMAGE_DIR}/scripts/healthcheck.sh" 'Nginx'
+reject_text "${IMAGE_DIR}/scripts/healthcheck.sh" '6768'
+reject_text "${IMAGE_DIR}/scripts/smoke-test.sh" 'paseo-nginx'
+reject_text "${IMAGE_DIR}/scripts/smoke-test.sh" 'Nginx'
+reject_text "${IMAGE_DIR}/scripts/smoke-test.sh" '6768'
+reject_text "${IMAGE_DIR}/scripts/doctor.sh" 'paseo-nginx'
+reject_text "${IMAGE_DIR}/scripts/doctor.sh" 'nginx'
+reject_text "${IMAGE_DIR}/scripts/doctor.sh" '6768'
 
 if grep -Eq '^CODEX_HOME=' "${IMAGE_DIR}/scripts/entrypoint.sh"; then
   fail "entrypoint must not repurpose the Codex CODEX_HOME setting"

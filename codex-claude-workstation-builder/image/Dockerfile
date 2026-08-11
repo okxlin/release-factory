@@ -79,7 +79,6 @@ RUN apt-get update \
     nethogs \
     net-tools \
     netcat-openbsd \
-    nginx \
     openjdk-21-jdk-headless \
     openssh-client \
     openssl \
@@ -317,10 +316,7 @@ RUN useradd -m -s /bin/bash -u 1001 dev \
         /home/dev/.paseo \
         /home/dev/go/bin \
         /home/dev/proxy \
-        /tmp/codex-nginx/client-body \
-        /tmp/codex-nginx/proxy \
     && chown -R dev:dev /workspace /run/codex /home/dev /opt/corepack \
-        /tmp/codex-nginx \
     && echo "root:${ROOT_PASSWORD}" | chpasswd \
     && echo "dev ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/dev \
     && chmod 0440 /etc/sudoers.d/dev
@@ -335,9 +331,6 @@ RUN for extension in ${CODE_SERVER_EXTENSIONS}; do \
 # ── Supervisord config ──
 COPY config/supervisord/supervisord.conf /etc/supervisor/supervisord.conf
 COPY config/supervisord/conf.d/ /etc/supervisor/conf.d/
-COPY config/nginx/nginx.conf /etc/nginx/nginx.conf
-RUN nginx -t -c /etc/nginx/nginx.conf \
-    && rm -f /run/codex/nginx.pid
 
 # ── Scripts ──
 COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -365,11 +358,9 @@ ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-${TARGETARCH}
 ENV NPM_CONFIG_CACHE=/home/dev/.cache/npm
 ENV NPM_CONFIG_PREFIX=/home/dev/.local
 ENV PASEO_HOME=/home/dev/.paseo
-ENV PASEO_LISTEN=127.0.0.1:6768
+ENV PASEO_LISTEN=0.0.0.0:6767
 ENV PASEO_HOSTNAMES=paseo.internal
 ENV PASEO_RELAY_ENABLED=false
-# Upstream retains localhost Service Proxy routing; the fixed-Host Nginx
-# listener, not this flag alone, contains that routing surface.
 ENV PASEO_SERVICE_PROXY_ENABLED=false
 ENV PASEO_TRUSTED_PROXIES=loopback
 ENV PASEO_WEB_UI_ENABLED=true

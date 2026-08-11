@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # healthcheck.sh — 容器健康检查 v2
-# 检查 code-server 与 Paseo 安全代理是否可用
+# 检查 code-server 与 Paseo daemon 是否可用
 
 set -euo pipefail
 
@@ -9,7 +9,7 @@ set -euo pipefail
 source /usr/local/lib/codex-workstation/paseo-password.sh
 
 CODE_SERVER_PORT="${CODE_SERVER_PORT:-8080}"
-PASEO_PROXY_PORT="${PASEO_PROXY_PORT:-6767}"
+PASEO_PORT="${PASEO_PORT:-6767}"
 
 http_code() {
     curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
@@ -22,16 +22,8 @@ if ! http_code "http://127.0.0.1:${CODE_SERVER_PORT}/" | grep -qE '^[234][0-9]{2
     exit 1
 fi
 
-if [ "$(http_code "http://127.0.0.1:${PASEO_PROXY_PORT}/api/health")" != "200" ]; then
-    echo "Paseo health endpoint not responding through port ${PASEO_PROXY_PORT}" >&2
-    exit 1
-fi
-
-# A forged localhost service Host must be rewritten by the inner Nginx proxy.
-# Without that rewrite Paseo classifies it before daemon authentication and
-# returns a Service Proxy response (404 or the registered service itself).
-if [ "$(http_code -H 'Host: fake--route.localhost' "http://127.0.0.1:${PASEO_PROXY_PORT}/api/status")" != "401" ]; then
-    echo "Paseo Host rewrite/authentication boundary is not enforced" >&2
+if [ "$(http_code -H 'Host: paseo.internal' "http://127.0.0.1:${PASEO_PORT}/api/health")" != "200" ]; then
+    echo "Paseo health endpoint not responding on port ${PASEO_PORT}" >&2
     exit 1
 fi
 
@@ -43,7 +35,7 @@ if ! paseo_password_is_websocket_token "${paseo_password}"; then
     echo "Paseo password is not browser WebSocket-token-safe; set a separate PASEO_PASSWORD" >&2
     exit 1
 fi
-if [ "$(http_code -H "Authorization: Bearer ${paseo_password}" "http://127.0.0.1:${PASEO_PROXY_PORT}/api/status")" != "200" ]; then
+if [ "$(http_code -H 'Host: paseo.internal' -H "Authorization: Bearer ${paseo_password}" "http://127.0.0.1:${PASEO_PORT}/api/status")" != "200" ]; then
     echo "Paseo authenticated status endpoint is not responding" >&2
     exit 1
 fi

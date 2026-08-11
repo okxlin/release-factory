@@ -14,12 +14,8 @@ codex-claude-workstation-builder/
 └── image/
     ├── .dockerignore
     ├── .env.example                # Build-time args reference
-    └── image/
-    ├── .dockerignore
-    ├── .env.example                # Build-time args reference
     ├── Dockerfile                  # Ubuntu 24.04 + mainstream AI/dev toolchain
     ├── config/
-    │   ├── nginx/                  # Fixed-Host security proxy for Paseo
     │   ├── codex/                  # config.toml + providers.toml examples
     │   ├── code-server/            # config.yaml example
     │   └── supervisord/            # supervisor + clash/sing-box/xray confs
@@ -111,9 +107,9 @@ Access code-server at `http://host:8080`.
 
 ## Paseo Mobile Access
 
-Paseo is exposed inside the container on port `6767`. Its daemon itself listens only on `127.0.0.1:6768`; an internal Nginx proxy fixes the upstream Host header, rate-limits API/WebSocket handshakes, and preserves the browser's public HTTPS origin. Relay, voice mode, dictation, and automatic local speech-model downloads are disabled.
+Paseo listens directly on container port `6767`; the image does not bundle a web proxy. Relay, voice mode, dictation, and automatic local speech-model downloads are disabled.
 
-Publish `6767` only on the host loopback address, then terminate public TLS in the host reverse proxy:
+Publish `6767` on the host loopback address by default, then terminate public TLS in the host OpenResty/Nginx instance. Because Paseo retains localhost Service Proxy routing, the public proxy should fix the upstream Host and Origin instead of forwarding arbitrary client values. The HTML injection keeps the browser WebSocket pointed at the public HTTPS domain:
 
 ```nginx
 map $http_upgrade $connection_upgrade {
@@ -128,12 +124,19 @@ server {
     location / {
         proxy_pass http://127.0.0.1:6767;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host paseo.internal;
+        proxy_set_header X-Forwarded-Host paseo.internal;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Origin http://paseo.internal;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Accept-Encoding "";
+        proxy_hide_header X-Powered-By;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
+
+        sub_filter_once on;
+        sub_filter '</head>' '<script>window.__PASEO_INITIAL_DAEMON_CONNECTION__={listen:window.location.host,useTls:window.location.protocol==="https:",label:"Codex Workstation"};</script></head>';
     }
 }
 ```
@@ -142,7 +145,7 @@ Open `https://paseo.example.com` on the phone and enter `PASEO_PASSWORD`. [Paseo
 
 For an existing deployment that does not yet define `PASEO_PASSWORD`, the entrypoint falls back to the existing code-server `PASSWORD` without rewriting it. If that legacy password is not WebSocket-token-safe, code-server remains available but the Paseo health check reports unhealthy and mobile sessions cannot connect until a separate compatible `PASEO_PASSWORD` is set.
 
-Do not expose container port `6768`, do not publish `6767` on `0.0.0.0`, and do not bypass the internal Nginx proxy. Paseo password authentication has no MFA, RBAC, or per-device token isolation, so HTTPS and a strong unique password remain mandatory. If the 1Panel/OpenResty reverse proxy shares `1panel-network`, it may instead target the actual workstation container name shown by 1Panel on port `6767`; do not assume a fixed container DNS name.
+Paseo password authentication has no MFA, RBAC, or per-device token isolation, so HTTPS and a strong unique password remain mandatory. Binding the host port to `0.0.0.0` is supported for operators who explicitly need it, but it exposes a path that bypasses the fixed-Host/TLS reverse proxy; keep the default `127.0.0.1` on public servers. If the 1Panel/OpenResty reverse proxy shares `1panel-network`, it may instead target the actual workstation container name shown by 1Panel on port `6767`; do not assume a fixed container DNS name.
 
 The `/home/dev` volume is intended for user state and user-installed tools. Runtime defaults keep these paths persistent:
 
@@ -183,7 +186,7 @@ Default release policy:
 - Manual builds use the provided tag, or `YYYYMMDD` when the tag is left empty.
 - `sha-*` tags are intentionally not published by default to avoid long-lived tag sprawl.
 - The workflow builds a local `linux/amd64` test image first, runs `healthcheck.sh`, `doctor.sh`, and `smoke-test.sh`, then builds and pushes the requested platforms after tests pass.
-- Before building, it validates the pinned Paseo dependency graph, reviewed lifecycle-script allowlist, fixed-Host proxy, disabled relay/voice defaults, and exact upstream source notice.
+- Before building, it validates the pinned Paseo dependency graph, reviewed lifecycle-script allowlist, direct 6767 listener, disabled relay/voice defaults, and exact upstream source notice.
 - The CI test container intentionally does not mount `/var/run/docker.sock`, and GHCR login happens only after tests pass.
 - Manual workflow inputs are validated before they are written to GitHub Actions outputs.
 - BuildKit cache uses GitHub Actions cache with `mode=min` to reduce cache storage pressure.
@@ -205,7 +208,7 @@ For GHCR storage, tags themselves are small; the real cost is retained image ver
 - **Supported platforms** in `configs/architectures.sh` match the PR scope
 - **Dockerfile** installs no experimental or unreleased packages
 - **entrypoint.sh** does not auto-login, does not print secrets
-- **healthcheck.sh** covers code-server (8080), Paseo via Nginx (6767), authenticated API access, and the Service Proxy Host-rewrite boundary
+- **healthcheck.sh** covers code-server (8080), the direct Paseo listener (6767), and authenticated API access
 - **.env.example** documents all build-time environment variables
 - **Paseo lockfile** still resolves only registry HTTPS artifacts with integrity fields and only the reviewed `node-pty` and `@parcel/watcher` lifecycle-script markers
 
@@ -215,7 +218,7 @@ For GHCR storage, tags themselves are small; the real cost is retained image ver
 - **Separate web entry points** — code-server uses `PASSWORD`; Paseo uses `PASEO_PASSWORD` with an unset/empty compatibility fallback to `PASSWORD`
 - **Browser-token password contract** — runtime health checks flag passwords that cannot be represented in `Sec-WebSocket-Protocol`; use a CSPRNG-generated hexadecimal value rather than an arbitrary password-manager symbol set
 - **No third-party Paseo relay** — the daemon runs with `--no-relay`; phones connect directly through the operator's HTTPS reverse proxy
-- **Paseo Service Proxy containment** — `PASEO_SERVICE_PROXY_ENABLED=false` does not remove Paseo's built-in localhost routing classification; clients reach fixed-Host Nginx on 6767 while the daemon stays private on loopback 6768
+- **Paseo Service Proxy containment** — `PASEO_SERVICE_PROXY_ENABLED=false` does not remove Paseo's built-in localhost routing classification; the host reverse proxy fixes Host/Origin, while loopback host-port binding prevents public clients from bypassing that edge by default
 - **Chat Completions-only APIs** — not supported; provider must implement OpenAI Responses API
 - **Multi-arch** — `linux/amd64` and `linux/arm64` are supported; CI smoke tests `linux/amd64` before publishing the multi-platform image
 

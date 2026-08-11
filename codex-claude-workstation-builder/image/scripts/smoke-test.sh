@@ -29,7 +29,7 @@ echo "[smoke] $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 echo ""
 echo "[smoke] === Required Commands ==="
-REQUIRED_CMDS=(node npm pnpm yarn corepack code-server codex claude omx paseo nginx git curl jq rg fd python3 pytest uv uvx pipx ruff black mypy pre-commit yamllint direnv make gcc g++ docker go rustc bun deno cargo java mvn yq actionlint gh supervisorctl bwrap unshare mihomo clash-meta sing-box xray dig nc lsof file)
+REQUIRED_CMDS=(node npm pnpm yarn corepack code-server codex claude omx paseo git curl jq rg fd python3 pytest uv uvx pipx ruff black mypy pre-commit yamllint direnv make gcc g++ docker go rustc bun deno cargo java mvn yq actionlint gh supervisorctl bwrap unshare mihomo clash-meta sing-box xray dig nc lsof file)
 for cmd in "${REQUIRED_CMDS[@]}"; do
     if command -v "$cmd" >/dev/null 2>&1; then
         pass "$cmd available"
@@ -64,7 +64,6 @@ if [ "$(paseo --version 2>/dev/null || true)" = "${PASEO_VERSION:-0.3.1}" ]; the
 else
     fail "paseo version mismatch"
 fi
-version_check "nginx config" nginx -t -c /etc/nginx/nginx.conf
 version_check "go" go version
 if [ "$(go env GOPATH 2>/dev/null || true)" = "/home/dev/go" ]; then
     pass "go GOPATH persistent"
@@ -91,8 +90,7 @@ version_check "xray" xray version
 echo ""
 echo "[smoke] === Core Services (HTTP probes) ==="
 CODE_SERVER_PORT="${CODE_SERVER_PORT:-8080}"
-PASEO_PROXY_PORT="${PASEO_PROXY_PORT:-6767}"
-PASEO_DAEMON_PORT="${PASEO_DAEMON_PORT:-6768}"
+PASEO_PORT="${PASEO_PORT:-6767}"
 
 if curl -s -o /dev/null -w "%{http_code}" "http://localhost:${CODE_SERVER_PORT}/" | grep -qE '^[234][0-9]{2}$'; then
     pass "code-server responding on port ${CODE_SERVER_PORT}"
@@ -100,16 +98,10 @@ else
     fail "code-server not responding on port ${CODE_SERVER_PORT}"
 fi
 
-if [ "$(http_code "http://127.0.0.1:${PASEO_PROXY_PORT}/api/health")" = "200" ]; then
-    pass "Paseo health responding through Nginx on port ${PASEO_PROXY_PORT}"
+if [ "$(http_code -H 'Host: paseo.internal' "http://127.0.0.1:${PASEO_PORT}/api/health")" = "200" ]; then
+    pass "Paseo health responding on port ${PASEO_PORT}"
 else
-    fail "Paseo health not responding through Nginx on port ${PASEO_PROXY_PORT}"
-fi
-
-if [ "$(http_code -H 'Host: fake--route.localhost' "http://127.0.0.1:${PASEO_PROXY_PORT}/api/status")" = "401" ]; then
-    pass "Paseo Service Proxy Host is rewritten before authentication"
-else
-    fail "Paseo Service Proxy Host rewrite is not enforced"
+    fail "Paseo health not responding on port ${PASEO_PORT}"
 fi
 
 paseo_password="${PASEO_PASSWORD:-${PASSWORD:-change-me}}"
@@ -122,63 +114,39 @@ else
     fail "Paseo password is not browser WebSocket-token-safe"
     paseo_password="invalid-password-placeholder"
 fi
-if [ "$(http_code -H "Authorization: Bearer ${paseo_password}" "http://127.0.0.1:${PASEO_PROXY_PORT}/api/status")" = "200" ]; then
+if [ "$(http_code -H 'Host: paseo.internal' -H "Authorization: Bearer ${paseo_password}" "http://127.0.0.1:${PASEO_PORT}/api/status")" = "200" ]; then
     pass "Paseo authenticated status responding"
 else
     fail "Paseo authenticated status failed"
 fi
 
-paseo_headers="$(curl --silent --show-error --dump-header - --output /dev/null \
-    --connect-timeout 2 --max-time 5 \
-    -H "Authorization: Bearer ${paseo_password}" \
-    "http://127.0.0.1:${PASEO_PROXY_PORT}/api/status" 2>/dev/null || true)"
-if grep -qE '^HTTP/[0-9.]+ 200' <<< "${paseo_headers}" \
-    && ! grep -qi '^X-Powered-By:' <<< "${paseo_headers}"; then
-    pass "Paseo proxy hides the upstream X-Powered-By header"
-else
-    fail "Paseo proxy leaked X-Powered-By or failed the header probe"
-fi
-
 websocket_code="$(curl --http1.1 --silent --show-error --output /dev/null --write-out '%{http_code}' \
     --connect-timeout 2 --max-time 1 \
-    -H 'Host: mobile.example.test' \
-    -H 'Origin: https://mobile.example.test' \
+    -H 'Host: paseo.internal' \
+    -H 'Origin: http://paseo.internal' \
     -H 'Connection: Upgrade' \
     -H 'Upgrade: websocket' \
     -H 'Sec-WebSocket-Version: 13' \
     -H 'Sec-WebSocket-Key: SGVsbG9QYXNlbzEyMzQ1Ng==' \
     -H "Sec-WebSocket-Protocol: paseo.bearer.${paseo_password}" \
-    "http://127.0.0.1:${PASEO_PROXY_PORT}/ws" 2>/dev/null || true)"
+    "http://127.0.0.1:${PASEO_PORT}/ws" 2>/dev/null || true)"
 if [ "${websocket_code}" = "101" ]; then
-    pass "Paseo authenticated WebSocket accepts the public browser origin"
+    pass "Paseo authenticated WebSocket accepts the configured origin"
 else
-    fail "Paseo authenticated WebSocket failed through the public-origin proxy path"
+    fail "Paseo authenticated WebSocket failed"
 fi
 
-paseo_html="$(curl --silent --show-error --max-time 5 \
-    -H 'Host: mobile.example.test' \
-    -H 'X-Forwarded-Proto: https' \
-    "http://127.0.0.1:${PASEO_PROXY_PORT}/" 2>/dev/null || true)"
-if grep -Fq 'listen:window.location.host' <<< "${paseo_html}" \
-    && grep -Fq 'window.location.protocol==="https:"' <<< "${paseo_html}"; then
-    pass "Paseo web UI uses the public browser origin after fixed-Host proxying"
+if ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq "^(0\\.0\\.0\\.0|\\*):${PASEO_PORT}$"; then
+    pass "Paseo daemon listening on container port ${PASEO_PORT}"
 else
-    fail "Paseo web UI public-origin connection hint missing"
+    fail "Paseo daemon is not listening on container port ${PASEO_PORT}"
 fi
 
-if ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Fxq "127.0.0.1:${PASEO_DAEMON_PORT}"; then
-    pass "Paseo daemon bound to loopback ${PASEO_DAEMON_PORT}"
+if supervisorctl status paseo 2>/dev/null | grep -q 'RUNNING'; then
+    pass "supervisor service paseo running"
 else
-    fail "Paseo daemon is not bound only to loopback ${PASEO_DAEMON_PORT}"
+    fail "supervisor service paseo not running"
 fi
-
-for service in paseo paseo-nginx; do
-    if supervisorctl status "${service}" 2>/dev/null | grep -q 'RUNNING'; then
-        pass "supervisor service ${service} running"
-    else
-        fail "supervisor service ${service} not running"
-    fi
-done
 
 echo ""
 echo "[smoke] === Code-server Extensions ==="

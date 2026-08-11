@@ -107,7 +107,7 @@ jobs:
             --latest-tag "latest" \
             --github-output "$GITHUB_OUTPUT"
 
-      - name: Validate Paseo supply-chain and proxy contract
+      - name: Validate Paseo supply-chain and runtime contract
         run: |
           set -euo pipefail
           bash codex-claude-workstation-builder/scripts/test-paseo-contract.sh

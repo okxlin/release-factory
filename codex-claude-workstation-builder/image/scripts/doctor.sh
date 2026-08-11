@@ -165,14 +165,6 @@ else
     status=1
 fi
 
-check "nginx"
-if command -v nginx >/dev/null 2>&1 && nginx -t -c /etc/nginx/nginx.conf; then
-    check "nginx Paseo proxy config: valid"
-else
-    warn "nginx Paseo proxy config is invalid"
-    status=1
-fi
-
 check "supervisord"
 if command -v supervisord >/dev/null 2>&1; then
     check "supervisord: available"
@@ -222,7 +214,7 @@ fi
 
 check ""
 check "=== Development Toolchain ==="
-for cmd in git curl jq rg fd make gcc g++ docker go rustc bun deno cargo java mvn yq actionlint gh supervisorctl bwrap unshare corepack uv uvx pipx pytest ruff black mypy pre-commit yamllint direnv dig nc lsof file paseo nginx; do
+for cmd in git curl jq rg fd make gcc g++ docker go rustc bun deno cargo java mvn yq actionlint gh supervisorctl bwrap unshare corepack uv uvx pipx pytest ruff black mypy pre-commit yamllint direnv dig nc lsof file paseo; do
     if command -v "$cmd" >/dev/null 2>&1; then
         check "$cmd: available"
     else
@@ -312,7 +304,6 @@ for dir in \
     /home/dev/.paseo \
     /home/dev/go/bin \
     /home/dev/proxy \
-    /tmp/codex-nginx \
     /run/codex; do
     if [ -d "$dir" ]; then
         if [ -w "$dir" ]; then
@@ -332,7 +323,6 @@ check "=== Config Files ==="
 CONFIG_FILES=(
     "/home/dev/.config/code-server/config.yaml"
     "/home/dev/.codex/config.toml"
-    "/etc/nginx/nginx.conf"
     "/etc/supervisor/supervisord.conf"
     "/usr/share/doc/paseo/LICENSE"
     "/usr/share/doc/paseo/UPSTREAM.md"
@@ -355,39 +345,30 @@ else
 fi
 
 if is_listening_port 6767; then
-    check "port 6767: Paseo Nginx proxy listening"
+    check "port 6767: Paseo daemon listening"
 else
-    warn "port 6767: Paseo Nginx proxy not listening"
+    warn "port 6767: Paseo daemon not listening"
     status=1
 fi
 
-if ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Fxq "127.0.0.1:6768"; then
-    check "port 6768: Paseo daemon bound to loopback only"
+if ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq '^(0\.0\.0\.0|\*):6767$'; then
+    check "Paseo daemon container listener: 0.0.0.0:6767"
 else
-    warn "port 6768: Paseo daemon loopback listener missing"
+    warn "Paseo daemon is not bound to container port 6767"
     status=1
 fi
 
-for service in paseo paseo-nginx; do
-    if supervisorctl status "${service}" 2>/dev/null | grep -q 'RUNNING'; then
-        check "supervisor ${service}: RUNNING"
-    else
-        warn "supervisor ${service}: not RUNNING"
-        status=1
-    fi
-done
-
-if [ "$(http_code "http://127.0.0.1:6767/api/health")" = "200" ]; then
-    check "Paseo health through Nginx: OK"
+if supervisorctl status paseo 2>/dev/null | grep -q 'RUNNING'; then
+    check "supervisor paseo: RUNNING"
 else
-    warn "Paseo health through Nginx failed"
+    warn "supervisor paseo: not RUNNING"
     status=1
 fi
 
-if [ "$(http_code -H 'Host: fake--route.localhost' http://127.0.0.1:6767/api/status)" = "401" ]; then
-    check "Paseo fixed-Host authentication boundary: enforced"
+if [ "$(http_code -H 'Host: paseo.internal' http://127.0.0.1:6767/api/health)" = "200" ]; then
+    check "Paseo health: OK"
 else
-    warn "Paseo fixed-Host authentication boundary failed"
+    warn "Paseo health failed"
     status=1
 fi
 
@@ -407,7 +388,7 @@ else
     status=1
     paseo_password="invalid-password-placeholder"
 fi
-if [ "$(http_code -H "Authorization: Bearer ${paseo_password}" http://127.0.0.1:6767/api/status)" = "200" ]; then
+if [ "$(http_code -H 'Host: paseo.internal' -H "Authorization: Bearer ${paseo_password}" http://127.0.0.1:6767/api/status)" = "200" ]; then
     check "Paseo authenticated status: OK"
 else
     warn "Paseo authenticated status failed"

@@ -11,8 +11,7 @@ CODEX_USER="dev"
 CODEX_GROUP="dev"
 WORKSPACE="${CONTAINER_WORKSPACE:-/workspace}"
 CODE_SERVER_PORT=8080
-PASEO_PROXY_PORT=6767
-PASEO_DAEMON_PORT=6768
+PASEO_PORT=6767
 
 ensure_owned_dir() {
     local dir="$1"
@@ -114,9 +113,6 @@ ensure_owned_dir "${WORKSTATION_HOME}/go"
 ensure_owned_dir "${WORKSTATION_HOME}/go/bin"
 ensure_owned_dir /run/codex
 ensure_owned_dir "${WORKSTATION_HOME}/proxy"
-ensure_owned_dir /tmp/codex-nginx
-ensure_owned_dir /tmp/codex-nginx/client-body
-ensure_owned_dir /tmp/codex-nginx/proxy
 
 seed_code_server_extensions
 configure_docker_socket_access
@@ -151,13 +147,10 @@ if [[ -z "${PASEO_PASSWORD//[[:space:]]/}" ]]; then
 fi
 export PASEO_PASSWORD
 export PASEO_HOME="${WORKSTATION_HOME}/.paseo"
-export PASEO_LISTEN="127.0.0.1:${PASEO_DAEMON_PORT}"
+export PASEO_LISTEN="0.0.0.0:${PASEO_PORT}"
 export PASEO_HOSTNAMES=paseo.internal
 export PASEO_TRUSTED_PROXIES=loopback
 export PASEO_RELAY_ENABLED=false
-# This disables Paseo's optional standalone proxy layer, but upstream keeps
-# localhost Service Proxy routing. The fixed-Host Nginx listener on 6767 is
-# the actual containment boundary and the daemon port must remain private.
 export PASEO_SERVICE_PROXY_ENABLED=false
 export PASEO_WEB_UI_ENABLED=true
 export PASEO_VOICE_MODE_ENABLED=false
@@ -202,7 +195,7 @@ echo " codex-claude-workstation is ready."
 echo ""
 echo " Access code-server: http://<host>:${CODE_SERVER_PORT}"
 echo " Password: configured from PASSWORD environment variable"
-echo " Access Paseo:      http://<host>:${PASEO_PROXY_PORT} (place behind HTTPS)"
+echo " Access Paseo:      http://<host>:${PASEO_PORT} (publish on loopback and place behind HTTPS)"
 echo " Paseo password:    configured from PASEO_PASSWORD (falls back to PASSWORD)"
 echo ""
 echo " In the code-server terminal, run 'codex login' to authenticate."
