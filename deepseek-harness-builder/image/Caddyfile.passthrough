@@ -1,0 +1,25 @@
+{
+	admin off
+	auto_https off
+	grace_period 10s
+}
+
+:{$PORT} {
+	header {
+		-Server
+		Content-Security-Policy "base-uri 'self'; frame-ancestors 'none'; object-src 'none'"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+		Permissions-Policy "camera=(), geolocation=(), microphone=()"
+	}
+
+	@forwarded_https header X-Forwarded-Proto https
+	header @forwarded_https Strict-Transport-Security "max-age=31536000"
+
+	route /healthz {
+		respond "ok" 200
+	}
+
+	reverse_proxy 127.0.0.1:{$DSH_INTERNAL_PORT}
+}

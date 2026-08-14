@@ -1,0 +1,140 @@
+diff --git a/pkg/identity/public_key.go b/pkg/identity/public_key.go
+index 7236ec9..cbc9f4d 100644
+--- a/pkg/identity/public_key.go
++++ b/pkg/identity/public_key.go
+@@ -22 +21,0 @@ import (
+-	"encoding/hex"
+@@ -25 +23,0 @@ import (
+-	"strconv"
+@@ -33 +30,0 @@ import (
+-	"golang.org/x/crypto/openpgp"
+@@ -39 +35,0 @@ var supportedPublicKeyTypes = map[string]bool{
+-	"gpg": true,
+@@ -134,2 +129,0 @@ func (p *PublicKey) parse() error {
+-	case strings.Contains(p.Payload, "BEGIN PGP PUBLIC KEY BLOCK"):
+-		return p.parsePublicKeyPGP()
+@@ -203,61 +196,0 @@ func (p *PublicKey) parsePublicKeyOpenSSH() error {
+-func (p *PublicKey) parsePublicKeyPGP() error {
+-	var user, algo, comment string
+-	p.Payload = strings.TrimSpace(p.Payload)
+-	for _, w := range []string{"BEGIN", "END"} {
+-		s := fmt.Sprintf("-----%s PGP PUBLIC KEY BLOCK-----", w)
+-		if (w == "BEGIN" && !strings.HasPrefix(p.Payload, s)) || (w == "END" && !strings.HasSuffix(p.Payload, s)) {
+-			return errors.ErrPublicKeyParse.WithArgs(fmt.Errorf("%s PGP PUBLIC KEY BLOCK not found", w))
+-		}
+-	}
+-	kr, err := openpgp.ReadArmoredKeyRing(bytes.NewBufferString(p.Payload))
+-	if err != nil {
+-		return errors.ErrPublicKeyParse.WithArgs(err)
+-	}
+-	if len(kr) != 1 {
+-		return errors.ErrPublicKeyParse.WithArgs(fmt.Errorf("PGP keyring contains %d entries", len(kr)))
+-	}
+-	if kr[0].PrimaryKey == nil {
+-		return errors.ErrPublicKeyParse.WithArgs(fmt.Errorf("PGP keyring entry has no public key"))
+-	}
+-	if len(kr[0].Identities) == 0 {
+-		return errors.ErrPublicKeyParse.WithArgs(fmt.Errorf("PGP keyring entry has no identities"))
+-	}
+-	pk := kr[0].PrimaryKey
+-	p.ID = strconv.FormatUint(pk.KeyId, 16)
+-	p.Fingerprint = hex.EncodeToString(pk.Fingerprint[:])
+-	switch pk.PubKeyAlgo {
+-	case 1, 2, 3:
+-		algo = "RSA"
+-		p.Type = "rsa"
+-	case 17:
+-		algo = "DSA"
+-		p.Type = "dsa"
+-	case 18:
+-		algo = "ECDH"
+-		p.Type = "ecdh"
+-	case 19:
+-		algo = "ECDSA"
+-		p.Type = "ecdsa"
+-	default:
+-		return errors.ErrPublicKeyParse.WithArgs(fmt.Errorf("PGP keyring entry has unsupported public key algo %v", pk.PubKeyAlgo))
+-	}
+-	for _, u := range kr[0].Identities {
+-		user = u.Name
+-		break
+-	}
+-	comment = fmt.Sprintf("%s, algo %s, created %s", user, algo, pk.CreationTime.UTC())
+-
+-	if p.Comment == "" {
+-		p.Comment = comment
+-	}
+-
+-	if p.Description == "" && p.Comment != comment {
+-		p.Description = comment
+-	}
+-
+-	if !strings.Contains(p.Description, comment) && !strings.Contains(p.Comment, comment) {
+-		p.Description = p.Description + " " + comment
+-	}
+-	return nil
+-}
+-
+diff --git a/pkg/identity/public_key_test.go b/pkg/identity/public_key_test.go
+index 10af3bf..a55e806 100644
+--- a/pkg/identity/public_key_test.go
++++ b/pkg/identity/public_key_test.go
+@@ -18,2 +17,0 @@ import (
+-	"bufio"
+-	"bytes"
+@@ -25 +22,0 @@ import (
+-	"os"
+@@ -35,18 +31,0 @@ import (
+-func readPEMFile(fp string) string {
+-	var buffer bytes.Buffer
+-	fileHandle, err := os.Open(fp)
+-	if err != nil {
+-		panic(err)
+-	}
+-	defer fileHandle.Close()
+-	scanner := bufio.NewScanner(fileHandle)
+-	for scanner.Scan() {
+-		line := scanner.Text()
+-		buffer.WriteString(strings.TrimSpace(line) + "\n")
+-	}
+-	if err := scanner.Err(); err != nil {
+-		panic(err)
+-	}
+-	return buffer.String()
+-}
+-
+@@ -168 +147 @@ func TestNewPublicKey(t *testing.T) {
+-			err:       errors.ErrPublicKeyUsagePayloadMismatch.WithArgs("gpg"),
++			err:       errors.ErrPublicKeyInvalidUsage.WithArgs("gpg"),
+@@ -192,27 +170,0 @@ func TestNewPublicKey(t *testing.T) {
+-		{
+-			name: "test gpg public key without end block",
+-			req: &requests.Request{
+-				Key: requests.Key{
+-					Usage:   "gpg",
+-					Comment: "jsmith@outlook.com",
+-					Payload: "-----BEGIN PGP PUBLIC KEY BLOCK-----",
+-				},
+-			},
+-			shouldErr: true,
+-			err:       errors.ErrPublicKeyParse.WithArgs("END PGP PUBLIC KEY BLOCK not found"),
+-		},
+-		{
+-			name: "test gpg public key",
+-			req: &requests.Request{
+-				Key: requests.Key{
+-					Usage:   "gpg",
+-					Payload: readPEMFile("../../testdata/gpg/linux_gpg_pub.pem"),
+-				},
+-			},
+-			want: map[string]interface{}{
+-				"usage":   "gpg",
+-				"type":    "dsa",
+-				"comment": "Google, Inc. Linux Package Signing Key <linux-packages-keymaster@google.com>, algo DSA, created 2007-03-08 20:17:10 +0000 UTC",
+-				"id":      "a040830f7fac5991",
+-			},
+-		},
+@@ -245,3 +196,0 @@ func TestNewPublicKey(t *testing.T) {
+-			if key.Usage == "gpg" {
+-				got["id"] = key.ID
+-			}

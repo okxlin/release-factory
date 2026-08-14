@@ -1,0 +1,271 @@
+name: Build DeepSeek Harness Workstation Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Published image tag; leave empty to use UTC date tag YYYYMMDD"
+        required: false
+        default: ""
+      platforms:
+        description: "Comma-separated target platforms"
+        required: true
+        default: "linux/amd64,linux/arm64"
+      push_latest:
+        description: "Also publish latest tag"
+        required: true
+        default: true
+        type: boolean
+  schedule:
+    - cron: "13 4 * * 0"
+
+concurrency:
+  group: build-deepseek-harness-workstation-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  AUDIT_IMAGE: deepseek-harness-workstation:ci-dependency-audit
+  GOVULNCHECK_VERSION: "1.6.0"
+  IMAGE_REPO: deepseek-harness-workstation
+  TEST_IMAGE_AMD64: deepseek-harness-workstation:ci-amd64
+  TEST_IMAGE_ARM64: deepseek-harness-workstation:ci-arm64
+  TRIVY_DOCKER_IMAGE: aquasec/trivy:0.72.0
+
+jobs:
+  build-test-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Normalize repository owner
+        id: owner
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          lower_owner="$(printf '%s' "${REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          if [[ ! "${lower_owner}" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+            echo "ERROR: Invalid repository owner: ${REPOSITORY_OWNER}" >&2
+            exit 1
+          fi
+          echo "lower_owner=${lower_owner}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Resolve release policy
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
+          INPUT_PUSH_LATEST: ${{ inputs.push_latest }}
+        run: |
+          set -euo pipefail
+          date_tag="$(date -u +%Y%m%d)"
+
+          if [[ "${EVENT_NAME}" == "schedule" ]]; then
+            image_tag="${date_tag}"
+            push_latest="true"
+          else
+            image_tag="${INPUT_IMAGE_TAG:-${date_tag}}"
+            push_latest="${INPUT_PUSH_LATEST:-true}"
+          fi
+
+          {
+            echo "date_tag=${date_tag}"
+            echo "image_tag=${image_tag}"
+            echo "push_latest=${push_latest}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Resolve build parameters
+        id: params
+        env:
+          INPUT_PLATFORMS: ${{ inputs.platforms || 'linux/amd64,linux/arm64' }}
+          RELEASE_IMAGE_TAG: ${{ steps.release.outputs.image_tag }}
+          RELEASE_PUSH_LATEST: ${{ steps.release.outputs.push_latest }}
+        run: |
+          chmod +x deepseek-harness-builder/scripts/*.sh
+          deepseek-harness-builder/scripts/resolve-build-params.sh \
+            --image-repo "${IMAGE_REPO}" \
+            --platforms "${INPUT_PLATFORMS}" \
+            --image-tag "${RELEASE_IMAGE_TAG}" \
+            --push-latest "${RELEASE_PUSH_LATEST}" \
+            --latest-tag latest \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Validate workstation Compose socket switch
+        run: deepseek-harness-builder/scripts/check-workstation-compose.sh
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.6"
+          cache: false
+
+      - name: Install pinned govulncheck
+        run: |
+          set -euo pipefail
+          go install "golang.org/x/vuln/cmd/govulncheck@v${GOVULNCHECK_VERSION}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          "$(go env GOPATH)/bin/govulncheck" -version
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}
+          tags: ${{ steps.params.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=DeepSeek Harness Workstation
+            org.opencontainers.image.description=Authenticated DeepSeek Harness workstation with Node.js, Python, Go, Rust, compilers, Docker client tools, and development CLI.
+            org.opencontainers.image.vendor=${{ github.repository_owner }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: Build dependency-audit stage
+        uses: docker/build-push-action@v7
+        with:
+          context: ./deepseek-harness-builder/image
+          file: ./deepseek-harness-builder/image/Dockerfile
+          target: dsh-deps
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.AUDIT_IMAGE }}
+          cache-from: type=gha,scope=deepseek-harness-workstation
+          cache-to: type=gha,mode=min,scope=deepseek-harness-workstation
+
+      - name: Audit pinned pnpm production dependencies
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint pnpm "${AUDIT_IMAGE}" \
+            audit --prod --audit-level high
+
+      - name: Build amd64 workstation test image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./deepseek-harness-builder/image
+          file: ./deepseek-harness-builder/image/Dockerfile
+          target: workstation
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.TEST_IMAGE_AMD64 }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=deepseek-harness-workstation
+          cache-to: type=gha,mode=min,scope=deepseek-harness-workstation
+
+      - name: Run amd64 authentication and proxy smoke
+        run: |
+          set -euo pipefail
+          deepseek-harness-builder/scripts/smoke-test.sh \
+            --image "${TEST_IMAGE_AMD64}" \
+            --profile full \
+            --variant workstation \
+            --public-url https://dsh.example.test
+
+      - name: Run amd64 workstation toolchain smoke
+        run: |
+          set -euo pipefail
+          deepseek-harness-builder/scripts/workstation-smoke-test.sh \
+            --image "${TEST_IMAGE_AMD64}"
+
+      - name: Run Caddy vulnerability gate
+        run: |
+          set -euo pipefail
+          deepseek-harness-builder/scripts/check-caddy-vulnerabilities.sh \
+            --image "${TEST_IMAGE_AMD64}"
+
+      - name: Scan amd64 workstation image
+        run: |
+          set -euo pipefail
+          scripts/trivy-image-gate.sh \
+            --image "${TEST_IMAGE_AMD64}" \
+            --output "${RUNNER_TEMP}/deepseek-harness-workstation-amd64.trivy.json" \
+            --max-fixable-critical 0 \
+            --max-fixable-high 0
+
+      - name: Build arm64 workstation test image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./deepseek-harness-builder/image
+          file: ./deepseek-harness-builder/image/Dockerfile
+          target: workstation
+          platforms: linux/arm64
+          load: true
+          tags: ${{ env.TEST_IMAGE_ARM64 }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=deepseek-harness-workstation
+          cache-to: type=gha,mode=min,scope=deepseek-harness-workstation
+
+      - name: Run arm64 authentication smoke under QEMU
+        run: |
+          set -euo pipefail
+          deepseek-harness-builder/scripts/smoke-test.sh \
+            --image "${TEST_IMAGE_ARM64}" \
+            --profile minimal \
+            --variant workstation \
+            --public-url https://dsh.example.test
+
+      - name: Run arm64 workstation toolchain smoke under QEMU
+        run: |
+          set -euo pipefail
+          deepseek-harness-builder/scripts/workstation-smoke-test.sh \
+            --image "${TEST_IMAGE_ARM64}"
+
+      - name: Scan arm64 workstation image
+        run: |
+          set -euo pipefail
+          scripts/trivy-image-gate.sh \
+            --image "${TEST_IMAGE_ARM64}" \
+            --output "${RUNNER_TEMP}/deepseek-harness-workstation-arm64.trivy.json" \
+            --max-fixable-critical 0 \
+            --max-fixable-high 0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-platform workstation image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./deepseek-harness-builder/image
+          file: ./deepseek-harness-builder/image/Dockerfile
+          target: workstation
+          platforms: ${{ steps.params.outputs.platforms }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=deepseek-harness-workstation
+          cache-to: type=gha,mode=min,scope=deepseek-harness-workstation
+
+      - name: Emit build summary
+        env:
+          IMAGE_NAME: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}
+          IMAGE_TAG: ${{ steps.params.outputs.image_tag }}
+          META_TAGS: ${{ steps.meta.outputs.tags }}
+          PARAM_PLATFORMS: ${{ steps.params.outputs.platforms }}
+        run: |
+          {
+            echo "## DeepSeek Harness Workstation image build"
+            echo ""
+            echo "- Image: ${IMAGE_NAME}"
+            echo "- Published image tag: ${IMAGE_TAG}"
+            echo "- Tags:"
+            while IFS= read -r tag; do
+              [[ -n "${tag}" ]] && echo "  - ${tag}"
+            done <<< "${META_TAGS}"
+            echo "- Platforms: ${PARAM_PLATFORMS}"
+            echo "- amd64: full authentication, WebSocket, isolation, resource, and compiler smoke"
+            echo "- arm64: QEMU authentication, native-module, and compiler smoke"
+            echo "- Security: pnpm audit, Caddy dependency-graph/govulncheck gate, and zero-fixable HIGH/CRITICAL Trivy gates"
+          } >> "$GITHUB_STEP_SUMMARY"

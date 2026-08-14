@@ -1,0 +1,84 @@
+{
+	admin off
+	auto_https off
+	grace_period 10s
+
+	security {
+		local identity store dsh_local {
+			realm local
+			path {$AUTH_DB_PATH}
+			user {$AUTH_USERNAME} {
+				name "DeepSeek Harness User"
+				email dsh-user@local.invalid
+				password "{$AUTH_PASSWORD_HASH}" overwrite
+				roles authp/user
+			}
+		}
+
+		authentication portal dsh_portal {
+			crypto default token lifetime {$AUTH_TOKEN_LIFETIME}
+			crypto key sign-verify "{$AUTH_JWT_SECRET}"
+			enable identity store dsh_local
+			cookie path /
+			cookie lifetime {$AUTH_TOKEN_LIFETIME}
+			cookie samesite strict
+			cookie insecure {$AUTH_COOKIE_INSECURE}
+			set cookie name prefix DSH
+			trust login redirect uri domain exact {$AUTH_PUBLIC_AUTHORITY} path prefix /
+			trust logout redirect uri domain exact {$AUTH_PUBLIC_AUTHORITY} path prefix /
+			ui {
+				meta title "DeepSeek Harness Login"
+				meta author "DeepSeek Harness"
+				meta description "Sign in to DeepSeek Harness"
+				links {
+					"DeepSeek Harness" "{$PUBLIC_URL}" icon "las la-terminal"
+				}
+			}
+		}
+
+		authorization policy dsh_policy {
+			set auth url /auth/
+			crypto key verify "{$AUTH_JWT_SECRET}"
+			allow roles authp/user
+		}
+	}
+}
+
+:{$PORT} {
+	header {
+		-Server
+		Content-Security-Policy "base-uri 'self'; frame-ancestors 'none'; object-src 'none'"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+		Permissions-Policy "camera=(), geolocation=(), microphone=()"
+	}
+
+	@forwarded_https header X-Forwarded-Proto https
+	header @forwarded_https Strict-Transport-Security "max-age=31536000"
+
+	route /healthz {
+		respond "ok" 200
+	}
+
+	route /auth* {
+		header Cache-Control "no-store"
+		authenticate with dsh_portal
+	}
+
+	route {
+		authorize with dsh_policy
+		reverse_proxy 127.0.0.1:{$DSH_INTERNAL_PORT} {
+			header_up -Authorization
+			header_up -Remote-User
+			header_up -X-Auth-User
+			header_up -X-Authenticated-User
+			header_up -X-Email
+			header_up -X-Forwarded-User
+			header_up -X-Roles
+			header_up -X-Remote-User
+			header_up -X-User
+			header_up -X-Webauth-User
+		}
+	}
+}
