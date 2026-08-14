@@ -2,12 +2,14 @@
 
 This builder packages [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) with a custom Caddy build and `caddy-security`. It provides a browser login form in front of DSH while keeping the application itself bound to container loopback.
 
-One Dockerfile produces two independently published images:
+One Dockerfile produces two independently tested variants under one image repository:
 
-| Image | Docker target | Intended use |
-| --- | --- | --- |
-| `ghcr.io/okxlin/deepseek-harness` | `runtime` | Lightweight 1Panel service with essential shell and repository tools. This remains the default final target. |
-| `ghcr.io/okxlin/deepseek-harness-workstation` | `workstation` | Full interactive development environment with compiler and language toolchains. |
+| Floating tag | Fixed tag pattern | Docker target | Intended use |
+| --- | --- | --- | --- |
+| `latest` | `YYYYMMDD` | `runtime` | Lightweight 1Panel service with essential shell and repository tools. This remains the default final target. |
+| `workstation` | `YYYYMMDD-workstation` | `workstation` | Full interactive development environment with compiler and language toolchains. |
+
+Both workflows publish the same tags to `ghcr.io/okxlin/deepseek-harness` and to `docker.io/$DOCKERHUB_USERNAME/deepseek-harness`. Configure `DOCKERHUB_USERNAME` as a GitHub Actions repository variable or secret and configure `DOCKERHUB_TOKEN` as a repository secret. The Docker Hub token is used only by the registry login action and is never passed to the image build.
 
 Pinned runtime versions:
 
@@ -108,7 +110,7 @@ docker run -d \
   -v deepseek-harness-workstation-data:/data \
   -v deepseek-harness-workstation-home:/home/node \
   -v deepseek-harness-workstation-workspace:/workspace \
-  ghcr.io/okxlin/deepseek-harness-workstation:latest
+  ghcr.io/okxlin/deepseek-harness:workstation
 ```
 
 Docker CLI, Compose, and Buildx work against a remote `DOCKER_HOST` without additional mounts. To control the host Docker daemon, explicitly add:
@@ -275,4 +277,4 @@ Both arm64 CI lanes use QEMU to prove the native `node-pty` build, Caddy plugin 
 
 ## Upgrade behavior
 
-Caddy and caddy-security are compiled together and pinned. Updating Caddy alone is not assumed safe. `build-deepseek-harness.yml` publishes only the `runtime` target, while `build-deepseek-harness-workstation.yml` publishes only the `workstation` target. Each workflow audits the frozen pnpm production tree, rebuilds and validates the plugin, runs the Caddy dependency-graph/govulncheck gate, executes its amd64 and arm64 smoke contracts, and applies zero-fixable HIGH/CRITICAL Trivy gates to both architectures. Publication occurs only after every gate passes. If the plugin or a pinned toolchain stops building, the affected workflow fails instead of publishing a partially protected image.
+Caddy and caddy-security are compiled together and pinned. Updating Caddy alone is not assumed safe. `build-deepseek-harness.yml` publishes the `runtime` target as `latest` plus a date tag, while `build-deepseek-harness-workstation.yml` publishes the `workstation` target as `workstation` plus a `YYYYMMDD-workstation` tag. Each workflow pushes its verified multi-platform manifest to both GHCR and Docker Hub only after auditing the frozen pnpm production tree, rebuilding and validating the plugin, running the Caddy dependency-graph/govulncheck gate, executing its amd64 and arm64 smoke contracts, and applying zero-fixable HIGH/CRITICAL Trivy gates to both architectures. If either registry login or publication fails, the workflow fails instead of reporting a complete release.

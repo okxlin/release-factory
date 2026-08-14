@@ -35,6 +35,8 @@ jobs:
   build-test-and-push:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
     permissions:
       contents: read
       packages: write
@@ -55,6 +57,25 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Validate Docker Hub credentials
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ env.DOCKERHUB_NAMESPACE }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DOCKERHUB_USERNAME}" ]]; then
+            echo "::error::DOCKERHUB_USERNAME is not configured"
+            exit 1
+          fi
+          if [[ ! "${DOCKERHUB_USERNAME}" =~ ^[a-z0-9]+([._-][a-z0-9]+)*$ ]]; then
+            echo "::error::DOCKERHUB_USERNAME is not a valid lowercase Docker Hub namespace"
+            exit 1
+          fi
+          if [[ -z "${DOCKERHUB_TOKEN}" ]]; then
+            echo "::error::DOCKERHUB_TOKEN is not configured"
+            exit 1
+          fi
 
       - name: Resolve release policy
         id: release
@@ -220,6 +241,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          registry: docker.io
+          username: ${{ env.DOCKERHUB_NAMESPACE }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Build and push multi-platform image
         uses: docker/build-push-action@v7
         with:
@@ -228,7 +256,11 @@ jobs:
           target: runtime
           platforms: ${{ steps.params.outputs.platforms }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: |
+            ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}:${{ steps.params.outputs.image_tag }}
+            docker.io/${{ env.DOCKERHUB_NAMESPACE }}/${{ steps.params.outputs.image_repo }}:${{ steps.params.outputs.image_tag }}
+            ${{ steps.release.outputs.push_latest == 'true' && format('ghcr.io/{0}/{1}:{2}', steps.owner.outputs.lower_owner, steps.params.outputs.image_repo, steps.params.outputs.latest_tag) || '' }}
+            ${{ steps.release.outputs.push_latest == 'true' && format('docker.io/{0}/{1}:{2}', env.DOCKERHUB_NAMESPACE, steps.params.outputs.image_repo, steps.params.outputs.latest_tag) || '' }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=deepseek-harness
           cache-to: type=gha,mode=min,scope=deepseek-harness
@@ -237,18 +269,17 @@ jobs:
         env:
           IMAGE_NAME: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}
           IMAGE_TAG: ${{ steps.params.outputs.image_tag }}
-          META_TAGS: ${{ steps.meta.outputs.tags }}
+          LATEST_TAG: ${{ steps.params.outputs.latest_tag }}
           PARAM_PLATFORMS: ${{ steps.params.outputs.platforms }}
+          PUSH_LATEST: ${{ steps.release.outputs.push_latest }}
         run: |
           {
             echo "## DeepSeek Harness image build"
             echo ""
             echo "- Image: ${IMAGE_NAME}"
             echo "- Published image tag: ${IMAGE_TAG}"
-            echo "- Tags:"
-            while IFS= read -r tag; do
-              [[ -n "${tag}" ]] && echo "  - ${tag}"
-            done <<< "${META_TAGS}"
+            echo "- Floating tag: ${LATEST_TAG} (published: ${PUSH_LATEST})"
+            echo "- Registries: GitHub Container Registry and Docker Hub"
             echo "- Platforms: ${PARAM_PLATFORMS}"
             echo "- amd64: full authentication, session, WebSocket, isolation, and resource smoke"
             echo "- arm64: QEMU minimal authentication and native-module smoke"
