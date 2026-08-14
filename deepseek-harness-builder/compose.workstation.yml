@@ -1,0 +1,25 @@
+services:
+  deepseek-harness:
+    image: ${DSH_IMAGE:-ghcr.io/okxlin/deepseek-harness-workstation:latest}
+    container_name: ${CONTAINER_NAME:-deepseek-harness-workstation}
+    restart: unless-stopped
+    env_file:
+      - path: ${RUNTIME_ENV_FILE:-./image/.env}
+        required: true
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-56789}:8080"
+    volumes:
+      - ${APP_DATA_DIR:-./data}/state:/data
+      - workstation-home:/home/node
+      - ${APP_DATA_DIR:-./data}/workspace:/workspace
+      - ${DOCKER_SOCK_SRC:-/dev/null}:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  workstation-home:
+    name: ${HOME_VOLUME_NAME:-deepseek-harness-workstation-home}

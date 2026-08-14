@@ -1,0 +1,7 @@
+diff --git a/store/util.go b/store/util.go
+index b8aede4..9f72530 100644
+--- a/store/util.go
++++ b/store/util.go
+@@ -8 +8 @@ import (
+-	"github.com/docker/docker/pkg/namesgenerator"
++	"github.com/docker/buildx/store/namesgenerator"

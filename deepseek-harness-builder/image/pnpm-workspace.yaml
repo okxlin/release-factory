@@ -1,0 +1,13 @@
+packages:
+  - .
+
+# pnpm 10+ blocks dependency lifecycle scripts unless they are reviewed here.
+# Keep the allowlist aligned with the DeepSeek Harness upstream workspace.
+strictDepBuilds: true
+allowBuilds:
+  '@deepseek-ai/dsh-subprocess-local': true
+  '@google/genai': false
+  koffi: true
+  node-addon-require-builtin: false
+  node-pty: true
+  protobufjs: false
