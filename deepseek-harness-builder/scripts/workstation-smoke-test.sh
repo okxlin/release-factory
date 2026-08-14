@@ -41,11 +41,16 @@ docker image inspect "${IMAGE}" >/dev/null 2>&1 || {
     exit 1
 }
 
-if [[ "$(docker image inspect --format '{{if index .Config.Volumes "/home/node"}}yes{{end}}' "${IMAGE}")" != "yes" ]]; then
-    printf 'ERROR: workstation image does not declare /home/node as persistent state\n' >&2
+declared_volumes="$(
+    docker image inspect \
+        --format '{{range $path, $value := .Config.Volumes}}{{println $path}}{{end}}' \
+        "${IMAGE}" | sed '/^$/d' | LC_ALL=C sort
+)"
+if [[ "${declared_volumes}" != "/data" ]]; then
+    printf 'ERROR: workstation image must declare only /data, got: %s\n' "${declared_volumes}" >&2
     exit 1
 fi
-printf '[workstation-smoke] PASS: /home/node is declared as persistent state\n'
+printf '[workstation-smoke] PASS: workstation image declares one persistent /data volume\n'
 
 docker run --rm --entrypoint bash -i "${IMAGE}" -s <<'SOCKET_TEST'
 set -Eeuo pipefail
@@ -94,6 +99,15 @@ trap 'rm -rf "${tmp_dir}"' EXIT
 
 [[ "${DSH_IMAGE_VARIANT:-}" == "workstation" ]] \
     || fail "image variant metadata is not workstation"
+[[ -L /home/node && "$(readlink /home/node)" == "/data/home" ]] \
+    || fail "workstation home is not backed by /data/home"
+[[ -L /workspace && "$(readlink /workspace)" == "/data/workspace" ]] \
+    || fail "workspace is not backed by /data/workspace"
+for persistent_dir in /data/home /data/workspace; do
+    [[ -d "${persistent_dir}" && ! -L "${persistent_dir}" ]] \
+        || fail "persistent directory is missing or symbolic: ${persistent_dir}"
+done
+pass "home and workspace are isolated subdirectories of the single data volume"
 [[ "$(node --version)" == "v24.18.0" ]] || fail "Node.js version drifted"
 [[ "$(pnpm --version)" == "11.21.0" ]] || fail "pnpm version drifted"
 [[ "$(go version)" == go\ version\ go1.26.6* ]] || fail "Go version drifted"
@@ -181,7 +195,9 @@ pass "workstation omits npm, Corepack, and sudo"
 
 touch "${HOME}/.workstation-write-probe"
 rm -f "${HOME}/.workstation-write-probe"
-pass "node user can write its persistent home"
+touch /workspace/.workstation-write-probe
+rm -f /workspace/.workstation-write-probe
+pass "node user can write its persistent home and workspace"
 CONTAINER
 
 printf '[workstation-smoke] ALL TESTS PASSED\n'

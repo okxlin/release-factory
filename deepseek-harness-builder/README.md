@@ -42,7 +42,7 @@ browser
   -> DeepSeek Harness on 127.0.0.1:3080 inside the container
 ```
 
-Only Caddy listens on the container interface. The DSH port is not exposed to sibling containers or the host network. `/data` persists the Caddy state, authentication database, JWT signing key, and DSH home; `/workspace` persists user work. The workstation image additionally declares `/home/node` for package-manager caches, credentials, configuration, and user-installed tools.
+Only Caddy listens on the container interface. The DSH port is not exposed to sibling containers or the host network. The lightweight image persists Caddy, authentication, JWT, and DSH state in `/data` and user work in `/workspace`. The workstation declares only `/data`: `/home/node` links to `/data/home`, while `/workspace` links to `/data/workspace`, so authentication state, user home, and projects survive through one named volume without sharing the same subdirectory.
 
 ## Build
 
@@ -82,7 +82,7 @@ The workstation image inherits the same DSH/authentication runtime and adds:
 - GCC/G++, Clang, GDB, CMake, Ninja, Autoconf/Automake, libtool, pkg-config, and common native-library headers
 - Git LFS, GitHub CLI, ShellCheck, shfmt, yamllint, pre-commit, fd, bat, fzf, tmux, Vim, SQLite, and common network/debug/archive tools
 
-It does not add code-server, Codex/Claude CLIs, proxy daemons, `sudo`, or a Docker daemon. Docker client tools are present, but no daemon socket is mounted by the image, so the default workstation has no host-container control path. User installs should remain under `/home/node`; mount a named volume there when they must survive image replacement.
+It does not add code-server, Codex/Claude CLIs, proxy daemons, `sudo`, or a Docker daemon. Docker client tools are present, but no daemon socket is mounted by the image, so the default workstation has no host-container control path. User installs under `/home/node` and projects under `/workspace` persist inside the workstation's single `/data` volume.
 
 ## Run behind 1Panel/OpenResty
 
@@ -99,7 +99,7 @@ docker run -d \
   ghcr.io/okxlin/deepseek-harness:latest
 ```
 
-The workstation uses the same ports and authentication variables. Change the image and add its persistent home volume:
+The workstation uses the same ports and authentication variables. Its single data volume also contains the persistent home and workspace:
 
 ```bash
 docker run -d \
@@ -108,8 +108,6 @@ docker run -d \
   -p 127.0.0.1:56789:8080 \
   --env-file /opt/deepseek-harness/runtime.env \
   -v deepseek-harness-workstation-data:/data \
-  -v deepseek-harness-workstation-home:/home/node \
-  -v deepseek-harness-workstation-workspace:/workspace \
   ghcr.io/okxlin/deepseek-harness:workstation
 ```
 
@@ -246,7 +244,7 @@ deepseek-harness-builder/scripts/smoke-test.sh \
   --variant runtime
 ```
 
-The test uses named volumes and no host port. It simulates the 1Panel/OpenResty headers and checks login redirects, browser autofill attributes, wrong-password rejection, protected cookies, forged identity headers, both DSH WebSockets, logout, loopback binding, secret isolation, persistent JWT state, resource use, fail-closed configuration errors, pnpm, and the selected image variant.
+The test uses named volumes and no host port. For the workstation variant it mounts only `/data`; for the lightweight runtime it retains the separate `/workspace` volume. It simulates the 1Panel/OpenResty headers and checks login redirects, browser autofill attributes, wrong-password rejection, protected cookies, forged identity headers, both DSH WebSockets, logout, loopback binding, secret isolation, persistent JWT state, resource use, fail-closed configuration errors, pnpm, and the selected image variant.
 
 Run both workstation contracts:
 
@@ -262,7 +260,7 @@ deepseek-harness-builder/scripts/workstation-smoke-test.sh \
   --image deepseek-harness-workstation:local
 ```
 
-The Compose contract check parses both switch states and proves that the default socket source is `/dev/null`, the enabled source is `/var/run/docker.sock`, and the HTTP port remains loopback-bound. The workstation-specific image test compiles and runs C, C++, Go, and Rust probes, creates a Python virtual environment, checks normal and login-shell PATH behavior, verifies the CLI set, confirms all Docker client binaries use Go `1.26.6` without the legacy daemon module, confirms Docker has no daemon access by default, characterizes optional socket-group mapping with an isolated Unix socket, and confirms that `/home/node` is persistent and writable by the unprivileged `node` user.
+The Compose contract check parses both switch states and proves that one named volume is mounted at `/data`, the default socket source is `/dev/null`, the enabled source is `/var/run/docker.sock`, and the HTTP port remains loopback-bound. The workstation-specific image test compiles and runs C, C++, Go, and Rust probes, creates a Python virtual environment, checks normal and login-shell PATH behavior, verifies the CLI set, confirms all Docker client binaries use Go `1.26.6` without the legacy daemon module, confirms Docker has no daemon access by default, characterizes optional socket-group mapping with an isolated Unix socket, verifies that the image declares only `/data`, and confirms that the unprivileged `node` user can write the persistent home and workspace subdirectories.
 
 Run the Caddy vulnerability gate after building the image:
 

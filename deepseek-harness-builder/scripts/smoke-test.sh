@@ -111,6 +111,7 @@ container_name="deepseek-harness-smoke-${run_id}"
 data_volume="deepseek-harness-smoke-data-${run_id}"
 workspace_volume="deepseek-harness-smoke-workspace-${run_id}"
 secret_volume="deepseek-harness-smoke-secret-${run_id}"
+layout_attack_volume="deepseek-harness-smoke-layout-${run_id}"
 test_username="smoke-admin"
 test_password="smoke-password-12345"
 failure_counter=0
@@ -136,6 +137,7 @@ cleanup() {
     docker rm -f "${container_name}" >/dev/null 2>&1 || true
     docker volume rm \
         "${data_volume}" \
+        "${layout_attack_volume}" \
         "${workspace_volume}" \
         "${secret_volume}" >/dev/null 2>&1 || true
     exit "${status}"
@@ -657,7 +659,14 @@ printf '[smoke] image=%s profile=%s variant=%s public_url=%s\n' \
     "${IMAGE}" "${PROFILE}" "${VARIANT}" "${PUBLIC_URL}"
 
 docker volume create "${data_volume}" >/dev/null
-docker volume create "${workspace_volume}" >/dev/null
+mount_args=(
+    -v "${secret_volume}:/run/secrets:ro"
+    -v "${data_volume}:/data"
+)
+if [[ "${VARIANT}" == "runtime" ]]; then
+    docker volume create "${workspace_volume}" >/dev/null
+    mount_args+=( -v "${workspace_volume}:/workspace" )
+fi
 docker volume create "${secret_volume}" >/dev/null
 printf '%s\n' "${test_password}" \
     | docker run --rm -i \
@@ -670,9 +679,7 @@ docker run -d \
     -e PUBLIC_URL="${PUBLIC_URL}" \
     -e AUTH_USERNAME="${test_username}" \
     -e AUTH_PASSWORD_FILE=/run/secrets/dsh_password \
-    -v "${secret_volume}:/run/secrets:ro" \
-    -v "${data_volume}:/data" \
-    -v "${workspace_volume}:/workspace" \
+    "${mount_args[@]}" \
     "${IMAGE}" >/dev/null
 
 wait_for_health
@@ -716,6 +723,21 @@ if [[ "${PROFILE}" == "full" ]]; then
         "PUBLIC_URL uses HTTP" \
         -e PUBLIC_URL=http://dsh.example.test \
         -e AUTH_PASSWORD="${test_password}"
+
+    if [[ "${VARIANT}" == "workstation" ]]; then
+        docker volume create "${layout_attack_volume}" >/dev/null
+        docker run --rm \
+            --entrypoint sh \
+            -v "${layout_attack_volume}:/data" \
+            "${IMAGE}" \
+            -c 'rm -rf /data/home && ln -s /data/auth /data/home'
+        expect_start_failure \
+            "workstation rejects a home path redirected into authentication state" \
+            "/data/home must be a regular directory, not a symbolic link" \
+            -e PUBLIC_URL="${PUBLIC_URL}" \
+            -e AUTH_PASSWORD="${test_password}" \
+            -v "${layout_attack_volume}:/data"
+    fi
 fi
 
 printf '[smoke] ALL TESTS PASSED\n'

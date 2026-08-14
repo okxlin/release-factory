@@ -34,10 +34,48 @@ validate_port() {
     (( numeric >= 1 && numeric <= 65535 )) || fatal "${name} must be between 1 and 65535"
 }
 
+prepare_workstation_path() {
+    local path="$1"
+    local target="$2"
+    local actual_target
+
+    if [[ -L "${target}" ]]; then
+        fatal "${target} must be a regular directory, not a symbolic link"
+    fi
+    if [[ -e "${target}" && ! -d "${target}" ]]; then
+        fatal "${target} must be a regular directory"
+    fi
+
+    if [[ -L "${path}" ]]; then
+        actual_target="$(readlink -- "${path}")"
+        [[ "${actual_target}" == "${target}" ]] \
+            || fatal "${path} must link to ${target}, got ${actual_target}"
+        install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" "${target}"
+        return
+    fi
+
+    if [[ -d "${path}" ]]; then
+        # Keep compatibility with older deployments that explicitly mounted
+        # separate home or workspace volumes before the single-volume layout.
+        install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" "${path}"
+        return
+    fi
+
+    [[ ! -e "${path}" ]] || fatal "${path} must be a directory or managed symbolic link"
+    install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" "${target}"
+    ln -s "${target}" "${path}"
+}
+
 prepare_directories() {
     install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" \
-        /data /data/caddy /data/caddy/config /data/caddy/data /data/dsh \
-        "${AUTH_DIR}" /home/node /workspace
+        /data /data/caddy /data/caddy/config /data/caddy/data /data/dsh "${AUTH_DIR}"
+
+    if [[ "${DSH_IMAGE_VARIANT:-runtime}" == "workstation" ]]; then
+        prepare_workstation_path /home/node /data/home
+        prepare_workstation_path /workspace /data/workspace
+    else
+        install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" /home/node /workspace
+    fi
 
     if [[ -L "${AUTH_DB_PATH}" || -L "${AUTH_JWT_SECRET_PATH}" ]]; then
         fatal "authentication state files must not be symbolic links"

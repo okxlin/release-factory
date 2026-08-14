@@ -279,13 +279,14 @@ RUN install -d -m 0750 -o node -g node \
 WORKDIR /workspace
 
 EXPOSE 8080
-VOLUME ["/data", "/workspace"]
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=45s --retries=4 CMD ["healthcheck.sh"]
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 
 FROM runtime-base AS workstation
+
+WORKDIR /
 
 ARG DOCKER_BUILDX_VERSION=0.36.1
 ARG DOCKER_COMPOSE_VERSION=5.4.0
@@ -397,7 +398,19 @@ RUN apt-get update \
 COPY profile.d/workstation.sh /etc/profile.d/deepseek-harness-workstation.sh
 COPY --chmod=0755 scripts/configure-docker-socket-access.sh /usr/local/bin/
 
-VOLUME ["/home/node"]
+RUN test ! -e /data/home \
+    && test ! -e /data/workspace \
+    && mv /home/node /data/home \
+    && mv /workspace /data/workspace \
+    && chmod 0750 /data/home /data/workspace \
+    && ln -s /data/home /home/node \
+    && ln -s /data/workspace /workspace \
+    && test "$(readlink /home/node)" = /data/home \
+    && test "$(readlink /workspace)" = /data/workspace
+
+WORKDIR /workspace
+
+VOLUME ["/data"]
 
 FROM runtime-base AS runtime
 
@@ -419,3 +432,5 @@ RUN rm -rf \
     && ! command -v python3 \
     && ! command -v go \
     && ! command -v rustc
+
+VOLUME ["/data", "/workspace"]

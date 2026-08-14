@@ -55,6 +55,25 @@ jq -e '
     fail "Compose must use the unified deepseek-harness workstation tag by default"
 pass "workstation defaults to the unified deepseek-harness image repository"
 
+jq -e '
+  [.services["deepseek-harness"].volumes[]
+    | select(.type == "volume")] as $mounts
+  | ($mounts | length) == 1
+    and $mounts[0].source == "workstation-data"
+    and $mounts[0].target == "/data"
+    and (.volumes | length) == 1
+    and .volumes["workstation-data"].name == "deepseek-harness-workstation-data"
+' <<<"${default_config}" >/dev/null ||
+    fail "Compose must persist workstation state through one /data named volume"
+pass "workstation home, workspace, authentication, and DSH state share one persistent /data volume"
+
+jq -e '
+  [.services["deepseek-harness"].volumes[].target]
+  | index("/home/node") == null and index("/workspace") == null
+' <<<"${default_config}" >/dev/null ||
+    fail "Compose must not add separate /home/node or /workspace mounts"
+pass "Compose does not create extra workstation persistence volumes"
+
 assert_socket_mount "${default_config}" "/dev/null"
 pass "Docker daemon access is disabled by default through a /dev/null bind"
 
