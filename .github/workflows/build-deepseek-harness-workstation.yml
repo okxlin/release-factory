@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Published image tag; leave empty to use UTC date tag YYYYMMDD"
+        description: "Workstation tag or tag base; -workstation is appended when absent"
         required: false
         default: ""
       platforms:
@@ -12,7 +12,7 @@ on:
         required: true
         default: "linux/amd64,linux/arm64"
       push_latest:
-        description: "Also publish latest tag"
+        description: "Also publish the workstation floating tag"
         required: true
         default: true
         type: boolean
@@ -26,7 +26,7 @@ concurrency:
 env:
   AUDIT_IMAGE: deepseek-harness-workstation:ci-dependency-audit
   GOVULNCHECK_VERSION: "1.6.0"
-  IMAGE_REPO: deepseek-harness-workstation
+  IMAGE_REPO: deepseek-harness
   TEST_IMAGE_AMD64: deepseek-harness-workstation:ci-amd64
   TEST_IMAGE_ARM64: deepseek-harness-workstation:ci-arm64
   TRIVY_DOCKER_IMAGE: aquasec/trivy:0.72.0
@@ -35,6 +35,8 @@ jobs:
   build-test-and-push:
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    env:
+      DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
     permissions:
       contents: read
       packages: write
@@ -56,6 +58,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Validate Docker Hub credentials
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ env.DOCKERHUB_NAMESPACE }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DOCKERHUB_USERNAME}" ]]; then
+            echo "::error::DOCKERHUB_USERNAME is not configured"
+            exit 1
+          fi
+          if [[ ! "${DOCKERHUB_USERNAME}" =~ ^[a-z0-9]+([._-][a-z0-9]+)*$ ]]; then
+            echo "::error::DOCKERHUB_USERNAME is not a valid lowercase Docker Hub namespace"
+            exit 1
+          fi
+          if [[ -z "${DOCKERHUB_TOKEN}" ]]; then
+            echo "::error::DOCKERHUB_TOKEN is not configured"
+            exit 1
+          fi
+
       - name: Resolve release policy
         id: release
         env:
@@ -67,10 +88,13 @@ jobs:
           date_tag="$(date -u +%Y%m%d)"
 
           if [[ "${EVENT_NAME}" == "schedule" ]]; then
-            image_tag="${date_tag}"
+            image_tag="${date_tag}-workstation"
             push_latest="true"
           else
-            image_tag="${INPUT_IMAGE_TAG:-${date_tag}}"
+            image_tag="${INPUT_IMAGE_TAG:-${date_tag}-workstation}"
+            if [[ "${image_tag}" != *-workstation ]]; then
+              image_tag="${image_tag}-workstation"
+            fi
             push_latest="${INPUT_PUSH_LATEST:-true}"
           fi
 
@@ -93,7 +117,7 @@ jobs:
             --platforms "${INPUT_PLATFORMS}" \
             --image-tag "${RELEASE_IMAGE_TAG}" \
             --push-latest "${RELEASE_PUSH_LATEST}" \
-            --latest-tag latest \
+            --latest-tag workstation \
             --github-output "$GITHUB_OUTPUT"
 
       - name: Validate workstation Compose socket switch
@@ -235,6 +259,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          registry: docker.io
+          username: ${{ env.DOCKERHUB_NAMESPACE }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Build and push multi-platform workstation image
         uses: docker/build-push-action@v7
         with:
@@ -243,7 +274,11 @@ jobs:
           target: workstation
           platforms: ${{ steps.params.outputs.platforms }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: |
+            ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}:${{ steps.params.outputs.image_tag }}
+            docker.io/${{ env.DOCKERHUB_NAMESPACE }}/${{ steps.params.outputs.image_repo }}:${{ steps.params.outputs.image_tag }}
+            ${{ steps.release.outputs.push_latest == 'true' && format('ghcr.io/{0}/{1}:{2}', steps.owner.outputs.lower_owner, steps.params.outputs.image_repo, steps.params.outputs.latest_tag) || '' }}
+            ${{ steps.release.outputs.push_latest == 'true' && format('docker.io/{0}/{1}:{2}', env.DOCKERHUB_NAMESPACE, steps.params.outputs.image_repo, steps.params.outputs.latest_tag) || '' }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=deepseek-harness-workstation
           cache-to: type=gha,mode=min,scope=deepseek-harness-workstation
@@ -252,18 +287,17 @@ jobs:
         env:
           IMAGE_NAME: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}
           IMAGE_TAG: ${{ steps.params.outputs.image_tag }}
-          META_TAGS: ${{ steps.meta.outputs.tags }}
+          LATEST_TAG: ${{ steps.params.outputs.latest_tag }}
           PARAM_PLATFORMS: ${{ steps.params.outputs.platforms }}
+          PUSH_LATEST: ${{ steps.release.outputs.push_latest }}
         run: |
           {
             echo "## DeepSeek Harness Workstation image build"
             echo ""
             echo "- Image: ${IMAGE_NAME}"
             echo "- Published image tag: ${IMAGE_TAG}"
-            echo "- Tags:"
-            while IFS= read -r tag; do
-              [[ -n "${tag}" ]] && echo "  - ${tag}"
-            done <<< "${META_TAGS}"
+            echo "- Floating tag: ${LATEST_TAG} (published: ${PUSH_LATEST})"
+            echo "- Registries: GitHub Container Registry and Docker Hub"
             echo "- Platforms: ${PARAM_PLATFORMS}"
             echo "- amd64: full authentication, WebSocket, isolation, resource, and compiler smoke"
             echo "- arm64: QEMU authentication, native-module, and compiler smoke"

@@ -49,6 +49,12 @@ assert_socket_mount() {
 }
 
 default_config="$(render_compose "")"
+jq -e '
+  .services["deepseek-harness"].image == "ghcr.io/okxlin/deepseek-harness:workstation"
+' <<<"${default_config}" >/dev/null ||
+    fail "Compose must use the unified deepseek-harness workstation tag by default"
+pass "workstation defaults to the unified deepseek-harness image repository"
+
 assert_socket_mount "${default_config}" "/dev/null"
 pass "Docker daemon access is disabled by default through a /dev/null bind"
 
