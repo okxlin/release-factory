@@ -60,10 +60,10 @@ jq -e '
   [.services["deepseek-harness"].volumes[]
     | select(.type == "volume")] as $mounts
   | ($mounts | length) == 1
-    and $mounts[0].source == "workstation-home"
+    and $mounts[0].source == "dsh-home"
     and $mounts[0].target == "/home/node"
     and (.volumes | length) == 1
-    and .volumes["workstation-home"].name == "deepseek-harness-workstation-home"
+    and .volumes["dsh-home"].name == "dsh-home"
 ' <<<"${default_config}" >/dev/null ||
     fail "Compose must persist the workstation home through one named volume"
 pass "workstation user installations and application state use one persistent HOME volume"

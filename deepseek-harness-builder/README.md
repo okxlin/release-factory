@@ -109,7 +109,7 @@ docker run -d \
   --restart unless-stopped \
   -p 127.0.0.1:56789:8080 \
   --env-file /opt/deepseek-harness/runtime.env \
-  -v deepseek-harness-workstation-home:/home/node \
+  -v dsh-home:/home/node \
   -v /opt/deepseek-harness/workspace:/workspace \
   ghcr.io/okxlin/deepseek-harness:workstation
 ```
@@ -240,10 +240,10 @@ The named HOME volume is outside a 1Panel application's installation directory, 
 docker stop deepseek-harness-workstation
 
 docker run --rm --entrypoint tar \
-  -v deepseek-harness-workstation-home:/source:ro \
+  -v dsh-home:/source:ro \
   -v "$PWD":/backup \
   ghcr.io/okxlin/deepseek-harness:workstation \
-  -C /source -czf /backup/deepseek-harness-workstation-home.tar.gz .
+  -C /source -czf /backup/dsh-home.tar.gz .
 
 docker start deepseek-harness-workstation
 ```
@@ -252,10 +252,10 @@ Restore only into a stopped workstation and preferably into an empty HOME volume
 
 ```bash
 docker run --rm --entrypoint tar \
-  -v deepseek-harness-workstation-home:/target \
+  -v dsh-home:/target \
   -v "$PWD":/backup:ro \
   ghcr.io/okxlin/deepseek-harness:workstation \
-  -C /target -xzf /backup/deepseek-harness-workstation-home.tar.gz
+  -C /target -xzf /backup/dsh-home.tar.gz
 ```
 
 Removing the container or running ordinary `docker compose down` preserves the named volume. `docker compose down --volumes`, `docker volume rm`, and `docker volume prune` can remove it.
