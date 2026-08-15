@@ -241,7 +241,8 @@ jobs:
         run: |
           set -euo pipefail
           deepseek-harness-builder/scripts/workstation-smoke-test.sh \
-            --image "${TEST_IMAGE_ARM64}"
+            --image "${TEST_IMAGE_ARM64}" \
+            --skip-sandbox-probe
 
       - name: Scan arm64 workstation image
         run: |
@@ -300,6 +301,6 @@ jobs:
             echo "- Registries: GitHub Container Registry and Docker Hub"
             echo "- Platforms: ${PARAM_PLATFORMS}"
             echo "- amd64: full authentication, WebSocket, isolation, resource, and compiler smoke"
-            echo "- arm64: QEMU authentication, native-module, and compiler smoke"
+            echo "- arm64: QEMU authentication, native-module, and compiler smoke; host-kernel sandbox probe skipped under user-mode emulation"
             echo "- Security: pnpm audit, Caddy dependency-graph/govulncheck gate, and zero-fixable HIGH/CRITICAL Trivy gates"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -6,10 +6,12 @@ One Dockerfile produces two independently tested variants under one image reposi
 
 | Floating tag | Fixed tag pattern | Docker target | Intended use |
 | --- | --- | --- | --- |
-| `latest` | `YYYYMMDD` | `runtime` | Lightweight 1Panel service with essential shell and repository tools. This remains the default final target. |
-| `workstation` | `YYYYMMDD-workstation` | `workstation` | Full interactive development environment with compiler and language toolchains. |
+| `latest` | `YYYYMMDD` or `<DSH_VERSION>` | `runtime` | Lightweight 1Panel service with essential shell and repository tools. This remains the default final target. |
+| `workstation` | `YYYYMMDD-workstation` or `<DSH_VERSION>-workstation` | `workstation` | Full interactive development environment with compiler and language toolchains. |
 
 Both workflows publish the same tags to `ghcr.io/okxlin/deepseek-harness` and to `docker.io/$DOCKERHUB_USERNAME/deepseek-harness`. Configure `DOCKERHUB_USERNAME` as a GitHub Actions repository variable or secret and configure `DOCKERHUB_TOKEN` as a repository secret. The Docker Hub token is used only by the registry login action and is never passed to the image build.
+
+Scheduled runs publish UTC date tags. Manual workflow runs can publish the pinned DeepSeek Harness version instead, for example `0.1.0-rc.6-workstation`. Use a floating tag for an AppStore `latest` channel and the matching version tag for a numbered AppStore version.
 
 Pinned runtime versions:
 
@@ -42,7 +44,7 @@ browser
   -> DeepSeek Harness on 127.0.0.1:3080 inside the container
 ```
 
-Only Caddy listens on the container interface. The DSH port is not exposed to sibling containers or the host network. `/data` persists the Caddy state, authentication database, JWT signing key, and DSH home; `/workspace` persists user work. The workstation image additionally declares `/home/node` for package-manager caches, credentials, configuration, and user-installed tools.
+Only Caddy listens on the container interface. The DSH port is not exposed to sibling containers or the host network. The lightweight image persists Caddy, authentication, JWT, and DSH state in `/data` and user work in `/workspace`. The workstation mounts one named volume directly at `/home/node`, stores authentication, Caddy, and DSH state below `/home/node/.local/share/deepseek-harness`, and uses a separate direct `/workspace` mount for projects. Neither workstation path is a symbolic link.
 
 ## Build
 
@@ -82,7 +84,7 @@ The workstation image inherits the same DSH/authentication runtime and adds:
 - GCC/G++, Clang, GDB, CMake, Ninja, Autoconf/Automake, libtool, pkg-config, and common native-library headers
 - Git LFS, GitHub CLI, ShellCheck, shfmt, yamllint, pre-commit, fd, bat, fzf, tmux, Vim, SQLite, and common network/debug/archive tools
 
-It does not add code-server, Codex/Claude CLIs, proxy daemons, `sudo`, or a Docker daemon. Docker client tools are present, but no daemon socket is mounted by the image, so the default workstation has no host-container control path. User installs should remain under `/home/node`; mount a named volume there when they must survive image replacement.
+It does not add code-server, Codex/Claude CLIs, proxy daemons, `sudo`, or a Docker daemon. Docker client tools are present, but no daemon socket is mounted by the image, so the default workstation has no host-container control path. User installs under `/home/node` persist in the workstation HOME volume, while projects persist through the direct `/workspace` mount.
 
 ## Run behind 1Panel/OpenResty
 
@@ -99,7 +101,7 @@ docker run -d \
   ghcr.io/okxlin/deepseek-harness:latest
 ```
 
-The workstation uses the same ports and authentication variables. Change the image and add its persistent home volume:
+The workstation uses the same ports and authentication variables. It persists HOME through one named volume and mounts the project directory directly:
 
 ```bash
 docker run -d \
@@ -107,11 +109,12 @@ docker run -d \
   --restart unless-stopped \
   -p 127.0.0.1:56789:8080 \
   --env-file /opt/deepseek-harness/runtime.env \
-  -v deepseek-harness-workstation-data:/data \
   -v deepseek-harness-workstation-home:/home/node \
-  -v deepseek-harness-workstation-workspace:/workspace \
+  -v /opt/deepseek-harness/workspace:/workspace \
   ghcr.io/okxlin/deepseek-harness:workstation
 ```
+
+The HOME volume contains user-installed pnpm, pipx, Cargo, and Go tools plus authentication, Caddy, and DSH state. The workspace bind is intended for project files and host-side backup or file access.
 
 Docker CLI, Compose, and Buildx work against a remote `DOCKER_HOST` without additional mounts. To control the host Docker daemon, explicitly add:
 
@@ -141,7 +144,7 @@ DOCKER_SOCK_SRC=/var/run/docker.sock \
   docker compose -f deepseek-harness-builder/compose.workstation.yml up -d
 ```
 
-The Compose file also binds port `8080` to host loopback by default. A later 1Panel package can expose `DOCKER_SOCK_SRC` as an optional form field without changing the image contract.
+The Compose file publishes container port `8080` as `127.0.0.1:56789` by default. The 1Panel package exposes the same opt-in socket contract through `DOCKER_SOCK_PATH`, with `/dev/null` as the disabled default and `/var/run/docker.sock` as the explicit high-risk choice.
 
 Create an HTTPS website in 1Panel and proxy it to `http://127.0.0.1:56789`. Keep the container port bound to host loopback; do not publish it as `0.0.0.0:56789`.
 
@@ -186,8 +189,8 @@ Rate-limit `/auth/login` and `/auth/sandbox/*` in the 1Panel WAF or the outer Op
 
 An IP authority is accepted by `PUBLIC_URL`; the smoke suite verifies the HTTPS proxy contract with an IPv4 address and port. The transport still determines whether that deployment is safe:
 
-- `PUBLIC_URL=https://203.0.113.10:8443` works when an outer proxy or another TLS endpoint presents a certificate valid for that IP.
-- `PUBLIC_URL=http://203.0.113.10:56789` requires `AUTH_COOKIE_INSECURE=true`. This has no transport confidentiality and, with the current caddy-security behavior, removes both `Secure` and `HttpOnly` from its cookies. Restrict it to an isolated test network.
+- An HTTPS IP origin works when an outer proxy or another TLS endpoint presents a certificate valid for that IP and `PUBLIC_URL` uses the same origin.
+- A plain HTTP IP origin requires `AUTH_COOKIE_INSECURE=true`. This has no transport confidentiality and, with the current caddy-security behavior, removes both `Secure` and `HttpOnly` from its cookies. Restrict it to an isolated test network.
 - Caddy's `tls internal` can create a private certificate for an IP, but every browser must first trust the container's private CA; otherwise users receive a certificate warning. Caddy documents this local-CA behavior at <https://caddyserver.com/docs/automatic-https#local-https>.
 
 Let's Encrypt made public IPv4/IPv6 certificates generally available in 2026, but they are 160-hour certificates and require the ACME `shortlived` profile: <https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability/>. Caddy `2.11.4` supports that profile, but successful issuance still requires public `http-01` or `tls-alpn-01` validation on the IP. This image does not enable direct ACME in its default mode because 1Panel/OpenResty already owns ports 80/443 and public TLS. A future direct-TLS mode should be a separate explicit deployment profile, not an automatic fallback.
@@ -214,6 +217,8 @@ Avoid placing a bcrypt hash directly in a Compose `.env` file unless its dollar 
 
 The login form marks the fields with `autocomplete="username"` and `autocomplete="current-password"`, so browser password managers can fill them. Access cookies use `Secure`, `HttpOnly`, and `SameSite=Strict` for normal HTTPS deployments.
 
+`AUTH_TOKEN_LIFETIME` accepts `300` through `2592000` seconds (five minutes through 30 days). It controls both the signed access-token lifetime and the browser Cookie lifetime. In the pinned caddy-security implementation, the refresh Cookie does not automatically issue a replacement access token, so expiry requires the user to sign in again. Keep the default one-hour lifetime for short-lived sessions, or select a longer bounded lifetime for a personal workstation.
+
 `AUTH_COOKIE_INSECURE=true` is only for explicitly trusted, isolated HTTP testing. With the current caddy-security behavior it removes both `Secure` and `HttpOnly`, not only `Secure`.
 
 caddy-security also creates an internal `webadmin` record with a random password when the local identity database is initialized. The DSH authorization policy allows only `authp/user`; that internal admin role cannot access DSH.
@@ -225,7 +230,35 @@ Other modes:
 - `AUTH_MODE=none` disables the login layer and should be used only behind another reviewed authentication boundary.
 - `AUTH_MODE=dsh` is reserved for a future DSH native-password release and currently fails closed. This prevents two authentication systems from silently stacking when native auth is added later.
 
-The generated JWT signing key is stored at `/data/auth/jwt-secret`. Persist `/data`; otherwise existing sessions are invalidated whenever the container is replaced.
+The generated JWT signing key is stored at `/data/auth/jwt-secret` in the lightweight image and at `/home/node/.local/share/deepseek-harness/auth/jwt-secret` in the workstation. Persist the corresponding volume; otherwise existing sessions are invalidated whenever the container is replaced.
+
+## Workstation backup and restore
+
+The named HOME volume is outside a 1Panel application's installation directory, so a normal 1Panel application backup does not include it. Stop the workstation before creating a consistent archive, and back up the workspace through 1Panel or the host filesystem separately.
+
+```bash
+docker stop deepseek-harness-workstation
+
+docker run --rm --entrypoint tar \
+  -v deepseek-harness-workstation-home:/source:ro \
+  -v "$PWD":/backup \
+  ghcr.io/okxlin/deepseek-harness:workstation \
+  -C /source -czf /backup/deepseek-harness-workstation-home.tar.gz .
+
+docker start deepseek-harness-workstation
+```
+
+Restore only into a stopped workstation and preferably into an empty HOME volume:
+
+```bash
+docker run --rm --entrypoint tar \
+  -v deepseek-harness-workstation-home:/target \
+  -v "$PWD":/backup:ro \
+  ghcr.io/okxlin/deepseek-harness:workstation \
+  -C /target -xzf /backup/deepseek-harness-workstation-home.tar.gz
+```
+
+Removing the container or running ordinary `docker compose down` preserves the named volume. `docker compose down --volumes`, `docker volume rm`, and `docker volume prune` can remove it.
 
 ## Resource use
 
@@ -246,7 +279,7 @@ deepseek-harness-builder/scripts/smoke-test.sh \
   --variant runtime
 ```
 
-The test uses named volumes and no host port. It simulates the 1Panel/OpenResty headers and checks login redirects, browser autofill attributes, wrong-password rejection, protected cookies, forged identity headers, both DSH WebSockets, logout, loopback binding, secret isolation, persistent JWT state, resource use, fail-closed configuration errors, pnpm, and the selected image variant.
+The test uses named test volumes and no host port. The workstation mounts HOME directly at `/home/node` and the test workspace directly at `/workspace`; the lightweight runtime retains its `/data` and `/workspace` volumes. It simulates the 1Panel/OpenResty headers and checks login redirects, browser autofill attributes, wrong-password rejection, protected cookies, forged identity headers, both DSH WebSockets, logout, loopback binding, secret isolation, persistent JWT state, container-recreation persistence, resource use, fail-closed configuration errors, pnpm, and the selected image variant.
 
 Run both workstation contracts:
 
@@ -262,7 +295,7 @@ deepseek-harness-builder/scripts/workstation-smoke-test.sh \
   --image deepseek-harness-workstation:local
 ```
 
-The Compose contract check parses both switch states and proves that the default socket source is `/dev/null`, the enabled source is `/var/run/docker.sock`, and the HTTP port remains loopback-bound. The workstation-specific image test compiles and runs C, C++, Go, and Rust probes, creates a Python virtual environment, checks normal and login-shell PATH behavior, verifies the CLI set, confirms all Docker client binaries use Go `1.26.6` without the legacy daemon module, confirms Docker has no daemon access by default, characterizes optional socket-group mapping with an isolated Unix socket, and confirms that `/home/node` is persistent and writable by the unprivileged `node` user.
+The Compose contract check parses both socket-switch states and proves that one named volume is mounted directly at `/home/node`, the package-local workspace is mounted directly at `/workspace`, the default socket source is `/dev/null`, the enabled source is `/var/run/docker.sock`, and the HTTP port remains loopback-bound. The workstation-specific image test compiles and runs C, C++, Go, and Rust probes, creates a Python virtual environment, checks normal and login-shell PATH behavior, verifies the CLI set, confirms all Docker client binaries use Go `1.26.6` without the legacy daemon module, confirms Docker has no daemon access by default, characterizes optional socket-group mapping with an isolated Unix socket, verifies that the image declares only `/home/node`, and confirms that HOME, application state, and workspace are real writable directories rather than symbolic links. It also runs the installed DSH sandbox executor under `no-new-privileges`: `workspace-write` must permit a project write and deny a writable path outside the workspace, while an explicit `danger-full-access` retry must permit that outside write without adding container privileges.
 
 Run the Caddy vulnerability gate after building the image:
 
@@ -273,8 +306,8 @@ deepseek-harness-builder/scripts/check-caddy-vulnerabilities.sh \
 
 Caddy's production binary is stripped. Go documents that binary scans without extractable symbols can fall back to all vulnerabilities in a required module: <https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck#hdr-Limitations>. The gate therefore accepts `GO-2026-5932` only when it is the sole finding, symbols are unavailable, and the build-produced package manifest proves that no OpenPGP package is linked. Any additional finding fails the gate.
 
-Both arm64 CI lanes use QEMU to prove the native `node-pty` build, Caddy plugin modules, authentication flow, architecture, and loopback boundary before a multi-platform image can be published. The workstation lane also runs its compiler probes on arm64.
+Both arm64 CI lanes use QEMU to prove the native `node-pty` build, Caddy plugin modules, authentication flow, architecture, and loopback boundary before a multi-platform image can be published. The workstation lane also runs its compiler probes on arm64. Because Landlock enforcement depends on the host kernel and is not reliably available under QEMU user-mode emulation, that lane explicitly skips only the DSH sandbox enforcement probe; the amd64 workstation lane still runs the full probe.
 
 ## Upgrade behavior
 
-Caddy and caddy-security are compiled together and pinned. Updating Caddy alone is not assumed safe. `build-deepseek-harness.yml` publishes the `runtime` target as `latest` plus a date tag, while `build-deepseek-harness-workstation.yml` publishes the `workstation` target as `workstation` plus a `YYYYMMDD-workstation` tag. Each workflow pushes its verified multi-platform manifest to both GHCR and Docker Hub only after auditing the frozen pnpm production tree, rebuilding and validating the plugin, running the Caddy dependency-graph/govulncheck gate, executing its amd64 and arm64 smoke contracts, and applying zero-fixable HIGH/CRITICAL Trivy gates to both architectures. If either registry login or publication fails, the workflow fails instead of reporting a complete release.
+Caddy and caddy-security are compiled together and pinned. Updating Caddy alone is not assumed safe. Scheduled workflows publish the `runtime` target as `latest` plus a UTC date tag and the `workstation` target as `workstation` plus a `YYYYMMDD-workstation` tag. Manual runs may replace the date component with the pinned DSH version, yielding fixed tags such as `<DSH_VERSION>` and `<DSH_VERSION>-workstation`. Each workflow pushes its verified multi-platform manifest to both GHCR and Docker Hub only after auditing the frozen pnpm production tree, rebuilding and validating the plugin, running the Caddy dependency-graph/govulncheck gate, executing its amd64 and arm64 smoke contracts, and applying zero-fixable HIGH/CRITICAL Trivy gates to both architectures. If either registry login or publication fails, the workflow fails instead of reporting a complete release.
