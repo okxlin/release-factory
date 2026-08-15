@@ -221,12 +221,16 @@ ARG DSH_VERSION=0.1.0-rc.6
 ARG PNPM_VERSION=11.21.0
 
 ENV AUTH_MODE=caddy-security \
+    AUTH_STATE_DIR=/data/auth \
     AUTH_COOKIE_INSECURE=false \
     AUTH_TOKEN_LIFETIME=3600 \
+    CADDY_CONFIG_HOME=/data/caddy/config \
+    CADDY_DATA_HOME=/data/caddy/data \
     DSH_HOME=/data/dsh \
     DSH_INTERNAL_PORT=3080 \
     DSH_TELEMETRY_DISABLED=1 \
     DSH_VERSION=${DSH_VERSION} \
+    DSH_WORKSPACE=/workspace \
     GOMEMLIMIT=128MiB \
     GOMAXPROCS=2 \
     HOME=/home/node \
@@ -279,13 +283,14 @@ RUN install -d -m 0750 -o node -g node \
 WORKDIR /workspace
 
 EXPOSE 8080
-VOLUME ["/data", "/workspace"]
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=45s --retries=4 CMD ["healthcheck.sh"]
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 
 FROM runtime-base AS workstation
+
+WORKDIR /
 
 ARG DOCKER_BUILDX_VERSION=0.36.1
 ARG DOCKER_COMPOSE_VERSION=5.4.0
@@ -295,7 +300,11 @@ ARG PNPM_VERSION=11.21.0
 ARG RUST_VERSION=1.97.1
 
 ENV CARGO_HOME=/home/node/.cargo \
+    AUTH_STATE_DIR=/home/node/.local/share/deepseek-harness/auth \
+    CADDY_CONFIG_HOME=/home/node/.local/share/deepseek-harness/caddy/config \
+    CADDY_DATA_HOME=/home/node/.local/share/deepseek-harness/caddy/data \
     DSH_IMAGE_VARIANT=workstation \
+    DSH_HOME=/home/node/.local/share/deepseek-harness/dsh \
     GOPATH=/home/node/go \
     PIPX_BIN_DIR=/home/node/.local/bin \
     PIPX_HOME=/home/node/.local/pipx \
@@ -379,6 +388,10 @@ RUN apt-get update \
         /home/node/.local \
         /home/node/.local/bin \
         /home/node/.local/pipx \
+        /home/node/.local/share/deepseek-harness/auth \
+        /home/node/.local/share/deepseek-harness/caddy/config \
+        /home/node/.local/share/deepseek-harness/caddy/data \
+        /home/node/.local/share/deepseek-harness/dsh \
         /home/node/.local/share/pnpm \
         /home/node/go \
     && chown -R node:node /home/node \
@@ -396,6 +409,13 @@ RUN apt-get update \
 
 COPY profile.d/workstation.sh /etc/profile.d/deepseek-harness-workstation.sh
 COPY --chmod=0755 scripts/configure-docker-socket-access.sh /usr/local/bin/
+
+RUN test -d /home/node \
+    && test ! -L /home/node \
+    && test -d /workspace \
+    && test ! -L /workspace
+
+WORKDIR /workspace
 
 VOLUME ["/home/node"]
 
@@ -419,3 +439,5 @@ RUN rm -rf \
     && ! command -v python3 \
     && ! command -v go \
     && ! command -v rustc
+
+VOLUME ["/data", "/workspace"]

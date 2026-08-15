@@ -7,6 +7,7 @@ PUBLIC_URL="${SMOKE_PUBLIC_URL:-https://dsh.example.test}"
 VARIANT="${SMOKE_VARIANT:-runtime}"
 MAX_IDLE_MEMORY_MIB="${SMOKE_MAX_IDLE_MEMORY_MIB:-256}"
 MAX_IDLE_PIDS="${SMOKE_MAX_IDLE_PIDS:-64}"
+TOKEN_LIFETIME="${SMOKE_TOKEN_LIFETIME:-2592000}"
 
 usage() {
     cat <<'EOF'
@@ -22,6 +23,7 @@ Options:
 Environment overrides:
   SMOKE_MAX_IDLE_MEMORY_MIB  Full-profile idle memory ceiling (default: 256)
   SMOKE_MAX_IDLE_PIDS        Full-profile idle PID ceiling (default: 64)
+  SMOKE_TOKEN_LIFETIME       Login lifetime exercised by the smoke test (default: 2592000)
 EOF
 }
 
@@ -86,6 +88,12 @@ if [[ ! "${MAX_IDLE_PIDS}" =~ ^[0-9]+$ ]] || (( MAX_IDLE_PIDS < 1 )); then
     printf 'ERROR: SMOKE_MAX_IDLE_PIDS must be a positive integer\n' >&2
     exit 2
 fi
+if [[ ! "${TOKEN_LIFETIME}" =~ ^[0-9]{1,7}$ ]] \
+    || (( 10#${TOKEN_LIFETIME} < 300 || 10#${TOKEN_LIFETIME} > 2592000 )); then
+    printf 'ERROR: SMOKE_TOKEN_LIFETIME must be an integer between 300 and 2592000\n' >&2
+    exit 2
+fi
+TOKEN_LIFETIME=$((10#${TOKEN_LIFETIME}))
 
 for command_name in docker timeout; do
     command -v "${command_name}" >/dev/null 2>&1 || {
@@ -109,8 +117,10 @@ run_id="${run_id:0:28}"
 
 container_name="deepseek-harness-smoke-${run_id}"
 data_volume="deepseek-harness-smoke-data-${run_id}"
+home_volume="deepseek-harness-smoke-home-${run_id}"
 workspace_volume="deepseek-harness-smoke-workspace-${run_id}"
 secret_volume="deepseek-harness-smoke-secret-${run_id}"
+layout_attack_volume="deepseek-harness-smoke-layout-${run_id}"
 test_username="smoke-admin"
 test_password="smoke-password-12345"
 failure_counter=0
@@ -136,6 +146,8 @@ cleanup() {
     docker rm -f "${container_name}" >/dev/null 2>&1 || true
     docker volume rm \
         "${data_volume}" \
+        "${home_volume}" \
+        "${layout_attack_volume}" \
         "${workspace_volume}" \
         "${secret_volume}" >/dev/null 2>&1 || true
     exit "${status}"
@@ -194,6 +206,7 @@ run_http_contract() {
         -e SMOKE_PROFILE="${PROFILE}" \
         -e TEST_PASSWORD="${test_password}" \
         -e TEST_PUBLIC_URL="${PUBLIC_URL}" \
+        -e TEST_TOKEN_LIFETIME="${TOKEN_LIFETIME}" \
         -e TEST_USERNAME="${test_username}" \
         -i "${container_name}" node - <<'NODE'
 const crypto = require('node:crypto');
@@ -202,6 +215,7 @@ const http = require('node:http');
 const profile = process.env.SMOKE_PROFILE;
 const password = process.env.TEST_PASSWORD;
 const publicUrl = process.env.TEST_PUBLIC_URL;
+const tokenLifetime = Number(process.env.TEST_TOKEN_LIFETIME);
 const username = process.env.TEST_USERNAME;
 const publicOrigin = new URL(publicUrl);
 const proxyHeaders = {
@@ -365,10 +379,21 @@ async function login() {
   assert(!response.headers.server, 'Caddy does not disclose a Server header');
 
   const accessCookie = jar.setCookieLines.find(line => line.startsWith('DSH_ACCESS_TOKEN='));
+  const refreshCookie = jar.setCookieLines.find(line => line.startsWith('DSH_REFRESH_TOKEN='));
   assert(Boolean(accessCookie), 'login sets the access cookie');
+  assert(Boolean(refreshCookie), 'login sets the refresh cookie');
   assert(/;\s*Secure/i.test(accessCookie), 'access cookie is Secure');
   assert(/;\s*HttpOnly/i.test(accessCookie), 'access cookie is HttpOnly');
   assert(/;\s*SameSite=Strict/i.test(accessCookie), 'access cookie is SameSite=Strict');
+  assert(new RegExp(`;\\s*Max-Age=${tokenLifetime}(?:;|$)`, 'i').test(accessCookie),
+    'access cookie uses the configured login lifetime');
+  assert(new RegExp(`;\\s*Max-Age=${tokenLifetime}(?:;|$)`, 'i').test(refreshCookie),
+    'refresh cookie uses the configured login lifetime');
+
+  const accessToken = jar.cookies.get('DSH_ACCESS_TOKEN');
+  const payload = JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url').toString('utf8'));
+  assert(payload.exp - payload.iat === tokenLifetime,
+    'signed access token uses the configured login lifetime');
   return jar;
 }
 
@@ -520,18 +545,21 @@ NODE
 }
 
 check_auth_file_permissions() {
-    docker exec -i "${container_name}" node - <<'NODE'
+    docker exec -i "${container_name}" node - "${auth_state_dir}" <<'NODE'
 const fs = require('node:fs');
+const path = require('node:path');
+const authStateDir = process.argv[2];
 
-for (const path of ['/data/auth/users.json', '/data/auth/jwt-secret']) {
-  const stat = fs.lstatSync(path);
+for (const name of ['users.json', 'jwt-secret']) {
+  const statePath = path.join(authStateDir, name);
+  const stat = fs.lstatSync(statePath);
   if (!stat.isFile() || stat.isSymbolicLink()) {
-    throw new Error(`${path} must be a regular non-symlink file`);
+    throw new Error(`${statePath} must be a regular non-symlink file`);
   }
   if ((stat.mode & 0o777) !== 0o600 || stat.uid !== 1000 || stat.gid !== 1000) {
-    throw new Error(`${path} must be mode 0600 and owned by node:node`);
+    throw new Error(`${statePath} must be mode 0600 and owned by node:node`);
   }
-  process.stdout.write(`[smoke] PASS: ${path} is a protected node-owned file\n`);
+  process.stdout.write(`[smoke] PASS: ${statePath} is a protected node-owned file\n`);
 }
 NODE
 }
@@ -656,8 +684,20 @@ check_idle_resources() {
 printf '[smoke] image=%s profile=%s variant=%s public_url=%s\n' \
     "${IMAGE}" "${PROFILE}" "${VARIANT}" "${PUBLIC_URL}"
 
-docker volume create "${data_volume}" >/dev/null
+mount_args=(
+    -v "${secret_volume}:/run/secrets:ro"
+)
+if [[ "${VARIANT}" == "runtime" ]]; then
+    auth_state_dir="/data/auth"
+    docker volume create "${data_volume}" >/dev/null
+    mount_args+=( -v "${data_volume}:/data" )
+else
+    auth_state_dir="/home/node/.local/share/deepseek-harness/auth"
+    docker volume create "${home_volume}" >/dev/null
+    mount_args+=( -v "${home_volume}:/home/node" )
+fi
 docker volume create "${workspace_volume}" >/dev/null
+mount_args+=( -v "${workspace_volume}:/workspace" )
 docker volume create "${secret_volume}" >/dev/null
 printf '%s\n' "${test_password}" \
     | docker run --rm -i \
@@ -665,15 +705,18 @@ printf '%s\n' "${test_password}" \
         -v "${secret_volume}:/run/secrets" \
         "${IMAGE}" \
         -c 'umask 077; cat > /run/secrets/dsh_password'
-docker run -d \
-    --name "${container_name}" \
-    -e PUBLIC_URL="${PUBLIC_URL}" \
-    -e AUTH_USERNAME="${test_username}" \
-    -e AUTH_PASSWORD_FILE=/run/secrets/dsh_password \
-    -v "${secret_volume}:/run/secrets:ro" \
-    -v "${data_volume}:/data" \
-    -v "${workspace_volume}:/workspace" \
-    "${IMAGE}" >/dev/null
+start_test_container() {
+    docker run -d \
+        --name "${container_name}" \
+        -e PUBLIC_URL="${PUBLIC_URL}" \
+        -e AUTH_USERNAME="${test_username}" \
+        -e AUTH_PASSWORD_FILE=/run/secrets/dsh_password \
+        -e AUTH_TOKEN_LIFETIME="${TOKEN_LIFETIME}" \
+        "${mount_args[@]}" \
+        "${IMAGE}" >/dev/null
+}
+
+start_test_container
 
 wait_for_health
 pass "container became healthy"
@@ -683,12 +726,27 @@ run_http_contract
 check_auth_file_permissions
 
 if [[ "${PROFILE}" == "full" ]]; then
-    jwt_before="$(docker exec "${container_name}" sha256sum /data/auth/jwt-secret | awk '{print $1}')"
-    docker restart "${container_name}" >/dev/null
+    jwt_before="$(docker exec "${container_name}" sha256sum "${auth_state_dir}/jwt-secret" | awk '{print $1}')"
+    if [[ "${VARIANT}" == "workstation" ]]; then
+        docker exec -u node "${container_name}" sh -c \
+            'printf "%s\n" "#!/bin/sh" "printf user-install-persisted" > "$HOME/.local/bin/dsh-user-install-probe" && chmod 0750 "$HOME/.local/bin/dsh-user-install-probe"'
+    fi
+    docker exec -u node "${container_name}" sh -c \
+        'printf workspace-persisted > /workspace/.dsh-workspace-persistence-probe'
+    docker rm -f "${container_name}" >/dev/null
+    start_test_container
     wait_for_health
-    jwt_after="$(docker exec "${container_name}" sha256sum /data/auth/jwt-secret | awk '{print $1}')"
-    [[ "${jwt_before}" == "${jwt_after}" ]] || fail "JWT signing key changed across restart"
-    pass "JWT signing key persists across restart"
+    jwt_after="$(docker exec "${container_name}" sha256sum "${auth_state_dir}/jwt-secret" | awk '{print $1}')"
+    [[ "${jwt_before}" == "${jwt_after}" ]] || fail "JWT signing key changed across container recreation"
+    pass "JWT signing key persists across container recreation"
+    if [[ "${VARIANT}" == "workstation" ]]; then
+        [[ "$(docker exec -u node "${container_name}" sh -c 'dsh-user-install-probe')" == "user-install-persisted" ]] \
+            || fail "user-installed HOME executable did not persist across container recreation"
+        pass "user-installed HOME executables persist across container recreation"
+    fi
+    [[ "$(docker exec -u node "${container_name}" cat /workspace/.dsh-workspace-persistence-probe)" == "workspace-persisted" ]] \
+        || fail "workspace data did not persist across container recreation"
+    pass "workspace data persists across container recreation"
     check_auth_file_permissions
     check_idle_resources
 
@@ -716,6 +774,27 @@ if [[ "${PROFILE}" == "full" ]]; then
         "PUBLIC_URL uses HTTP" \
         -e PUBLIC_URL=http://dsh.example.test \
         -e AUTH_PASSWORD="${test_password}"
+    expect_start_failure \
+        "login lifetime above 30 days fails closed" \
+        "AUTH_TOKEN_LIFETIME must be between 300 and 2592000 seconds" \
+        -e PUBLIC_URL="${PUBLIC_URL}" \
+        -e AUTH_PASSWORD="${test_password}" \
+        -e AUTH_TOKEN_LIFETIME=2592001
+
+    if [[ "${VARIANT}" == "workstation" ]]; then
+        docker volume create "${layout_attack_volume}" >/dev/null
+        docker run --rm \
+            --entrypoint sh \
+            -v "${layout_attack_volume}:/home/node" \
+            "${IMAGE}" \
+            -c 'rm -rf /home/node/.local/share/deepseek-harness/auth && ln -s /home/node/.local/share/deepseek-harness/dsh /home/node/.local/share/deepseek-harness/auth'
+        expect_start_failure \
+            "workstation rejects redirected authentication state" \
+            "/home/node/.local/share/deepseek-harness/auth must be a regular directory, not a symbolic link" \
+            -e PUBLIC_URL="${PUBLIC_URL}" \
+            -e AUTH_PASSWORD="${test_password}" \
+            -v "${layout_attack_volume}:/home/node"
+    fi
 fi
 
 printf '[smoke] ALL TESTS PASSED\n'

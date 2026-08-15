@@ -3,9 +3,13 @@ set -Eeuo pipefail
 
 APP_USER="node"
 APP_GROUP="node"
-AUTH_DIR="/data/auth"
-AUTH_DB_PATH="${AUTH_DIR}/users.json"
-AUTH_JWT_SECRET_PATH="${AUTH_DIR}/jwt-secret"
+AUTH_STATE_DIR="${AUTH_STATE_DIR:-/data/auth}"
+AUTH_DB_PATH="${AUTH_STATE_DIR}/users.json"
+AUTH_JWT_SECRET_PATH="${AUTH_STATE_DIR}/jwt-secret"
+CADDY_CONFIG_HOME="${CADDY_CONFIG_HOME:-/data/caddy/config}"
+CADDY_DATA_HOME="${CADDY_DATA_HOME:-/data/caddy/data}"
+DSH_HOME="${DSH_HOME:-/data/dsh}"
+DSH_WORKSPACE="${DSH_WORKSPACE:-/workspace}"
 CADDY_AUTH_CONFIG="/etc/caddy/Caddyfile"
 CADDY_PASSTHROUGH_CONFIG="/etc/caddy/Caddyfile.passthrough"
 
@@ -34,10 +38,39 @@ validate_port() {
     (( numeric >= 1 && numeric <= 65535 )) || fatal "${name} must be between 1 and 65535"
 }
 
+prepare_owned_directory() {
+    local path="$1"
+    local current=""
+    local part
+    local -a parts=()
+
+    [[ "${path}" == /* ]] || fatal "persistent directory paths must be absolute: ${path}"
+    IFS='/' read -r -a parts <<< "${path#/}"
+    for part in "${parts[@]}"; do
+        [[ -n "${part}" ]] || continue
+        current="${current}/${part}"
+        if [[ -L "${current}" ]]; then
+            fatal "${current} must be a regular directory, not a symbolic link"
+        fi
+        if [[ -e "${current}" && ! -d "${current}" ]]; then
+            fatal "${current} must be a regular directory"
+        fi
+    done
+
+    install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" "${path}"
+}
+
 prepare_directories() {
-    install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" \
-        /data /data/caddy /data/caddy/config /data/caddy/data /data/dsh \
-        "${AUTH_DIR}" /home/node /workspace
+    local path
+    for path in \
+        /home/node \
+        "${DSH_WORKSPACE}" \
+        "${AUTH_STATE_DIR}" \
+        "${CADDY_CONFIG_HOME}" \
+        "${CADDY_DATA_HOME}" \
+        "${DSH_HOME}"; do
+        prepare_owned_directory "${path}"
+    done
 
     if [[ -L "${AUTH_DB_PATH}" || -L "${AUTH_JWT_SECRET_PATH}" ]]; then
         fatal "authentication state files must not be symbolic links"
@@ -229,10 +262,10 @@ PORT=$((10#${PORT}))
 DSH_INTERNAL_PORT=$((10#${DSH_INTERNAL_PORT}))
 (( PORT != DSH_INTERNAL_PORT )) \
     || fatal "PORT and DSH_INTERNAL_PORT must be different"
-[[ "${AUTH_TOKEN_LIFETIME}" =~ ^[0-9]{1,5}$ ]] || fatal "AUTH_TOKEN_LIFETIME must be an integer"
+[[ "${AUTH_TOKEN_LIFETIME}" =~ ^[0-9]{1,7}$ ]] || fatal "AUTH_TOKEN_LIFETIME must be an integer"
 AUTH_TOKEN_LIFETIME=$((10#${AUTH_TOKEN_LIFETIME}))
-(( AUTH_TOKEN_LIFETIME >= 300 && AUTH_TOKEN_LIFETIME <= 86400 )) \
-    || fatal "AUTH_TOKEN_LIFETIME must be between 300 and 86400 seconds"
+(( AUTH_TOKEN_LIFETIME >= 300 && AUTH_TOKEN_LIFETIME <= 2592000 )) \
+    || fatal "AUTH_TOKEN_LIFETIME must be between 300 and 2592000 seconds"
 [[ "${AUTH_COOKIE_INSECURE}" == "true" || "${AUTH_COOKIE_INSECURE}" == "false" ]] \
     || fatal "AUTH_COOKIE_INSECURE must be true or false"
 [[ "${AUTH_USERNAME}" =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$ ]] \
@@ -264,15 +297,18 @@ case "${AUTH_MODE}" in
 esac
 
 export PORT DSH_INTERNAL_PORT AUTH_MODE AUTH_USERNAME AUTH_TOKEN_LIFETIME AUTH_COOKIE_INSECURE
-export AUTH_DB_PATH XDG_CONFIG_HOME=/data/caddy/config XDG_DATA_HOME=/data/caddy/data
+export AUTH_DB_PATH
 
-gosu "${APP_USER}" caddy validate --config "${CADDY_CONFIG}" --adapter caddyfile
+gosu "${APP_USER}" env \
+    XDG_CONFIG_HOME="${CADDY_CONFIG_HOME}" \
+    XDG_DATA_HOME="${CADDY_DATA_HOME}" \
+    caddy validate --config "${CADDY_CONFIG}" --adapter caddyfile
 
 trap shutdown_children TERM INT
 
 log "starting DeepSeek Harness ${DSH_VERSION:-unknown} on 127.0.0.1:${DSH_INTERNAL_PORT}"
 (
-    cd /workspace
+    cd "${DSH_WORKSPACE}"
     exec env -u AUTH_JWT_SECRET -u AUTH_PASSWORD_HASH \
         gosu "${APP_USER}" dsh "${DSH_ARGS[@]}"
 ) &
@@ -281,7 +317,10 @@ DSH_PID=$!
 wait_for_dsh
 
 log "starting Caddy on 0.0.0.0:${PORT} with AUTH_MODE=${AUTH_MODE}"
-gosu "${APP_USER}" caddy run --config "${CADDY_CONFIG}" --adapter caddyfile &
+gosu "${APP_USER}" env \
+    XDG_CONFIG_HOME="${CADDY_CONFIG_HOME}" \
+    XDG_DATA_HOME="${CADDY_DATA_HOME}" \
+    caddy run --config "${CADDY_CONFIG}" --adapter caddyfile &
 CADDY_PID=$!
 
 set +e
