@@ -8,6 +8,7 @@ VARIANT="${SMOKE_VARIANT:-runtime}"
 MAX_IDLE_MEMORY_MIB="${SMOKE_MAX_IDLE_MEMORY_MIB:-256}"
 MAX_IDLE_PIDS="${SMOKE_MAX_IDLE_PIDS:-64}"
 TOKEN_LIFETIME="${SMOKE_TOKEN_LIFETIME:-2592000}"
+EXPECTED_DSH_VERSION="${SMOKE_EXPECTED_DSH_VERSION:-}"
 
 usage() {
     cat <<'EOF'
@@ -24,6 +25,7 @@ Environment overrides:
   SMOKE_MAX_IDLE_MEMORY_MIB  Full-profile idle memory ceiling (default: 256)
   SMOKE_MAX_IDLE_PIDS        Full-profile idle PID ceiling (default: 64)
   SMOKE_TOKEN_LIFETIME       Login lifetime exercised by the smoke test (default: 2592000)
+  SMOKE_EXPECTED_DSH_VERSION Expected DSH version; defaults to image DSH_VERSION
 EOF
 }
 
@@ -581,9 +583,19 @@ check_runtime_versions() {
         || fail "runtime architecture ${runtime_arch} does not match image architecture ${image_arch}"
     pass "image architecture ${image_arch} runs as Node.js ${runtime_arch}"
 
-    [[ "$(docker exec "${container_name}" dsh --version)" == "0.1.0-rc.6" ]] \
-        || fail "DeepSeek Harness version is not pinned to 0.1.0-rc.6"
-    pass "DeepSeek Harness version is pinned"
+    if [[ -z "${EXPECTED_DSH_VERSION}" ]]; then
+        EXPECTED_DSH_VERSION="$(docker exec "${container_name}" sh -c '
+          if [ -n "${DSH_VERSION:-}" ]; then
+            printf %s "${DSH_VERSION}"
+          elif [ -r "${DSH_VERSION_FILE:-/etc/deepseek-harness-version}" ]; then
+            sed -n "s/^DSH_VERSION=//p" "${DSH_VERSION_FILE:-/etc/deepseek-harness-version}" | head -n 1
+          fi
+        ')"
+    fi
+    [[ -n "${EXPECTED_DSH_VERSION}" ]] || fail "DeepSeek Harness expected version is empty"
+    [[ "$(docker exec "${container_name}" dsh --version)" == "${EXPECTED_DSH_VERSION}" ]] \
+        || fail "DeepSeek Harness version is not ${EXPECTED_DSH_VERSION}"
+    pass "DeepSeek Harness version matches ${EXPECTED_DSH_VERSION}"
 
     [[ "$(docker exec "${container_name}" node --version)" == "v24.18.0" ]] \
         || fail "Node.js version is not pinned to v24.18.0"

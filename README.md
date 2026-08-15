@@ -42,7 +42,7 @@ docker pull ghcr.io/okxlin/openclaw-sandbox:latest
 gh workflow run build-deepseek-harness.yml \
   --repo okxlin/release-factory \
   --ref main \
-  -f image_tag=20260815 \
+  -f dsh_version=0.1.0-rc.6 \
   -f platforms=linux/amd64,linux/arm64 \
   -f push_latest=true
 
@@ -52,16 +52,18 @@ gh workflow run build-1panel.yml \
   -f version=v2.1.3
 ```
 
+DeepSeek Harness 的 `image_tag` 默认跟随 `dsh_version`；留空时会使用当前解析到的 npm 版本。
+
 DeepSeek Harness 同时发布到 GHCR 和 Docker Hub。运行这两个工作流前，需要配置仓库变量或 Secret `DOCKERHUB_USERNAME`，以及 Secret `DOCKERHUB_TOKEN`。Token 只用于 Registry 登录，不会传入镜像构建上下文。
 
 ## 标签与发布策略
 
-| 项目 | 主要版本/日期标签 | 可选浮动标签 |
+| 项目 | 主要版本标签 | 可选浮动标签 |
 | --- | --- | --- |
 | 1Panel | Release：`1panel-<actor>-<version>`；文件：`1panel-<actor>-<version>-<arch>.tar.gz` | 不适用 |
 | Codex Claude Workstation | UTC 日期 `YYYYMMDD` | `latest`，手动触发默认启用，定时任务始终更新 |
-| DeepSeek Harness Runtime | UTC 日期 `YYYYMMDD` | `latest`，手动触发默认启用，定时任务始终更新 |
-| DeepSeek Harness Workstation | `YYYYMMDD-workstation`；手动标签缺少后缀时自动补全 | `workstation`，手动触发默认启用，定时任务始终更新 |
+| DeepSeek Harness Runtime | 解析到的 `@deepseek-ai/dsh` 版本 `<DSH_VERSION>` | `latest`，手动触发默认启用，定时任务始终更新 |
+| DeepSeek Harness Workstation | `<DSH_VERSION>-workstation`；手动标签缺少后缀时自动补全 | `workstation`，手动触发默认启用，定时任务始终更新 |
 | Gemini Skill Browser（Kasm） | `<browser_base_tag>-kasm` | `latest-kasm`，仅显式启用时发布 |
 | Gemini Skill Browser（LinuxServer） | `<browser_base_tag>-linuxserver` | `latest-linuxserver`，仅显式启用时发布 |
 | OpenCode Workstation | `latest` 或手动指定标签 | 可显式附带 `latest` |

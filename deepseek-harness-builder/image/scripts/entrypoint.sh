@@ -9,9 +9,20 @@ AUTH_JWT_SECRET_PATH="${AUTH_STATE_DIR}/jwt-secret"
 CADDY_CONFIG_HOME="${CADDY_CONFIG_HOME:-/data/caddy/config}"
 CADDY_DATA_HOME="${CADDY_DATA_HOME:-/data/caddy/data}"
 DSH_HOME="${DSH_HOME:-/data/dsh}"
+DSH_VERSION_FILE="${DSH_VERSION_FILE:-/etc/deepseek-harness-version}"
 DSH_WORKSPACE="${DSH_WORKSPACE:-/workspace}"
 CADDY_AUTH_CONFIG="/etc/caddy/Caddyfile"
 CADDY_PASSTHROUGH_CONFIG="/etc/caddy/Caddyfile.passthrough"
+
+if [[ -z "${DSH_VERSION:-}" && -r "${DSH_VERSION_FILE}" ]]; then
+    while IFS='=' read -r key value; do
+        if [[ "${key}" == "DSH_VERSION" ]]; then
+            DSH_VERSION="${value}"
+            break
+        fi
+    done < "${DSH_VERSION_FILE}"
+fi
+export DSH_VERSION
 
 log() {
     printf '[entrypoint] %s\n' "$*"

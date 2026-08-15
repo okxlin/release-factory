@@ -69,7 +69,7 @@ RUN mkdir -p /licenses \
 
 FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS dsh-deps
 
-ARG DSH_VERSION=0.1.0-rc.6
+ARG DSH_VERSION=
 ARG PNPM_VERSION=11.21.0
 
 RUN apt-get update \
@@ -84,9 +84,10 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
 RUN corepack enable \
     && corepack prepare "pnpm@${PNPM_VERSION}" --activate \
-    && test "$(node -p "require('./package.json').dependencies['@deepseek-ai/dsh']")" = "${DSH_VERSION}" \
+    && resolved_dsh_version="${DSH_VERSION:-$(node -p "require('./package.json').dependencies['@deepseek-ai/dsh']")}" \
+    && test "$(node -p "require('./package.json').dependencies['@deepseek-ai/dsh']")" = "${resolved_dsh_version}" \
     && pnpm install --prod --frozen-lockfile --trust-lockfile \
-    && pnpm exec dsh --version | grep -Fx "${DSH_VERSION}" \
+    && pnpm exec dsh --version | grep -Fx "${resolved_dsh_version}" \
     && find node_modules/.pnpm \
         -path '*/node_modules/node-pty/build/Release/pty.node' \
         -type f -print -quit | grep -q .
@@ -217,7 +218,7 @@ FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd3
 
 ARG CADDY_VERSION=2.11.4
 ARG CADDY_SECURITY_VERSION=1.1.64
-ARG DSH_VERSION=0.1.0-rc.6
+ARG DSH_VERSION=
 ARG PNPM_VERSION=11.21.0
 
 ENV AUTH_MODE=caddy-security \
@@ -229,7 +230,6 @@ ENV AUTH_MODE=caddy-security \
     DSH_HOME=/data/dsh \
     DSH_INTERNAL_PORT=3080 \
     DSH_TELEMETRY_DISABLED=1 \
-    DSH_VERSION=${DSH_VERSION} \
     DSH_WORKSPACE=/workspace \
     GOMEMLIMIT=128MiB \
     GOMAXPROCS=2 \
@@ -274,11 +274,15 @@ RUN install -d -m 0750 -o node -g node \
     && chown -R node:node /home/node \
     && ln -s /opt/pnpm/bin/pnpm.mjs /usr/local/bin/pnpm \
     && ln -s /opt/pnpm/bin/pnpx.mjs /usr/local/bin/pnpx \
+    && resolved_dsh_version="${DSH_VERSION:-$(node -p "require('/opt/dsh/package.json').dependencies['@deepseek-ai/dsh']")}" \
+    && printf 'DSH_VERSION=%s\n' "${resolved_dsh_version}" > /etc/deepseek-harness-version \
     && caddy version | grep -F "v${CADDY_VERSION}" \
     && caddy list-modules | grep -Fx 'security' \
-    && dsh --version | grep -Fx "${DSH_VERSION}" \
+    && dsh --version | grep -Fx "${resolved_dsh_version}" \
     && node --version | grep -Fx 'v24.18.0' \
     && pnpm --version | grep -Fx "${PNPM_VERSION}"
+
+ENV DSH_VERSION_FILE=/etc/deepseek-harness-version
 
 WORKDIR /workspace
 

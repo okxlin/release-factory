@@ -42,7 +42,7 @@ Choose a workflow on the [Actions](https://github.com/okxlin/release-factory/act
 gh workflow run build-deepseek-harness.yml \
   --repo okxlin/release-factory \
   --ref main \
-  -f image_tag=20260815 \
+  -f dsh_version=0.1.0-rc.6 \
   -f platforms=linux/amd64,linux/arm64 \
   -f push_latest=true
 
@@ -52,16 +52,18 @@ gh workflow run build-1panel.yml \
   -f version=v2.1.3
 ```
 
+DeepSeek Harness `image_tag` follows `dsh_version` by default; leave it empty to use the currently resolved npm version.
+
 DeepSeek Harness publishes to both GHCR and Docker Hub. Before running either DeepSeek workflow, configure `DOCKERHUB_USERNAME` as a repository variable or secret and `DOCKERHUB_TOKEN` as a repository secret. The token is used only for registry login and is not passed to the image build context.
 
 ## Tags and Publication Policy
 
-| Project | Primary version/date tag | Optional floating tag |
+| Project | Primary version tag | Optional floating tag |
 | --- | --- | --- |
 | 1Panel | Release: `1panel-<actor>-<version>`; file: `1panel-<actor>-<version>-<arch>.tar.gz` | Not applicable |
 | Codex Claude Workstation | UTC date `YYYYMMDD` | `latest`; enabled by default for manual runs and always updated by scheduled runs |
-| DeepSeek Harness Runtime | UTC date `YYYYMMDD` | `latest`; enabled by default for manual runs and always updated by scheduled runs |
-| DeepSeek Harness Workstation | `YYYYMMDD-workstation`; the suffix is appended when a manual tag omits it | `workstation`; enabled by default for manual runs and always updated by scheduled runs |
+| DeepSeek Harness Runtime | Resolved `@deepseek-ai/dsh` version (`<DSH_VERSION>`) | `latest`; enabled by default for manual runs and always updated by scheduled runs |
+| DeepSeek Harness Workstation | `<DSH_VERSION>-workstation`; the suffix is appended when a manual tag omits it | `workstation`; enabled by default for manual runs and always updated by scheduled runs |
 | Gemini Skill Browser (Kasm) | `<browser_base_tag>-kasm` | `latest-kasm`, published only when explicitly enabled |
 | Gemini Skill Browser (LinuxServer) | `<browser_base_tag>-linuxserver` | `latest-linuxserver`, published only when explicitly enabled |
 | OpenCode Workstation | `latest` or a manually supplied tag | Can explicitly add the `latest` alias |
