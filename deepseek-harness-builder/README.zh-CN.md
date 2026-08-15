@@ -1,0 +1,402 @@
+# DeepSeek Harness 镜像构建器
+
+[English](README.md) | **简体中文**
+
+这个构建器把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 与自定义 Caddy 和 `caddy-security` 打包到同一个镜像体系中。它在 DSH 前提供浏览器登录表单，同时让 DSH 应用本身只绑定到容器内 loopback。
+
+一个 Dockerfile 会产出两个独立测试的变体，并发布到同一个镜像仓库：
+
+| 浮动标签 | 固定标签格式 | Docker target | 用途 |
+| --- | --- | --- | --- |
+| `latest` | `<DSH_VERSION>` | `runtime` | 轻量级 1Panel 服务镜像，包含必要 Shell 和仓库工具。它仍是默认最终 target。 |
+| `workstation` | `<DSH_VERSION>-workstation` | `workstation` | 完整交互式开发环境，包含编译器和语言工具链。 |
+
+两个工作流都会把相同标签发布到 `ghcr.io/okxlin/deepseek-harness` 和 `docker.io/$DOCKERHUB_USERNAME/deepseek-harness`。请把 `DOCKERHUB_USERNAME` 配置为 GitHub Actions 仓库变量或 Secret，并把 `DOCKERHUB_TOKEN` 配置为仓库 Secret。Docker Hub token 只用于 Registry 登录，不会传入镜像构建上下文。
+
+定时任务会解析当前 npm `@deepseek-ai/dsh` 版本，更新镜像构建上下文，并发布匹配标签，例如 `0.1.0-rc.6` 和 `0.1.0-rc.6-workstation`。手动工作流仍可覆盖 DSH 版本或发布标签。AppStore `latest` 通道使用浮动标签，编号 AppStore 版本使用匹配的版本标签。
+
+当前提交基线版本：
+
+- DeepSeek Harness `0.1.0-rc.6`
+- Node.js `24.18.0`
+- pnpm `11.21.0`
+- Caddy `2.11.4`
+- caddy-security `1.1.64`
+- go-authcrunch `1.1.41`，带镜像内 OpenPGP 移除补丁
+
+仅 workstation 固定的版本：
+
+- Docker CLI `29.7.2`、Docker Compose `5.4.0`、Docker Buildx `0.36.1`
+- Go `1.26.6`
+- Rust 和 Cargo `1.97.1`
+
+Go 跟随官方稳定版本端点 <https://go.dev/VERSION?m=text>。Rust 跟随官方稳定通道清单 <https://static.rust-lang.org/dist/channel-rust-stable.toml>。它们的 Docker Official Image index 均固定 digest，用于可复现地选择 `amd64` 和 `arm64`。
+
+workstation 中的三个 Docker 客户端二进制文件使用 Go `1.26.6` 从校验和固定的官方源码归档重新构建。Buildx `0.36.1` 只为了冻结的随机名称生成器而导入旧 `github.com/docker/docker` 模块；构建会在本地保留该 vendored 包，并在编译 Buildx 和 Compose 前移除无关 daemon 模块。这样可以把 daemon-only AuthZ 问题 [CVE-2026-34040](https://github.com/moby/moby/security/advisories/GHSA-x744-4wpc-v9h2) 排除在客户端依赖图之外，而不是放宽镜像扫描阈值。
+
+镜像会为 `linux/amd64` 和 `linux/arm64` 构建并测试。
+
+## 运行时布局
+
+```text
+browser
+  -> HTTPS reverse proxy (1Panel/OpenResty)
+  -> host loopback port, for example 127.0.0.1:56789
+  -> Caddy + caddy-security on container port 8080
+  -> DeepSeek Harness on 127.0.0.1:3080 inside the container
+```
+
+只有 Caddy 监听容器接口。DSH 端口不会暴露给同宿主的其他容器或宿主网络。轻量镜像把 Caddy、认证、JWT 和 DSH 状态持久化到 `/data`，把用户工作目录放在 `/workspace`。workstation 会把一个命名卷直接挂载到 `/home/node`，把认证、Caddy 和 DSH 状态存放在 `/home/node/.local/share/deepseek-harness` 下，并用单独的直接 `/workspace` 挂载承载项目文件。workstation 的这两个路径都不是符号链接。
+
+## 构建
+
+```bash
+# 默认/轻量镜像。默认解析 npm @deepseek-ai/dsh@latest。
+deepseek-harness-builder/scripts/build-local.sh \
+  --target runtime \
+  --tag deepseek-harness:local
+
+# 完整开发 workstation。
+deepseek-harness-builder/scripts/build-local.sh \
+  --target workstation \
+  --tag deepseek-harness-workstation:local
+```
+
+本地构建辅助脚本会解析请求的 `@deepseek-ai/dsh` npm 版本，在临时构建上下文中更新 `package.json` 和 `pnpm-lock.yaml`，并把解析后的版本作为 Docker `DSH_VERSION` 传入。使用 `--version 0.1.0-rc.6` 或其他 npm dist-tag 可以构建指定 DSH 版本。直接 `docker build` 仍支持已提交的基线上下文；未提供构建参数时会从 `package.json` 推导 `DSH_VERSION`。
+
+生产依赖闭包由活跃构建上下文中的 `pnpm-lock.yaml` 固定。pnpm 生命周期脚本 fail-closed，并限制在 `pnpm-workspace.yaml` 中已审查的软件包内。
+
+自定义 Caddy 构建会校验 go-authcrunch 源码归档 checksum，移除未使用的 GPG 公钥解析器，并在链接前运行上游 identity 包测试。caddy-security 仍保留 SSH 公钥支持，同时生成的 `CADDY_GO_PACKAGES.txt` 清单不得包含 `golang.org/x/crypto/openpgp` 包。构建还会把 `grpc`、`klauspost/compress` 和 `x/text` 提升到已修复版本。
+
+两个镜像都包含校验和固定的独立 pnpm `11.21.0` bundle，并移除 npm 和 Corepack。这会保留单一、已审计的 Node.js 包管理器面，避免所选 pnpm 版本静默跟随包管理器通道。
+
+## 开发环境
+
+轻量镜像在现有 Bash、Git、curl 运行时基础上加入这些低开销基础工具：
+
+- OpenSSH client、jq、ripgrep、less、procps、file、unzip
+- 独立 pnpm `11.21.0`
+
+它有意不包含 npm、Python、Go、Rust、GCC/G++ 和 Make。
+
+workstation 镜像继承相同的 DSH/认证运行时，并额外包含：
+
+- Node.js `24.18.0` 和 pnpm `11.21.0`
+- Python 3，含 pip、venv、pipx、pytest 和开发头文件
+- Go `1.26.6`；Rust 和 Cargo `1.97.1`
+- Docker CLI `29.7.2`、Compose `5.4.0`、Buildx `0.36.1`，仅客户端工具
+- GCC/G++、Clang、GDB、CMake、Ninja、Autoconf/Automake、libtool、pkg-config 和常见原生库头文件
+- Git LFS、GitHub CLI、ShellCheck、shfmt、yamllint、pre-commit、fd、bat、fzf、tmux、Vim、SQLite，以及常见网络、调试、归档工具
+
+它不包含 code-server、Codex/Claude CLI、代理守护进程、`sudo` 或 Docker daemon。镜像中有 Docker 客户端工具，但默认不会挂载 daemon socket，因此默认 workstation 没有宿主-容器控制通道。用户安装在 `/home/node` 下的工具会随 workstation HOME 卷持久化，项目则通过直接 `/workspace` 挂载持久化。
+
+## 在 1Panel/OpenResty 后运行
+
+复制 `image/.env.example` 到私有环境文件，并至少修改 `PUBLIC_URL` 和 `AUTH_PASSWORD`。不要提交这个文件。
+
+```bash
+docker run -d \
+  --name deepseek-harness \
+  --restart unless-stopped \
+  -p 127.0.0.1:56789:8080 \
+  --env-file /opt/deepseek-harness/runtime.env \
+  -v dsh-data:/data \
+  -v /opt/deepseek-harness/workspace:/workspace \
+  ghcr.io/okxlin/deepseek-harness:latest
+```
+
+`/opt/deepseek-harness` 是示例宿主路径，可以替换为你控制的任意持久目录。
+
+workstation 使用相同端口和认证变量。它通过一个命名卷持久化 HOME，并直接挂载项目目录：
+
+```bash
+docker run -d \
+  --name deepseek-harness-workstation \
+  --restart unless-stopped \
+  -p 127.0.0.1:56789:8080 \
+  --env-file /opt/deepseek-harness/runtime.env \
+  -v dsh-home:/home/node \
+  -v /opt/deepseek-harness/workspace:/workspace \
+  ghcr.io/okxlin/deepseek-harness:workstation
+```
+
+HOME 卷包含用户安装的 pnpm、pipx、Cargo、Go 工具，以及认证、Caddy 和 DSH 状态。workspace bind 用于项目文件，以及宿主侧备份或文件访问。
+
+Docker CLI、Compose 和 Buildx 可以通过远程 `DOCKER_HOST` 工作，不需要额外挂载。若要控制宿主 Docker daemon，必须显式加入：
+
+```bash
+-v /var/run/docker.sock:/var/run/docker.sock
+```
+
+entrypoint 会在可能时把 socket 的数字 group 映射给非特权 `node` 用户。挂载这个 socket 会让工具和模型驱动终端实质上拥有宿主 Docker daemon 控制权；除非明确需要这项权限，否则保持禁用。
+
+两个 Compose 文件都采用相同的可选 Docker socket 合约。复制 `image/.env.example` 到 `image/.env`，并至少设置 `PUBLIC_URL` 和 `AUTH_PASSWORD`，然后在 Docker 访问禁用状态下启动任一变体。
+
+轻量镜像把 Caddy、认证、JWT 和 DSH 状态持久化到命名卷 `dsh-data`，并把项目目录绑定到包内 `data/workspace`：
+
+```bash
+docker compose -f deepseek-harness-builder/compose.yml up -d
+```
+
+workstation 把 HOME、用户安装工具链和应用状态持久化到命名卷 `dsh-home`，并把项目目录绑定到包内 `data/workspace`：
+
+```bash
+docker compose -f deepseek-harness-builder/compose.workstation.yml up -d
+```
+
+共享 socket 挂载为：
+
+```yaml
+volumes:
+  - ${DOCKER_SOCK_SRC:-/dev/null}:/var/run/docker.sock
+```
+
+未设置或为空时会挂载 `/dev/null`，它不是 Unix socket，因此 daemon 访问保持禁用。只有在部署确实需要时，才启用高风险宿主控制路径：
+
+```bash
+DOCKER_SOCK_SRC=/var/run/docker.sock \
+  docker compose -f deepseek-harness-builder/compose.yml up -d
+```
+
+任一变体都接受相同的 `DOCKER_SOCK_SRC`；workstation 请替换为 `compose.workstation.yml`。
+
+两个 Compose 文件默认把容器端口 `8080` 发布为 `127.0.0.1:56789`。1Panel 应用包通过 `DOCKER_SOCK_PATH` 暴露相同的可选 socket 合约，`/dev/null` 为禁用默认值，`/var/run/docker.sock` 为显式高风险选择。
+
+在 1Panel 中创建 HTTPS 网站，并代理到 `http://127.0.0.1:56789`。保持容器端口绑定到宿主 loopback；不要发布为 `0.0.0.0:56789`。
+
+反向代理必须保留公网 authority 和 scheme，并允许 WebSocket 升级：
+
+```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+location / {
+    proxy_pass http://127.0.0.1:56789;
+    proxy_http_version 1.1;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+}
+```
+
+1Panel 常规反向代理模板通常已经提供大部分指令；请确认 WebSocket 支持以及三个 Host/scheme 头，而不是创建重复 location。如果 CDN 在 OpenResty 前终止 TLS，请确保 `X-Forwarded-Proto` 仍代表浏览器面对的 HTTPS scheme。错误值会导致登录重定向和 Cookie 处理使用错误 scheme。
+
+把 `PUBLIC_URL` 设置为精确浏览器 origin，例如：
+
+```dotenv
+PUBLIC_URL=https://dsh.example.com
+AUTH_COOKIE_INSECURE=false
+```
+
+有意拒绝 `https://example.com/dsh` 这类子路径部署。请使用独立域名或子域名。
+
+请在 1Panel WAF 或外层 OpenResty 中对 `/auth/login` 和 `/auth/sandbox/*` 做限速。镜像不会在 Caddy 中再添加额外 rate-limit 插件。当站点位于 Cloudflare 或其他 CDN 后时，应先配置可信真实客户端 IP 链再应用基于 IP 的限速；否则所有用户可能共享同一个边缘 IP 配额。
+
+`/healthz` 有意不需要认证，只返回 `ok`，因此 1Panel 和 Docker 可以在没有会话的情况下探测就绪状态。
+
+## 配置参考
+
+### Compose 变量
+
+在 shell 或 Compose 文件旁的 `.env` 中设置这些变量，可以不编辑 Compose 文件就定制部署。
+
+| 变量 | 默认值（轻量 / workstation） | 说明 |
+| --- | --- | --- |
+| `DSH_IMAGE` | `ghcr.io/okxlin/deepseek-harness:latest` / `:workstation` | 覆盖镜像标签，例如固定日期或版本标签。 |
+| `CONTAINER_NAME` | `deepseek-harness` / `deepseek-harness-workstation` | 容器名称。 |
+| `RUNTIME_ENV_FILE` | `./image/.env` | 运行时环境文件路径；复制 `image/.env.example` 到这里并编辑。 |
+| `BIND_ADDRESS` | `127.0.0.1` | 发布 HTTP 端口的宿主接口。位于 1Panel/OpenResty 后时保持 loopback。 |
+| `HOST_PORT` | `56789` | 映射到容器端口 `8080` 的宿主端口。 |
+| `DOCKER_SOCK_SRC` | `/dev/null` | Docker socket 源。`/dev/null` 或空值禁用 daemon 访问；`/var/run/docker.sock` 启用访问。 |
+| `DATA_VOLUME_NAME` / `HOME_VOLUME_NAME` | `dsh-data` / `dsh-home` | 持久状态卷名称。 |
+
+### 运行时环境变量
+
+复制 `image/.env.example` 到 `RUNTIME_ENV_FILE`，默认为 `image/.env`，并至少设置 `PUBLIC_URL` 和 `AUTH_PASSWORD`。`AUTH_PASSWORD`、`AUTH_PASSWORD_FILE`、`AUTH_PASSWORD_HASH` 三者只能设置一个。
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `PUBLIC_URL` | *必填* | 浏览器 origin，例如 `https://dsh.example.com`。拒绝子路径。 |
+| `AUTH_MODE` | `caddy-security` | 登录层；`none` 会禁用它，`dsh` 为预留模式并 fail closed。 |
+| `AUTH_USERNAME` | `admin` | 单一 DSH 用户。 |
+| `AUTH_PASSWORD` | *必填* | 明文密码，至少 12 个字符。 |
+| `AUTH_PASSWORD_FILE` | *未设置* | 可读 secret 文件路径，例如 Docker secret。 |
+| `AUTH_PASSWORD_HASH` | *未设置* | `bcrypt:<cost>:<hash>`，cost 为 `12-31`。 |
+| `AUTH_TOKEN_LIFETIME` | `3600` | 访问 token 和 Cookie 生命周期，范围 `300`-`2592000` 秒。 |
+| `AUTH_COOKIE_INSECURE` | `false` | 仅用于隔离 HTTP 测试；会移除 `Secure` 和 `HttpOnly`。 |
+| `DSH_TRUSTED_HOSTS` | *空* | 逗号分隔的额外 DSH Host authority。 |
+| `PORT` | `8080` | Caddy 监听的容器端口；通过 loopback 发布。 |
+| `DSH_INTERNAL_PORT` | `3080` | 容器内 DSH loopback 端口。 |
+| `GOMEMLIMIT` | `128MiB` | Caddy Go runtime 软内存限制；不限制 DSH 工作负载内存。 |
+| `GOMAXPROCS` | `2` | Caddy Go runtime CPU 限制。 |
+| `DSH_TELEMETRY_DISABLED` | `1` | 禁用 DSH telemetry。 |
+
+## 通过 IP 地址访问
+
+`PUBLIC_URL` 接受 IP authority；烟雾测试会使用 IPv4 地址和端口验证 HTTPS 代理合约。实际传输层仍决定部署是否安全：
+
+- 当外层代理或其他 TLS 端点提供对该 IP 有效的证书，且 `PUBLIC_URL` 使用相同 origin 时，HTTPS IP origin 可以工作。
+- 明文 HTTP IP origin 需要 `AUTH_COOKIE_INSECURE=true`。它没有传输保密性，并且在当前 caddy-security 行为下会同时移除 Cookie 的 `Secure` 和 `HttpOnly`。请仅限隔离测试网络使用。
+- Caddy 的 `tls internal` 可以为 IP 创建私有证书，但每个浏览器都必须先信任容器的私有 CA，否则用户会看到证书警告。Caddy 在 <https://caddyserver.com/docs/automatic-https#local-https> 记录了这个本地 CA 行为。
+
+Let's Encrypt 在 2026 年开放了公共 IPv4/IPv6 证书，但证书有效期为 160 小时，并要求 ACME `shortlived` profile：<https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability/>。Caddy `2.11.4` 支持该 profile，但成功签发仍要求该 IP 上的公开 `http-01` 或 `tls-alpn-01` 校验。本镜像默认模式不启用直接 ACME，因为 1Panel/OpenResty 已经拥有 80/443 和公网 TLS。未来如果加入 direct-TLS 模式，应作为单独显式部署 profile，而不是自动 fallback。
+
+## 认证
+
+默认 `AUTH_MODE=caddy-security` 会使用 `AUTH_USERNAME` 以及下列互斥凭据输入之一创建一个 DSH 用户：
+
+- `AUTH_PASSWORD`：由部署 secret 机制提供的明文密码，至少 12 个字符。
+- `AUTH_PASSWORD_FILE`：可读文件，例如 Docker secret。
+- `AUTH_PASSWORD_HASH`：精确的 `bcrypt:<cost>:<hash>` 值，cost 匹配 `12-31`。
+
+无需在宿主安装 Caddy 即可生成可接受的 hash：
+
+```bash
+password_hash="$({ printf '%s\n' 'replace-this-password'; } | \
+  docker run --rm -i --entrypoint caddy \
+  ghcr.io/okxlin/deepseek-harness:latest \
+  hash-password --algorithm bcrypt --bcrypt-cost 12)"
+docker run ... -e "AUTH_PASSWORD_HASH=bcrypt:12:${password_hash}" ...
+```
+
+除非按当前 Compose 版本要求转义美元符号，否则不要把 bcrypt hash 直接放入 Compose `.env` 文件。secret 文件更不容易出错。
+
+登录表单会把字段标记为 `autocomplete="username"` 和 `autocomplete="current-password"`，因此浏览器密码管理器可以填充。正常 HTTPS 部署的访问 Cookie 使用 `Secure`、`HttpOnly` 和 `SameSite=Strict`。
+
+`AUTH_TOKEN_LIFETIME` 接受 `300` 到 `2592000` 秒，即 5 分钟到 30 天。它同时控制签名访问 token 生命周期和浏览器 Cookie 生命周期。在固定的 caddy-security 实现中，refresh Cookie 不会自动签发替代访问 token，因此过期后用户需要重新登录。短会话可保留默认 1 小时，个人 workstation 可选择更长但有边界的生命周期。
+
+`AUTH_COOKIE_INSECURE=true` 只用于明确可信、隔离的 HTTP 测试。按当前 caddy-security 行为，它不仅移除 `Secure`，还会移除 `HttpOnly`。
+
+caddy-security 在本地身份库初始化时还会创建一个带随机密码的内部 `webadmin` 记录。DSH 授权策略只允许 `authp/user`；该内部 admin 角色不能访问 DSH。
+
+Go 漏洞数据库目前对历史 caddy-security findings `GO-2024-2549` 和 `GO-2024-2557` 到 `GO-2024-2565` 存在范围差异：数据库记录没有 fixed event，而对应 GitHub advisories 把受影响版本限制在 `<=1.1.20`、`<=1.1.23` 或 `<=1.0.42`。本镜像固定 `1.1.64`，Trivy 会评估已发布版本范围并报告没有受影响的 caddy-security finding。这个差异记录在仓库安全扫描策略中，而不是静默忽略。
+
+其他模式：
+
+- `AUTH_MODE=none` 禁用登录层，只应在另一个已审查认证边界之后使用。
+- `AUTH_MODE=dsh` 为未来 DSH 原生密码发布预留，目前 fail closed。这可以防止未来原生认证加入后两个认证系统静默叠加。
+
+生成的 JWT 签名密钥在轻量镜像中存储于 `/data/auth/jwt-secret`，在 workstation 中存储于 `/home/node/.local/share/deepseek-harness/auth/jwt-secret`。请持久化对应卷；否则每次替换容器都会让现有会话失效。
+
+## 备份与恢复
+
+轻量 `dsh-data` 卷和 workstation `dsh-home` 卷都位于 1Panel 应用安装目录之外，因此普通 1Panel 应用备份不包含它们。创建一致归档前请停止容器，并通过 1Panel 或宿主文件系统单独备份包内 `data/workspace` bind。
+
+### 轻量镜像
+
+命名卷 `dsh-data` 保存 Caddy、认证、JWT 和 DSH 状态。容器停止后再备份：
+
+```bash
+docker stop deepseek-harness
+
+docker run --rm --entrypoint tar \
+  -v dsh-data:/source:ro \
+  -v "$PWD":/backup \
+  ghcr.io/okxlin/deepseek-harness:latest \
+  -C /source -czf /backup/dsh-data.tar.gz .
+
+docker start deepseek-harness
+```
+
+只恢复到已停止容器，最好恢复到空卷：
+
+```bash
+docker run --rm --entrypoint tar \
+  -v dsh-data:/target \
+  -v "$PWD":/backup:ro \
+  ghcr.io/okxlin/deepseek-harness:latest \
+  -C /target -xzf /backup/dsh-data.tar.gz
+```
+
+### Workstation
+
+```bash
+docker stop deepseek-harness-workstation
+
+docker run --rm --entrypoint tar \
+  -v dsh-home:/source:ro \
+  -v "$PWD":/backup \
+  ghcr.io/okxlin/deepseek-harness:workstation \
+  -C /source -czf /backup/dsh-home.tar.gz .
+
+docker start deepseek-harness-workstation
+```
+
+只恢复到已停止 workstation，最好恢复到空 HOME 卷：
+
+```bash
+docker run --rm --entrypoint tar \
+  -v dsh-home:/target \
+  -v "$PWD":/backup:ro \
+  ghcr.io/okxlin/deepseek-harness:workstation \
+  -C /target -xzf /backup/dsh-home.tar.gz
+```
+
+删除容器或执行普通 `docker compose down` 会保留命名卷。`docker compose down --volumes`、`docker volume rm` 和 `docker volume prune` 可能删除它。
+
+## 资源使用
+
+当前 amd64 认证烟雾测试在 DSH `0.1.0-rc.6` 下稳定在约 `167-180 MiB` 和约 `20-21` 个 PID。workstation 工具链空闲时不会显著提高内存，但会提高磁盘占用：当前本地 amd64 Docker size 在 registry 压缩前约为轻量镜像 `700 MB`、workstation `2.59 GB`。Debian 重建可能改变这些数字。
+
+CI 对空闲流程的上限仍为 `256 MiB`。这不是工作负载限制：终端、仓库、语言服务器、编译器和模型工具可能需要更多内存。
+
+`GOMEMLIMIT=128MiB` 和 `GOMAXPROCS=2` 只限制 Caddy 的 Go runtime。如果 1Panel 需要容器内存限制，轻量镜像建议从 `512 MiB` 开始，workstation 至少从 `1 GiB` 开始，再按观测工作负载调整，不要把 Caddy 限制当成整个容器预算。
+
+## 验证
+
+运行完整 amd64 合约：
+
+```bash
+deepseek-harness-builder/scripts/smoke-test.sh \
+  --image deepseek-harness:local \
+  --profile full \
+  --variant runtime
+```
+
+测试使用命名测试卷且不占用宿主端口。workstation 会把 HOME 直接挂到 `/home/node`，把测试 workspace 直接挂到 `/workspace`；轻量 runtime 保留 `/data` 和 `/workspace` 卷。它会模拟 1Panel/OpenResty 头，并检查登录重定向、浏览器自动填充属性、错误密码拒绝、受保护 Cookie、伪造 identity header、两个 DSH WebSocket、登出、loopback 绑定、secret 隔离、JWT 状态持久化、容器重建持久化、资源使用、fail-closed 配置错误、pnpm 和所选镜像变体。
+
+运行轻量 Compose 合约：
+
+```bash
+deepseek-harness-builder/scripts/check-compose.sh
+```
+
+它会证明一个命名卷挂载到 `/data`、包内 workspace 挂载到 `/workspace`、默认 socket 源是 `/dev/null`、启用源是 `/var/run/docker.sock`、不存在 workstation HOME 卷，并且 HTTP 端口保持 loopback 绑定。
+
+运行两个 workstation 合约：
+
+```bash
+deepseek-harness-builder/scripts/check-workstation-compose.sh
+
+deepseek-harness-builder/scripts/smoke-test.sh \
+  --image deepseek-harness-workstation:local \
+  --profile full \
+  --variant workstation
+
+deepseek-harness-builder/scripts/workstation-smoke-test.sh \
+  --image deepseek-harness-workstation:local
+```
+
+Compose 合约检查会解析 socket 开关的两种状态，并证明一个命名卷直接挂载到 `/home/node`、包内 workspace 直接挂载到 `/workspace`、默认 socket 源是 `/dev/null`、启用源是 `/var/run/docker.sock`，且 HTTP 端口保持 loopback 绑定。workstation 专用镜像测试会编译并运行 C、C++、Go、Rust 探针，创建 Python 虚拟环境，检查普通和登录 shell 的 PATH 行为，验证 CLI 集合，确认所有 Docker 客户端二进制文件都使用 Go `1.26.6` 且不包含旧 daemon 模块，确认 Docker 默认没有 daemon 访问，使用隔离 Unix socket 刻画可选 socket group 映射，验证镜像只声明 `/home/node`，并确认 HOME、应用状态和 workspace 都是真实可写目录而不是符号链接。它还会在 `no-new-privileges` 下运行已安装的 DSH sandbox executor：`workspace-write` 必须允许项目写入并拒绝 workspace 外可写路径，而显式 `danger-full-access` 重试必须允许外部写入且不增加容器特权。
+
+构建镜像后运行 Caddy 漏洞门禁：
+
+```bash
+deepseek-harness-builder/scripts/check-caddy-vulnerabilities.sh \
+  --image deepseek-harness:local
+```
+
+Caddy 生产二进制文件已 stripped。Go 文档说明，在没有可提取符号的二进制扫描中，扫描器可能退回到 required module 的所有漏洞：<https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck#hdr-Limitations>。因此门禁只在 `GO-2026-5932` 是唯一 finding、符号不可用、且构建产出的包清单证明没有链接 OpenPGP 包时接受它。任何额外 finding 都会失败。
+
+两个 arm64 CI lane 使用 QEMU 在可发布多平台镜像前验证原生 `node-pty` 构建、Caddy 插件模块、认证流程、架构和 loopback 边界。workstation lane 也会在 arm64 上运行编译器探针。由于 Landlock enforcement 取决于宿主内核且在 QEMU user-mode emulation 下不可靠，该 lane 只明确跳过 DSH sandbox enforcement 探针；amd64 workstation lane 仍运行完整探针。
+
+## 升级行为
+
+Caddy 和 caddy-security 会一起编译并固定版本。不能假设只更新 Caddy 是安全的。定时工作流会解析 npm `@deepseek-ai/dsh@latest`，在构建 workspace 中临时更新 `package.json` 和 `pnpm-lock.yaml`，把解析出的版本作为 Docker `DSH_VERSION` 构建参数，并把 `runtime` target 发布为 `latest` 加 `<DSH_VERSION>`，把 `workstation` target 发布为 `workstation` 加 `<DSH_VERSION>-workstation`。手动运行可以覆盖 DSH 包版本或最终镜像标签，同时保留相同验证和可选浮动标签行为。每个工作流都会先审计冻结的 pnpm 生产依赖树、重建并验证插件、运行 Caddy 依赖图和 `govulncheck` 门禁、执行 amd64 和 arm64 烟雾合约，并对两个架构应用零可修复 HIGH/CRITICAL Trivy 门禁，然后才把验证过的多平台 manifest 推送到 GHCR 和 Docker Hub。任一 registry 登录或发布失败，工作流都会失败，而不是报告完整发布。
