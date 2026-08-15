@@ -1,5 +1,7 @@
 # DeepSeek Harness image builder
 
+**English** | [简体中文](README.zh-CN.md)
+
 This builder packages [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) with a custom Caddy build and `caddy-security`. It provides a browser login form in front of DSH while keeping the application itself bound to container loopback.
 
 One Dockerfile produces two independently tested variants under one image repository:
