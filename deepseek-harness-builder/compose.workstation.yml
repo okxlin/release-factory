@@ -9,7 +9,8 @@ services:
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-56789}:8080"
     volumes:
-      - workstation-data:/data
+      - workstation-home:/home/node
+      - ./data/workspace:/workspace
       - ${DOCKER_SOCK_SRC:-/dev/null}:/var/run/docker.sock
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh"]
@@ -19,5 +20,5 @@ services:
       start_period: 15s
 
 volumes:
-  workstation-data:
-    name: ${DATA_VOLUME_NAME:-deepseek-harness-workstation-data}
+  workstation-home:
+    name: ${HOME_VOLUME_NAME:-deepseek-harness-workstation-home}

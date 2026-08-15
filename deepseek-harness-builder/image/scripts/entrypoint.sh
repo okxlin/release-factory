@@ -3,9 +3,13 @@ set -Eeuo pipefail
 
 APP_USER="node"
 APP_GROUP="node"
-AUTH_DIR="/data/auth"
-AUTH_DB_PATH="${AUTH_DIR}/users.json"
-AUTH_JWT_SECRET_PATH="${AUTH_DIR}/jwt-secret"
+AUTH_STATE_DIR="${AUTH_STATE_DIR:-/data/auth}"
+AUTH_DB_PATH="${AUTH_STATE_DIR}/users.json"
+AUTH_JWT_SECRET_PATH="${AUTH_STATE_DIR}/jwt-secret"
+CADDY_CONFIG_HOME="${CADDY_CONFIG_HOME:-/data/caddy/config}"
+CADDY_DATA_HOME="${CADDY_DATA_HOME:-/data/caddy/data}"
+DSH_HOME="${DSH_HOME:-/data/dsh}"
+DSH_WORKSPACE="${DSH_WORKSPACE:-/workspace}"
 CADDY_AUTH_CONFIG="/etc/caddy/Caddyfile"
 CADDY_PASSTHROUGH_CONFIG="/etc/caddy/Caddyfile.passthrough"
 
@@ -34,48 +38,39 @@ validate_port() {
     (( numeric >= 1 && numeric <= 65535 )) || fatal "${name} must be between 1 and 65535"
 }
 
-prepare_workstation_path() {
+prepare_owned_directory() {
     local path="$1"
-    local target="$2"
-    local actual_target
+    local current=""
+    local part
+    local -a parts=()
 
-    if [[ -L "${target}" ]]; then
-        fatal "${target} must be a regular directory, not a symbolic link"
-    fi
-    if [[ -e "${target}" && ! -d "${target}" ]]; then
-        fatal "${target} must be a regular directory"
-    fi
+    [[ "${path}" == /* ]] || fatal "persistent directory paths must be absolute: ${path}"
+    IFS='/' read -r -a parts <<< "${path#/}"
+    for part in "${parts[@]}"; do
+        [[ -n "${part}" ]] || continue
+        current="${current}/${part}"
+        if [[ -L "${current}" ]]; then
+            fatal "${current} must be a regular directory, not a symbolic link"
+        fi
+        if [[ -e "${current}" && ! -d "${current}" ]]; then
+            fatal "${current} must be a regular directory"
+        fi
+    done
 
-    if [[ -L "${path}" ]]; then
-        actual_target="$(readlink -- "${path}")"
-        [[ "${actual_target}" == "${target}" ]] \
-            || fatal "${path} must link to ${target}, got ${actual_target}"
-        install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" "${target}"
-        return
-    fi
-
-    if [[ -d "${path}" ]]; then
-        # Keep compatibility with older deployments that explicitly mounted
-        # separate home or workspace volumes before the single-volume layout.
-        install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" "${path}"
-        return
-    fi
-
-    [[ ! -e "${path}" ]] || fatal "${path} must be a directory or managed symbolic link"
-    install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" "${target}"
-    ln -s "${target}" "${path}"
+    install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" "${path}"
 }
 
 prepare_directories() {
-    install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" \
-        /data /data/caddy /data/caddy/config /data/caddy/data /data/dsh "${AUTH_DIR}"
-
-    if [[ "${DSH_IMAGE_VARIANT:-runtime}" == "workstation" ]]; then
-        prepare_workstation_path /home/node /data/home
-        prepare_workstation_path /workspace /data/workspace
-    else
-        install -d -m 0750 -o "${APP_USER}" -g "${APP_GROUP}" /home/node /workspace
-    fi
+    local path
+    for path in \
+        /home/node \
+        "${DSH_WORKSPACE}" \
+        "${AUTH_STATE_DIR}" \
+        "${CADDY_CONFIG_HOME}" \
+        "${CADDY_DATA_HOME}" \
+        "${DSH_HOME}"; do
+        prepare_owned_directory "${path}"
+    done
 
     if [[ -L "${AUTH_DB_PATH}" || -L "${AUTH_JWT_SECRET_PATH}" ]]; then
         fatal "authentication state files must not be symbolic links"
@@ -302,15 +297,18 @@ case "${AUTH_MODE}" in
 esac
 
 export PORT DSH_INTERNAL_PORT AUTH_MODE AUTH_USERNAME AUTH_TOKEN_LIFETIME AUTH_COOKIE_INSECURE
-export AUTH_DB_PATH XDG_CONFIG_HOME=/data/caddy/config XDG_DATA_HOME=/data/caddy/data
+export AUTH_DB_PATH
 
-gosu "${APP_USER}" caddy validate --config "${CADDY_CONFIG}" --adapter caddyfile
+gosu "${APP_USER}" env \
+    XDG_CONFIG_HOME="${CADDY_CONFIG_HOME}" \
+    XDG_DATA_HOME="${CADDY_DATA_HOME}" \
+    caddy validate --config "${CADDY_CONFIG}" --adapter caddyfile
 
 trap shutdown_children TERM INT
 
 log "starting DeepSeek Harness ${DSH_VERSION:-unknown} on 127.0.0.1:${DSH_INTERNAL_PORT}"
 (
-    cd /workspace
+    cd "${DSH_WORKSPACE}"
     exec env -u AUTH_JWT_SECRET -u AUTH_PASSWORD_HASH \
         gosu "${APP_USER}" dsh "${DSH_ARGS[@]}"
 ) &
@@ -319,7 +317,10 @@ DSH_PID=$!
 wait_for_dsh
 
 log "starting Caddy on 0.0.0.0:${PORT} with AUTH_MODE=${AUTH_MODE}"
-gosu "${APP_USER}" caddy run --config "${CADDY_CONFIG}" --adapter caddyfile &
+gosu "${APP_USER}" env \
+    XDG_CONFIG_HOME="${CADDY_CONFIG_HOME}" \
+    XDG_DATA_HOME="${CADDY_DATA_HOME}" \
+    caddy run --config "${CADDY_CONFIG}" --adapter caddyfile &
 CADDY_PID=$!
 
 set +e

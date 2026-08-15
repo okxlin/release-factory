@@ -5,6 +5,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 builder_dir="$(cd -- "${script_dir}/.." && pwd)"
 compose_file="${builder_dir}/compose.workstation.yml"
 example_env="${builder_dir}/image/.env.example"
+workspace_source="$(realpath -m -- "${builder_dir}/data/workspace")"
 
 fail() {
     printf '[compose-contract] FAIL: %s\n' "$*" >&2
@@ -59,20 +60,30 @@ jq -e '
   [.services["deepseek-harness"].volumes[]
     | select(.type == "volume")] as $mounts
   | ($mounts | length) == 1
-    and $mounts[0].source == "workstation-data"
-    and $mounts[0].target == "/data"
+    and $mounts[0].source == "workstation-home"
+    and $mounts[0].target == "/home/node"
     and (.volumes | length) == 1
-    and .volumes["workstation-data"].name == "deepseek-harness-workstation-data"
+    and .volumes["workstation-home"].name == "deepseek-harness-workstation-home"
 ' <<<"${default_config}" >/dev/null ||
-    fail "Compose must persist workstation state through one /data named volume"
-pass "workstation home, workspace, authentication, and DSH state share one persistent /data volume"
+    fail "Compose must persist the workstation home through one named volume"
+pass "workstation user installations and application state use one persistent HOME volume"
+
+jq -e --arg source "${workspace_source}" '
+  [.services["deepseek-harness"].volumes[]
+    | select(.target == "/workspace")] as $mounts
+  | ($mounts | length) == 1
+    and $mounts[0].type == "bind"
+    and $mounts[0].source == $source
+' <<<"${default_config}" >/dev/null ||
+    fail "Compose must bind the package-local data/workspace directory to /workspace"
+pass "workspace uses a package-local bind mount for 1Panel backup and file access"
 
 jq -e '
   [.services["deepseek-harness"].volumes[].target]
-  | index("/home/node") == null and index("/workspace") == null
+  | index("/data") == null
 ' <<<"${default_config}" >/dev/null ||
-    fail "Compose must not add separate /home/node or /workspace mounts"
-pass "Compose does not create extra workstation persistence volumes"
+    fail "Compose must not retain the obsolete /data workstation mount"
+pass "Compose has no obsolete workstation /data mount"
 
 assert_socket_mount "${default_config}" "/dev/null"
 pass "Docker daemon access is disabled by default through a /dev/null bind"
