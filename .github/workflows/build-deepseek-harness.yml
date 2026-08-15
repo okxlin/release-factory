@@ -4,7 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Published image tag; leave empty to use UTC date tag YYYYMMDD"
+        description: "Published image tag; leave empty to use the resolved @deepseek-ai/dsh version"
+        required: false
+        default: ""
+      dsh_version:
+        description: "DeepSeek Harness npm version or dist-tag; leave empty to resolve latest"
         required: false
         default: ""
       platforms:
@@ -58,6 +62,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24.18.0"
+
+      - name: Prepare DeepSeek Harness version
+        id: dsh
+        env:
+          INPUT_DSH_VERSION: ${{ inputs.dsh_version }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ -n "${INPUT_DSH_VERSION}" ]]; then
+            args+=(--version "${INPUT_DSH_VERSION}")
+          fi
+          deepseek-harness-builder/scripts/prepare-dsh-version.sh \
+            "${args[@]}" \
+            --github-output "$GITHUB_OUTPUT"
+
       - name: Validate Docker Hub credentials
         env:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -81,22 +104,22 @@ jobs:
         id: release
         env:
           EVENT_NAME: ${{ github.event_name }}
+          DSH_VERSION: ${{ steps.dsh.outputs.dsh_version }}
           INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
           INPUT_PUSH_LATEST: ${{ inputs.push_latest }}
         run: |
           set -euo pipefail
-          date_tag="$(date -u +%Y%m%d)"
 
           if [[ "${EVENT_NAME}" == "schedule" ]]; then
-            image_tag="${date_tag}"
+            image_tag="${DSH_VERSION}"
             push_latest="true"
           else
-            image_tag="${INPUT_IMAGE_TAG:-${date_tag}}"
+            image_tag="${INPUT_IMAGE_TAG:-${DSH_VERSION}}"
             push_latest="${INPUT_PUSH_LATEST:-true}"
           fi
 
           {
-            echo "date_tag=${date_tag}"
+            echo "dsh_version=${DSH_VERSION}"
             echo "image_tag=${image_tag}"
             echo "push_latest=${push_latest}"
           } >> "$GITHUB_OUTPUT"
@@ -157,6 +180,8 @@ jobs:
           platforms: linux/amd64
           load: true
           tags: ${{ env.AUDIT_IMAGE }}
+          build-args: |
+            DSH_VERSION=${{ steps.release.outputs.dsh_version }}
           cache-from: type=gha,scope=deepseek-harness
           cache-to: type=gha,mode=min,scope=deepseek-harness
 
@@ -176,6 +201,8 @@ jobs:
           load: true
           tags: ${{ env.TEST_IMAGE_AMD64 }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            DSH_VERSION=${{ steps.release.outputs.dsh_version }}
           cache-from: type=gha,scope=deepseek-harness
           cache-to: type=gha,mode=min,scope=deepseek-harness
 
@@ -213,6 +240,8 @@ jobs:
           load: true
           tags: ${{ env.TEST_IMAGE_ARM64 }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            DSH_VERSION=${{ steps.release.outputs.dsh_version }}
           cache-from: type=gha,scope=deepseek-harness
           cache-to: type=gha,mode=min,scope=deepseek-harness
 
@@ -262,6 +291,8 @@ jobs:
             ${{ steps.release.outputs.push_latest == 'true' && format('ghcr.io/{0}/{1}:{2}', steps.owner.outputs.lower_owner, steps.params.outputs.image_repo, steps.params.outputs.latest_tag) || '' }}
             ${{ steps.release.outputs.push_latest == 'true' && format('docker.io/{0}/{1}:{2}', env.DOCKERHUB_NAMESPACE, steps.params.outputs.image_repo, steps.params.outputs.latest_tag) || '' }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            DSH_VERSION=${{ steps.release.outputs.dsh_version }}
           cache-from: type=gha,scope=deepseek-harness
           cache-to: type=gha,mode=min,scope=deepseek-harness
 
@@ -269,6 +300,7 @@ jobs:
         env:
           IMAGE_NAME: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}
           IMAGE_TAG: ${{ steps.params.outputs.image_tag }}
+          DSH_VERSION: ${{ steps.release.outputs.dsh_version }}
           LATEST_TAG: ${{ steps.params.outputs.latest_tag }}
           PARAM_PLATFORMS: ${{ steps.params.outputs.platforms }}
           PUSH_LATEST: ${{ steps.release.outputs.push_latest }}
@@ -277,6 +309,7 @@ jobs:
             echo "## DeepSeek Harness image build"
             echo ""
             echo "- Image: ${IMAGE_NAME}"
+            echo "- DeepSeek Harness: ${DSH_VERSION}"
             echo "- Published image tag: ${IMAGE_TAG}"
             echo "- Floating tag: ${LATEST_TAG} (published: ${PUSH_LATEST})"
             echo "- Registries: GitHub Container Registry and Docker Hub"

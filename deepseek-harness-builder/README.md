@@ -6,14 +6,14 @@ One Dockerfile produces two independently tested variants under one image reposi
 
 | Floating tag | Fixed tag pattern | Docker target | Intended use |
 | --- | --- | --- | --- |
-| `latest` | `YYYYMMDD` or `<DSH_VERSION>` | `runtime` | Lightweight 1Panel service with essential shell and repository tools. This remains the default final target. |
-| `workstation` | `YYYYMMDD-workstation` or `<DSH_VERSION>-workstation` | `workstation` | Full interactive development environment with compiler and language toolchains. |
+| `latest` | `<DSH_VERSION>` | `runtime` | Lightweight 1Panel service with essential shell and repository tools. This remains the default final target. |
+| `workstation` | `<DSH_VERSION>-workstation` | `workstation` | Full interactive development environment with compiler and language toolchains. |
 
 Both workflows publish the same tags to `ghcr.io/okxlin/deepseek-harness` and to `docker.io/$DOCKERHUB_USERNAME/deepseek-harness`. Configure `DOCKERHUB_USERNAME` as a GitHub Actions repository variable or secret and configure `DOCKERHUB_TOKEN` as a repository secret. The Docker Hub token is used only by the registry login action and is never passed to the image build.
 
-Scheduled runs publish UTC date tags. Manual workflow runs can publish the pinned DeepSeek Harness version instead, for example `0.1.0-rc.6-workstation`. Use a floating tag for an AppStore `latest` channel and the matching version tag for a numbered AppStore version.
+Scheduled runs resolve the current npm `@deepseek-ai/dsh` version, update the image build context, and publish matching tags such as `0.1.0-rc.6` and `0.1.0-rc.6-workstation`. Manual workflow runs can still override the DSH version or the published tag. Use a floating tag for an AppStore `latest` channel and the matching version tag for a numbered AppStore version.
 
-Pinned runtime versions:
+Checked-in baseline versions:
 
 - DeepSeek Harness `0.1.0-rc.6`
 - Node.js `24.18.0`
@@ -49,18 +49,20 @@ Only Caddy listens on the container interface. The DSH port is not exposed to si
 ## Build
 
 ```bash
-# Default/lightweight image. --target runtime is explicit for release parity.
-docker build --target runtime \
-  -t deepseek-harness:local \
-  deepseek-harness-builder/image
+# Default/lightweight image. Resolves npm @deepseek-ai/dsh@latest by default.
+deepseek-harness-builder/scripts/build-local.sh \
+  --target runtime \
+  --tag deepseek-harness:local
 
 # Full development workstation.
-docker build --target workstation \
-  -t deepseek-harness-workstation:local \
-  deepseek-harness-builder/image
+deepseek-harness-builder/scripts/build-local.sh \
+  --target workstation \
+  --tag deepseek-harness-workstation:local
 ```
 
-The production dependency closure is pinned by `pnpm-lock.yaml`. pnpm lifecycle scripts are fail-closed and limited to the reviewed packages in `pnpm-workspace.yaml`.
+The local build helper resolves the requested `@deepseek-ai/dsh` npm version, updates `package.json` and `pnpm-lock.yaml` in a temporary build context, and passes the resolved version as Docker `DSH_VERSION`. Use `--version 0.1.0-rc.6` or another npm dist-tag to build a specific DSH release. Direct `docker build` remains supported for the checked-in baseline context, and derives `DSH_VERSION` from `package.json` when no build argument is supplied.
+
+The production dependency closure is pinned by `pnpm-lock.yaml` in the active build context. pnpm lifecycle scripts are fail-closed and limited to the reviewed packages in `pnpm-workspace.yaml`.
 
 The custom Caddy build verifies the go-authcrunch source archive checksum, removes its unused GPG public-key parser, and runs the upstream identity-package tests before linking. SSH public-key support remains available to caddy-security, while the generated `CADDY_GO_PACKAGES.txt` manifest must contain no `golang.org/x/crypto/openpgp` package. The build also raises `grpc`, `klauspost/compress`, and `x/text` to their fixed versions.
 
@@ -393,4 +395,4 @@ Both arm64 CI lanes use QEMU to prove the native `node-pty` build, Caddy plugin 
 
 ## Upgrade behavior
 
-Caddy and caddy-security are compiled together and pinned. Updating Caddy alone is not assumed safe. Scheduled workflows publish the `runtime` target as `latest` plus a UTC date tag and the `workstation` target as `workstation` plus a `YYYYMMDD-workstation` tag. Manual runs may replace the date component with the pinned DSH version, yielding fixed tags such as `<DSH_VERSION>` and `<DSH_VERSION>-workstation`. Each workflow pushes its verified multi-platform manifest to both GHCR and Docker Hub only after auditing the frozen pnpm production tree, rebuilding and validating the plugin, running the Caddy dependency-graph/govulncheck gate, executing its amd64 and arm64 smoke contracts, and applying zero-fixable HIGH/CRITICAL Trivy gates to both architectures. If either registry login or publication fails, the workflow fails instead of reporting a complete release.
+Caddy and caddy-security are compiled together and pinned. Updating Caddy alone is not assumed safe. Scheduled workflows resolve npm `@deepseek-ai/dsh@latest`, temporarily update `package.json` and `pnpm-lock.yaml` in the build workspace, pass the resolved version as the Docker `DSH_VERSION` build argument, and publish the `runtime` target as `latest` plus `<DSH_VERSION>` and the `workstation` target as `workstation` plus `<DSH_VERSION>-workstation`. Manual runs may override either the DSH package version or the final image tag while retaining the same validation and optional floating tag behavior. Each workflow pushes its verified multi-platform manifest to both GHCR and Docker Hub only after auditing the frozen pnpm production tree, rebuilding and validating the plugin, running the Caddy dependency-graph/govulncheck gate, executing its amd64 and arm64 smoke contracts, and applying zero-fixable HIGH/CRITICAL Trivy gates to both architectures. If either registry login or publication fails, the workflow fails instead of reporting a complete release.
