@@ -212,6 +212,8 @@ Avoid placing a bcrypt hash directly in a Compose `.env` file unless its dollar 
 
 The login form marks the fields with `autocomplete="username"` and `autocomplete="current-password"`, so browser password managers can fill them. Access cookies use `Secure`, `HttpOnly`, and `SameSite=Strict` for normal HTTPS deployments.
 
+`AUTH_TOKEN_LIFETIME` accepts `300` through `2592000` seconds (five minutes through 30 days). It controls both the signed access-token lifetime and the browser Cookie lifetime. In the pinned caddy-security implementation, the refresh Cookie does not automatically issue a replacement access token, so expiry requires the user to sign in again. Keep the default one-hour lifetime for short-lived sessions, or select a longer bounded lifetime for a personal workstation.
+
 `AUTH_COOKIE_INSECURE=true` is only for explicitly trusted, isolated HTTP testing. With the current caddy-security behavior it removes both `Secure` and `HttpOnly`, not only `Secure`.
 
 caddy-security also creates an internal `webadmin` record with a random password when the local identity database is initialized. The DSH authorization policy allows only `authp/user`; that internal admin role cannot access DSH.

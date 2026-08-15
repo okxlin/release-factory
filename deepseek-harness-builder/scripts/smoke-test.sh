@@ -7,6 +7,7 @@ PUBLIC_URL="${SMOKE_PUBLIC_URL:-https://dsh.example.test}"
 VARIANT="${SMOKE_VARIANT:-runtime}"
 MAX_IDLE_MEMORY_MIB="${SMOKE_MAX_IDLE_MEMORY_MIB:-256}"
 MAX_IDLE_PIDS="${SMOKE_MAX_IDLE_PIDS:-64}"
+TOKEN_LIFETIME="${SMOKE_TOKEN_LIFETIME:-2592000}"
 
 usage() {
     cat <<'EOF'
@@ -22,6 +23,7 @@ Options:
 Environment overrides:
   SMOKE_MAX_IDLE_MEMORY_MIB  Full-profile idle memory ceiling (default: 256)
   SMOKE_MAX_IDLE_PIDS        Full-profile idle PID ceiling (default: 64)
+  SMOKE_TOKEN_LIFETIME       Login lifetime exercised by the smoke test (default: 2592000)
 EOF
 }
 
@@ -86,6 +88,12 @@ if [[ ! "${MAX_IDLE_PIDS}" =~ ^[0-9]+$ ]] || (( MAX_IDLE_PIDS < 1 )); then
     printf 'ERROR: SMOKE_MAX_IDLE_PIDS must be a positive integer\n' >&2
     exit 2
 fi
+if [[ ! "${TOKEN_LIFETIME}" =~ ^[0-9]{1,7}$ ]] \
+    || (( 10#${TOKEN_LIFETIME} < 300 || 10#${TOKEN_LIFETIME} > 2592000 )); then
+    printf 'ERROR: SMOKE_TOKEN_LIFETIME must be an integer between 300 and 2592000\n' >&2
+    exit 2
+fi
+TOKEN_LIFETIME=$((10#${TOKEN_LIFETIME}))
 
 for command_name in docker timeout; do
     command -v "${command_name}" >/dev/null 2>&1 || {
@@ -196,6 +204,7 @@ run_http_contract() {
         -e SMOKE_PROFILE="${PROFILE}" \
         -e TEST_PASSWORD="${test_password}" \
         -e TEST_PUBLIC_URL="${PUBLIC_URL}" \
+        -e TEST_TOKEN_LIFETIME="${TOKEN_LIFETIME}" \
         -e TEST_USERNAME="${test_username}" \
         -i "${container_name}" node - <<'NODE'
 const crypto = require('node:crypto');
@@ -204,6 +213,7 @@ const http = require('node:http');
 const profile = process.env.SMOKE_PROFILE;
 const password = process.env.TEST_PASSWORD;
 const publicUrl = process.env.TEST_PUBLIC_URL;
+const tokenLifetime = Number(process.env.TEST_TOKEN_LIFETIME);
 const username = process.env.TEST_USERNAME;
 const publicOrigin = new URL(publicUrl);
 const proxyHeaders = {
@@ -367,10 +377,21 @@ async function login() {
   assert(!response.headers.server, 'Caddy does not disclose a Server header');
 
   const accessCookie = jar.setCookieLines.find(line => line.startsWith('DSH_ACCESS_TOKEN='));
+  const refreshCookie = jar.setCookieLines.find(line => line.startsWith('DSH_REFRESH_TOKEN='));
   assert(Boolean(accessCookie), 'login sets the access cookie');
+  assert(Boolean(refreshCookie), 'login sets the refresh cookie');
   assert(/;\s*Secure/i.test(accessCookie), 'access cookie is Secure');
   assert(/;\s*HttpOnly/i.test(accessCookie), 'access cookie is HttpOnly');
   assert(/;\s*SameSite=Strict/i.test(accessCookie), 'access cookie is SameSite=Strict');
+  assert(new RegExp(`;\\s*Max-Age=${tokenLifetime}(?:;|$)`, 'i').test(accessCookie),
+    'access cookie uses the configured login lifetime');
+  assert(new RegExp(`;\\s*Max-Age=${tokenLifetime}(?:;|$)`, 'i').test(refreshCookie),
+    'refresh cookie uses the configured login lifetime');
+
+  const accessToken = jar.cookies.get('DSH_ACCESS_TOKEN');
+  const payload = JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url').toString('utf8'));
+  assert(payload.exp - payload.iat === tokenLifetime,
+    'signed access token uses the configured login lifetime');
   return jar;
 }
 
@@ -679,6 +700,7 @@ docker run -d \
     -e PUBLIC_URL="${PUBLIC_URL}" \
     -e AUTH_USERNAME="${test_username}" \
     -e AUTH_PASSWORD_FILE=/run/secrets/dsh_password \
+    -e AUTH_TOKEN_LIFETIME="${TOKEN_LIFETIME}" \
     "${mount_args[@]}" \
     "${IMAGE}" >/dev/null
 
@@ -723,6 +745,12 @@ if [[ "${PROFILE}" == "full" ]]; then
         "PUBLIC_URL uses HTTP" \
         -e PUBLIC_URL=http://dsh.example.test \
         -e AUTH_PASSWORD="${test_password}"
+    expect_start_failure \
+        "login lifetime above 30 days fails closed" \
+        "AUTH_TOKEN_LIFETIME must be between 300 and 2592000 seconds" \
+        -e PUBLIC_URL="${PUBLIC_URL}" \
+        -e AUTH_PASSWORD="${test_password}" \
+        -e AUTH_TOKEN_LIFETIME=2592001
 
     if [[ "${VARIANT}" == "workstation" ]]; then
         docker volume create "${layout_attack_volume}" >/dev/null

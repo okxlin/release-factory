@@ -267,10 +267,10 @@ PORT=$((10#${PORT}))
 DSH_INTERNAL_PORT=$((10#${DSH_INTERNAL_PORT}))
 (( PORT != DSH_INTERNAL_PORT )) \
     || fatal "PORT and DSH_INTERNAL_PORT must be different"
-[[ "${AUTH_TOKEN_LIFETIME}" =~ ^[0-9]{1,5}$ ]] || fatal "AUTH_TOKEN_LIFETIME must be an integer"
+[[ "${AUTH_TOKEN_LIFETIME}" =~ ^[0-9]{1,7}$ ]] || fatal "AUTH_TOKEN_LIFETIME must be an integer"
 AUTH_TOKEN_LIFETIME=$((10#${AUTH_TOKEN_LIFETIME}))
-(( AUTH_TOKEN_LIFETIME >= 300 && AUTH_TOKEN_LIFETIME <= 86400 )) \
-    || fatal "AUTH_TOKEN_LIFETIME must be between 300 and 86400 seconds"
+(( AUTH_TOKEN_LIFETIME >= 300 && AUTH_TOKEN_LIFETIME <= 2592000 )) \
+    || fatal "AUTH_TOKEN_LIFETIME must be between 300 and 2592000 seconds"
 [[ "${AUTH_COOKIE_INSECURE}" == "true" || "${AUTH_COOKIE_INSECURE}" == "false" ]] \
     || fatal "AUTH_COOKIE_INSECURE must be true or false"
 [[ "${AUTH_USERNAME}" =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$ ]] \
