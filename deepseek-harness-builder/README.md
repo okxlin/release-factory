@@ -96,8 +96,8 @@ docker run -d \
   --restart unless-stopped \
   -p 127.0.0.1:56789:8080 \
   --env-file /opt/deepseek-harness/runtime.env \
-  -v deepseek-harness-data:/data \
-  -v deepseek-harness-workspace:/workspace \
+  -v dsh-data:/data \
+  -v /opt/deepseek-harness/workspace:/workspace \
   ghcr.io/okxlin/deepseek-harness:latest
 ```
 
@@ -124,13 +124,21 @@ Docker CLI, Compose, and Buildx work against a remote `DOCKER_HOST` without addi
 
 The entrypoint maps the socket's numeric group to the unprivileged `node` user when possible. Mounting this socket grants tools and model-driven terminals effective control over the host Docker daemon; leave it disabled unless that authority is required.
 
-The included `compose.workstation.yml` applies the same opt-in contract as the existing Codex workstation package. Copy `image/.env.example` to `image/.env`, set the authentication values, and start it with Docker access disabled:
+Both Compose files apply the same opt-in Docker socket contract. Copy `image/.env.example` to `image/.env` and set at least `PUBLIC_URL` and `AUTH_PASSWORD` before starting either variant with Docker access disabled.
+
+The lightweight image persists Caddy, authentication, JWT, and DSH state in the named `dsh-data` volume and binds the project directory to the package-local `data/workspace`:
+
+```bash
+docker compose -f deepseek-harness-builder/compose.yml up -d
+```
+
+The workstation persists HOME, user-installed toolchains, and application state in the named `dsh-home` volume and binds the project directory to the package-local `data/workspace`:
 
 ```bash
 docker compose -f deepseek-harness-builder/compose.workstation.yml up -d
 ```
 
-Its socket mount is:
+The shared socket mount is:
 
 ```yaml
 volumes:
@@ -141,10 +149,12 @@ An unset or empty field mounts `/dev/null`, which is not a Unix socket and there
 
 ```bash
 DOCKER_SOCK_SRC=/var/run/docker.sock \
-  docker compose -f deepseek-harness-builder/compose.workstation.yml up -d
+  docker compose -f deepseek-harness-builder/compose.yml up -d
 ```
 
-The Compose file publishes container port `8080` as `127.0.0.1:56789` by default. The 1Panel package exposes the same opt-in socket contract through `DOCKER_SOCK_PATH`, with `/dev/null` as the disabled default and `/var/run/docker.sock` as the explicit high-risk choice.
+Either variant accepts the same `DOCKER_SOCK_SRC`; substitute `compose.workstation.yml` for the workstation.
+
+Both Compose files publish container port `8080` as `127.0.0.1:56789` by default. The 1Panel package exposes the same opt-in socket contract through `DOCKER_SOCK_PATH`, with `/dev/null` as the disabled default and `/var/run/docker.sock` as the explicit high-risk choice.
 
 Create an HTTPS website in 1Panel and proxy it to `http://127.0.0.1:56789`. Keep the container port bound to host loopback; do not publish it as `0.0.0.0:56789`.
 
@@ -184,6 +194,43 @@ Subpath deployments such as `https://example.com/dsh` are intentionally rejected
 Rate-limit `/auth/login` and `/auth/sandbox/*` in the 1Panel WAF or the outer OpenResty layer. The image does not add another rate-limit plugin to Caddy. When the site is behind Cloudflare or another CDN, configure the trusted real-client-IP chain before applying an IP-based limit; otherwise all users may share an edge IP quota.
 
 `/healthz` is intentionally unauthenticated and returns only `ok`, so 1Panel and Docker can probe readiness without a session.
+
+## Configuration reference
+
+### Compose variables
+
+Set these in the shell or a `.env` file next to the Compose file to customize a deployment without editing it.
+
+| Variable | Default (lightweight / workstation) | Description |
+| --- | --- | --- |
+| `DSH_IMAGE` | `ghcr.io/okxlin/deepseek-harness:latest` / `:workstation` | Override the image tag, for example a pinned date or version tag. |
+| `CONTAINER_NAME` | `deepseek-harness` / `deepseek-harness-workstation` | Container name. |
+| `RUNTIME_ENV_FILE` | `./image/.env` | Path to the runtime environment file; copy `image/.env.example` here and edit it. |
+| `BIND_ADDRESS` | `127.0.0.1` | Host interface to publish the HTTP port on. Keep loopback behind 1Panel/OpenResty. |
+| `HOST_PORT` | `56789` | Host port mapped to container port `8080`. |
+| `DOCKER_SOCK_SRC` | `/dev/null` | Docker socket source. `/dev/null` or empty disables daemon access; `/var/run/docker.sock` enables it. |
+| `DATA_VOLUME_NAME` / `HOME_VOLUME_NAME` | `dsh-data` / `dsh-home` | Name of the persistent state volume. |
+
+### Runtime environment variables
+
+Copy `image/.env.example` to `RUNTIME_ENV_FILE` (default `image/.env`) and set at least `PUBLIC_URL` and `AUTH_PASSWORD`. Set exactly one of `AUTH_PASSWORD`, `AUTH_PASSWORD_FILE`, or `AUTH_PASSWORD_HASH`.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PUBLIC_URL` | *(required)* | Browser origin, e.g. `https://dsh.example.com`. Subpaths are rejected. |
+| `AUTH_MODE` | `caddy-security` | Login layer; `none` disables it, `dsh` is reserved and fails closed. |
+| `AUTH_USERNAME` | `admin` | Single DSH user. |
+| `AUTH_PASSWORD` | *(required)* | Plaintext password, at least 12 characters. |
+| `AUTH_PASSWORD_FILE` | *(unset)* | Path to a readable secret file, e.g. a Docker secret. |
+| `AUTH_PASSWORD_HASH` | *(unset)* | `bcrypt:<cost>:<hash>` with cost `12-31`. |
+| `AUTH_TOKEN_LIFETIME` | `3600` | Access token and cookie lifetime, `300`-`2592000` seconds. |
+| `AUTH_COOKIE_INSECURE` | `false` | `true` only for isolated HTTP tests; drops `Secure` and `HttpOnly`. |
+| `DSH_TRUSTED_HOSTS` | *(empty)* | Comma-separated additional DSH Host authorities. |
+| `PORT` | `8080` | Container port Caddy listens on; publish via loopback. |
+| `DSH_INTERNAL_PORT` | `3080` | DSH loopback port inside the container. |
+| `GOMEMLIMIT` | `128MiB` | Caddy Go runtime soft memory limit; does not cap DSH workload memory. |
+| `GOMAXPROCS` | `2` | Caddy Go runtime CPU limit. |
+| `DSH_TELEMETRY_DISABLED` | `1` | Disables DSH telemetry. |
 
 ## Access by IP address
 
@@ -232,9 +279,37 @@ Other modes:
 
 The generated JWT signing key is stored at `/data/auth/jwt-secret` in the lightweight image and at `/home/node/.local/share/deepseek-harness/auth/jwt-secret` in the workstation. Persist the corresponding volume; otherwise existing sessions are invalidated whenever the container is replaced.
 
-## Workstation backup and restore
+## Backup and restore
 
-The named HOME volume is outside a 1Panel application's installation directory, so a normal 1Panel application backup does not include it. Stop the workstation before creating a consistent archive, and back up the workspace through 1Panel or the host filesystem separately.
+The lightweight `dsh-data` volume and the workstation `dsh-home` volume are both outside a 1Panel application's installation directory, so a normal 1Panel application backup does not include either. Stop the container before creating a consistent archive, and back up the package-local `data/workspace` bind through 1Panel or the host filesystem separately.
+
+### Lightweight
+
+The named `dsh-data` volume holds Caddy, authentication, JWT, and DSH state. Back it up while the container is stopped:
+
+```bash
+docker stop deepseek-harness
+
+docker run --rm --entrypoint tar \
+  -v dsh-data:/source:ro \
+  -v "$PWD":/backup \
+  ghcr.io/okxlin/deepseek-harness:latest \
+  -C /source -czf /backup/dsh-data.tar.gz .
+
+docker start deepseek-harness
+```
+
+Restore only into a stopped container and preferably into an empty volume:
+
+```bash
+docker run --rm --entrypoint tar \
+  -v dsh-data:/target \
+  -v "$PWD":/backup:ro \
+  ghcr.io/okxlin/deepseek-harness:latest \
+  -C /target -xzf /backup/dsh-data.tar.gz
+```
+
+### Workstation
 
 ```bash
 docker stop deepseek-harness-workstation
@@ -280,6 +355,14 @@ deepseek-harness-builder/scripts/smoke-test.sh \
 ```
 
 The test uses named test volumes and no host port. The workstation mounts HOME directly at `/home/node` and the test workspace directly at `/workspace`; the lightweight runtime retains its `/data` and `/workspace` volumes. It simulates the 1Panel/OpenResty headers and checks login redirects, browser autofill attributes, wrong-password rejection, protected cookies, forged identity headers, both DSH WebSockets, logout, loopback binding, secret isolation, persistent JWT state, container-recreation persistence, resource use, fail-closed configuration errors, pnpm, and the selected image variant.
+
+Run the lightweight Compose contract:
+
+```bash
+deepseek-harness-builder/scripts/check-compose.sh
+```
+
+It proves that one named volume is mounted at `/data`, the package-local workspace is mounted at `/workspace`, the default socket source is `/dev/null`, the enabled source is `/var/run/docker.sock`, no workstation HOME volume is present, and the HTTP port remains loopback-bound.
 
 Run both workstation contracts:
 
