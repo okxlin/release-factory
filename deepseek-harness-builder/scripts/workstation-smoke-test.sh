@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 IMAGE="${WORKSTATION_SMOKE_IMAGE:-deepseek-harness-workstation:ci-test}"
+SKIP_SANDBOX_PROBE=false
 
 usage() {
     cat <<'EOF'
@@ -9,6 +10,7 @@ Usage: workstation-smoke-test.sh [options]
 
 Options:
   --image IMAGE          Workstation image to test
+  --skip-sandbox-probe   Skip the host-kernel sandbox probe (for QEMU user-mode CI)
   -h, --help             Show this help
 EOF
 }
@@ -19,6 +21,10 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] || { printf 'ERROR: --image requires a value\n' >&2; exit 2; }
             IMAGE="$2"
             shift 2
+            ;;
+        --skip-sandbox-probe)
+            SKIP_SANDBOX_PROBE=true
+            shift
             ;;
         -h|--help)
             usage
@@ -82,6 +88,9 @@ gosu node test -w /var/run/docker.sock
 SOCKET_TEST
 printf '[workstation-smoke] PASS: optional Docker socket group is mapped to node\n'
 
+if [[ "${SKIP_SANDBOX_PROBE}" == "true" ]]; then
+    printf '[workstation-smoke] SKIP: DSH sandbox enforcement probe requires the host kernel and is unavailable under QEMU user-mode emulation\n'
+else
 docker run --rm --security-opt no-new-privileges:true --user node \
     --workdir /workspace --entrypoint node -i "${IMAGE}" --input-type=module - <<'SANDBOX_TEST'
 import assert from 'node:assert/strict'
@@ -176,6 +185,7 @@ try {
 }
 SANDBOX_TEST
 printf '[workstation-smoke] PASS: DSH switches between confined workspace writes and explicit full access under no-new-privileges\n'
+fi
 
 docker run --rm --user node --entrypoint bash -i "${IMAGE}" -s <<'CONTAINER'
 set -Eeuo pipefail
