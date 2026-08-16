@@ -95,15 +95,24 @@ It does not add code-server, Codex/Claude CLIs, proxy daemons, `sudo`, or a Dock
 Copy `image/.env.example` to a private environment file and change at least `PUBLIC_URL` and `AUTH_PASSWORD`. Do not commit that file.
 
 ```bash
+sudo install -d -m 0750 /opt/deepseek-harness/data /opt/deepseek-harness/workspace
+
 docker run -d \
   --name deepseek-harness \
   --restart unless-stopped \
   -p 127.0.0.1:56789:8080 \
   --env-file /opt/deepseek-harness/runtime.env \
-  -v dsh-data:/data \
+  -v /opt/deepseek-harness/data:/data \
   -v /opt/deepseek-harness/workspace:/workspace \
   ghcr.io/okxlin/deepseek-harness:latest
 ```
+
+The lightweight runtime is recommended with a host bind at `/data`. It keeps
+authentication, Caddy, JWT, and DSH state in
+`/opt/deepseek-harness/data`, where host backup and migration tools can access
+it directly. The entrypoint creates the required subdirectories and files for
+the `node` user (UID/GID `1000:1000`); keep the bind source a regular directory
+and preserve its ownership and permissions when copying or restoring data.
 
 The workstation uses the same ports and authentication variables. It persists HOME through one named volume and mounts the project directory directly:
 
@@ -130,7 +139,11 @@ The entrypoint maps the socket's numeric group to the unprivileged `node` user w
 
 Both Compose files apply the same opt-in Docker socket contract. Copy `image/.env.example` to `image/.env` and set at least `PUBLIC_URL` and `AUTH_PASSWORD` before starting either variant with Docker access disabled.
 
-The lightweight image persists Caddy, authentication, JWT, and DSH state in the named `dsh-data` volume and binds the project directory to the package-local `data/workspace`:
+The checked-in lightweight Compose file retains the named `dsh-data` volume for
+compatibility and contract tests. The manual `docker run` example above uses
+the recommended `/opt/deepseek-harness/data:/data` bind instead. If you deploy
+through Compose, apply the same bind in a local Compose override or local copy;
+do not commit an environment-specific host path to the repository:
 
 ```bash
 docker compose -f deepseek-harness-builder/compose.yml up -d
@@ -213,7 +226,7 @@ Set these in the shell or a `.env` file next to the Compose file to customize a 
 | `BIND_ADDRESS` | `127.0.0.1` | Host interface to publish the HTTP port on. Keep loopback behind 1Panel/OpenResty. |
 | `HOST_PORT` | `56789` | Host port mapped to container port `8080`. |
 | `DOCKER_SOCK_SRC` | `/dev/null` | Docker socket source. `/dev/null` or empty disables daemon access; `/var/run/docker.sock` enables it. |
-| `DATA_VOLUME_NAME` / `HOME_VOLUME_NAME` | `dsh-data` / `dsh-home` | Name of the persistent state volume. |
+| `DATA_VOLUME_NAME` / `HOME_VOLUME_NAME` | `dsh-data` / `dsh-home` | Names of the Compose persistent state volumes; `DATA_VOLUME_NAME` is not used by the recommended bind-mounted `docker run` deployment. |
 
 ### Runtime environment variables
 
@@ -281,15 +294,46 @@ Other modes:
 - `AUTH_MODE=none` disables the login layer and should be used only behind another reviewed authentication boundary.
 - `AUTH_MODE=dsh` is reserved for a future DSH native-password release and currently fails closed. This prevents two authentication systems from silently stacking when native auth is added later.
 
-The generated JWT signing key is stored at `/data/auth/jwt-secret` in the lightweight image and at `/home/node/.local/share/deepseek-harness/auth/jwt-secret` in the workstation. Persist the corresponding volume; otherwise existing sessions are invalidated whenever the container is replaced.
+The generated JWT signing key is stored at `/data/auth/jwt-secret` in the lightweight image and at `/home/node/.local/share/deepseek-harness/auth/jwt-secret` in the workstation. Persist the corresponding bind path or volume; otherwise existing sessions are invalidated whenever the container is replaced.
 
 ## Backup and restore
 
-The lightweight `dsh-data` volume and the workstation `dsh-home` volume are both outside a 1Panel application's installation directory, so a normal 1Panel application backup does not include either. Stop the container before creating a consistent archive, and back up the package-local `data/workspace` bind through 1Panel or the host filesystem separately.
+The recommended lightweight deployment stores its state in the host bind
+`/opt/deepseek-harness/data`, while the workstation stores its state in the
+named `dsh-home` volume. These paths are outside a 1Panel application's
+installation directory, so a normal 1Panel application backup does not include
+them. Stop the container before creating a consistent archive, and back up the
+`/opt/deepseek-harness/workspace` bind through 1Panel or the host filesystem
+separately.
 
 ### Lightweight
 
-The named `dsh-data` volume holds Caddy, authentication, JWT, and DSH state. Back it up while the container is stopped:
+The recommended host bind holds Caddy, authentication, JWT, and DSH state. Back
+it up while the container is stopped:
+
+```bash
+docker stop deepseek-harness
+
+sudo tar -C /opt/deepseek-harness/data \
+  -czf /opt/deepseek-harness/dsh-data.tar.gz .
+
+docker start deepseek-harness
+```
+
+Restore only into a stopped container, preferably into an empty data directory,
+and preserve the existing `node` ownership and file modes:
+
+```bash
+docker stop deepseek-harness
+
+sudo tar -C /opt/deepseek-harness/data \
+  -xzf /opt/deepseek-harness/dsh-data.tar.gz
+
+docker start deepseek-harness
+```
+
+The checked-in Compose file uses a named volume instead. Back up that volume
+with:
 
 ```bash
 docker stop deepseek-harness
@@ -337,7 +381,12 @@ docker run --rm --entrypoint tar \
   -C /target -xzf /backup/dsh-home.tar.gz
 ```
 
-Removing the container or running ordinary `docker compose down` preserves the named volume. `docker compose down --volumes`, `docker volume rm`, and `docker volume prune` can remove it.
+Removing the container or running ordinary `docker compose down` preserves a
+named volume. `docker compose down --volumes`, `docker volume rm`, and
+`docker volume prune` can remove a named volume. A bind-mounted
+`/opt/deepseek-harness/data` is not a Docker volume and remains after these
+commands; remove or replace that host directory separately only when its data
+is no longer needed.
 
 ## Resource use
 
