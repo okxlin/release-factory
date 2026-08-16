@@ -69,6 +69,8 @@
 	route {
 		authorize with dsh_policy
 		reverse_proxy 127.0.0.1:{$DSH_INTERNAL_PORT} {
+			header_up Host 127.0.0.1:{$DSH_INTERNAL_PORT}
+			header_up -Origin
 			header_up -Authorization
 			header_up -Remote-User
 			header_up -X-Auth-User
