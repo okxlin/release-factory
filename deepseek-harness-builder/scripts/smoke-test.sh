@@ -153,7 +153,6 @@ cleanup() {
         "${home_volume}" \
         "${workspace_volume}" \
         "${secret_volume}" >/dev/null 2>&1 || true
-
     for cleanup_dir in "${data_bind_dir}" "${layout_attack_data_dir}"; do
         if [[ -d "${cleanup_dir}" ]]; then
             docker run --rm \
