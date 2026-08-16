@@ -5,6 +5,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 builder_dir="$(cd -- "${script_dir}/.." && pwd)"
 compose_file="${builder_dir}/compose.yml"
 example_env="${builder_dir}/image/.env.example"
+data_source="$(realpath -m -- "${builder_dir}/data/data")"
 workspace_source="$(realpath -m -- "${builder_dir}/data/workspace")"
 
 fail() {
@@ -56,17 +57,28 @@ jq -e '
     fail "Compose must use the unified deepseek-harness latest tag by default"
 pass "lightweight defaults to the unified deepseek-harness image repository"
 
+jq -e --arg source "${data_source}" '
+  [.services["deepseek-harness"].volumes[]
+    | select(.target == "/data")] as $mounts
+  | ($mounts | length) == 1
+    and $mounts[0].type == "bind"
+    and $mounts[0].target == "/data"
+    and $mounts[0].source == $source
+' <<<"${default_config}" >/dev/null ||
+    fail "Compose must persist Caddy, authentication, JWT, and DSH state through the package-local data bind at /data"
+pass "application state uses the package-local /data bind mount"
+
 jq -e '
   [.services["deepseek-harness"].volumes[]
     | select(.type == "volume")] as $mounts
   | ($mounts | length) == 1
-    and $mounts[0].source == "dsh-data"
-    and $mounts[0].target == "/data"
+    and $mounts[0].source == "dsh-home"
+    and $mounts[0].target == "/home/node"
     and (.volumes | length) == 1
-    and .volumes["dsh-data"].name == "dsh-data"
+    and .volumes["dsh-home"].name == "dsh-home"
 ' <<<"${default_config}" >/dev/null ||
-    fail "Compose must persist Caddy, authentication, JWT, and DSH state through one named volume at /data"
-pass "application state uses one persistent /data volume"
+    fail "Lightweight Compose must persist the user home through one named volume"
+pass "lightweight user installations use one persistent HOME volume"
 
 jq -e --arg source "${workspace_source}" '
   [.services["deepseek-harness"].volumes[]
@@ -80,10 +92,10 @@ pass "workspace uses a package-local bind mount for 1Panel backup and file acces
 
 jq -e '
   [.services["deepseek-harness"].volumes[].target]
-  | index("/home/node") == null
+  | index("/home/node") != null
 ' <<<"${default_config}" >/dev/null ||
-    fail "Lightweight Compose must not mount a workstation HOME volume"
-pass "Compose has no workstation HOME mount"
+    fail "Compose must include the shared /home/node HOME mount"
+pass "Compose includes the shared HOME mount"
 
 assert_socket_mount "${default_config}" "/dev/null"
 pass "Docker daemon access is disabled by default through a /dev/null bind"

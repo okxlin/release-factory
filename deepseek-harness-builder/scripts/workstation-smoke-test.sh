@@ -206,19 +206,19 @@ trap 'rm -rf "${tmp_dir}"' EXIT
     || fail "image variant metadata is not workstation"
 for persistent_dir in \
     /home/node \
-    /home/node/.local/share/deepseek-harness/auth \
-    /home/node/.local/share/deepseek-harness/caddy/config \
-    /home/node/.local/share/deepseek-harness/caddy/data \
-    /home/node/.local/share/deepseek-harness/dsh \
+    /data/auth \
+    /data/caddy/config \
+    /data/caddy/data \
+    /data/dsh \
     /workspace; do
     [[ -d "${persistent_dir}" && ! -L "${persistent_dir}" ]] \
         || fail "workstation directory is missing or symbolic: ${persistent_dir}"
 done
-[[ "${AUTH_STATE_DIR}" == "/home/node/.local/share/deepseek-harness/auth" ]] \
-    || fail "authentication state is not stored under the persistent home"
-[[ "${DSH_HOME}" == "/home/node/.local/share/deepseek-harness/dsh" ]] \
-    || fail "DeepSeek Harness state is not stored under the persistent home"
-pass "home, application state, and workspace use direct directories without symbolic links"
+[[ "${AUTH_STATE_DIR}" == "/data/auth" ]] \
+    || fail "authentication state is not stored under /data"
+[[ "${DSH_HOME}" == "/data/dsh" ]] \
+    || fail "DeepSeek Harness state is not stored under /data"
+pass "home, /data application state, and workspace use direct directories without symbolic links"
 [[ "$(node --version)" == "v24.18.0" ]] || fail "Node.js version drifted"
 [[ "$(pnpm --version)" == "11.21.0" ]] || fail "pnpm version drifted"
 [[ "$(go version)" == go\ version\ go1.26.6* ]] || fail "Go version drifted"
@@ -306,9 +306,11 @@ pass "workstation omits npm, Corepack, and sudo"
 
 touch "${HOME}/.workstation-write-probe"
 rm -f "${HOME}/.workstation-write-probe"
+touch /data/dsh/.workstation-write-probe
+rm -f /data/dsh/.workstation-write-probe
 touch /workspace/.workstation-write-probe
 rm -f /workspace/.workstation-write-probe
-pass "node user can write its persistent home and workspace"
+pass "node user can write persistent home, /data state, and workspace"
 CONTAINER
 
 printf '[workstation-smoke] ALL TESTS PASSED\n'

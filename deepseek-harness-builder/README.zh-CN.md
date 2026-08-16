@@ -46,7 +46,7 @@ browser
   -> DeepSeek Harness on 127.0.0.1:3080 inside the container
 ```
 
-只有 Caddy 监听容器接口。DSH 端口不会暴露给同宿主的其他容器或宿主网络。轻量镜像把 Caddy、认证、JWT 和 DSH 状态持久化到 `/data`，把用户工作目录放在 `/workspace`。workstation 会把一个命名卷直接挂载到 `/home/node`，把认证、Caddy 和 DSH 状态存放在 `/home/node/.local/share/deepseek-harness` 下，并用单独的直接 `/workspace` 挂载承载项目文件。workstation 的这两个路径都不是符号链接。
+只有 Caddy 监听容器接口。DSH 端口不会暴露给同宿主的其他容器或宿主网络。轻量镜像把 Caddy、认证、JWT 和 DSH 状态持久化到 `/data`，把用户工作目录放在 `/workspace`。workstation 把认证、Caddy 和 DSH 状态放在 `/data`，把用户安装的工具放在挂载到 `/home/node` 的 HOME 卷里，并用单独的直接 `/workspace` 挂载承载项目文件。workstation 的这两个路径都不是符号链接。
 
 ## 构建
 
@@ -114,7 +114,7 @@ docker run -d \
 
 `/opt/deepseek-harness` 是示例宿主路径，可以替换为你控制的任意持久目录。
 
-workstation 使用相同端口和认证变量。它通过一个命名卷持久化 HOME，并直接挂载项目目录：
+workstation 使用相同端口和认证变量。它通过 `/data` 持久化应用状态，通过一个命名卷持久化 HOME，并直接挂载项目目录：
 
 ```bash
 docker run -d \
@@ -122,12 +122,13 @@ docker run -d \
   --restart unless-stopped \
   -p 127.0.0.1:56789:8080 \
   --env-file /opt/deepseek-harness/runtime.env \
+  -v /opt/deepseek-harness/data:/data \
   -v dsh-home:/home/node \
   -v /opt/deepseek-harness/workspace:/workspace \
   ghcr.io/okxlin/deepseek-harness:workstation
 ```
 
-HOME 卷包含用户安装的 pnpm、pipx、Cargo、Go 工具，以及认证、Caddy 和 DSH 状态。workspace bind 用于项目文件，以及宿主侧备份或文件访问。
+HOME 卷包含用户安装的 pnpm、pipx、Cargo、Go 工具。应用状态位于 `/data`。workspace bind 用于项目文件，以及宿主侧备份或文件访问。
 
 Docker CLI、Compose 和 Buildx 可以通过远程 `DOCKER_HOST` 工作，不需要额外挂载。若要控制宿主 Docker daemon，必须显式加入：
 
@@ -139,16 +140,13 @@ entrypoint 会在可能时把 socket 的数字 group 映射给非特权 `node` �
 
 两个 Compose 文件都采用相同的可选 Docker socket 合约。复制 `image/.env.example` 到 `image/.env`，并至少设置 `PUBLIC_URL` 和 `AUTH_PASSWORD`，然后在 Docker 访问禁用状态下启动任一变体。
 
-仓库中的轻量 Compose 文件仍保留命名卷 `dsh-data`，用于兼容性和契约测试。上面的
-手动 `docker run` 示例使用推荐的 `/opt/deepseek-harness/data:/data` 路径绑定。
-如果通过 Compose 部署，请在本地 Compose override 或本地副本中使用相同的路径绑定；
-不要把特定环境的宿主路径提交到仓库：
+仓库中的 Compose 文件使用包内的 `./data/data`、`./data/workspace` 和 `dsh-home` 布局。上面的手动 `docker run` 示例使用推荐的 `/opt/deepseek-harness/data:/data` 路径绑定。如果通过 Compose 部署，请在本地 Compose override 或本地副本中使用相同的路径绑定；不要把特定环境的宿主路径提交到仓库：
 
 ```bash
 docker compose -f deepseek-harness-builder/compose.yml up -d
 ```
 
-workstation 把 HOME、用户安装工具链和应用状态持久化到命名卷 `dsh-home`，并把项目目录绑定到包内 `data/workspace`：
+workstation 把应用状态持久化到 `./data/data`，把 HOME 持久化到命名卷 `dsh-home`，并把项目目录绑定到 `./data/workspace`：
 
 ```bash
 docker compose -f deepseek-harness-builder/compose.workstation.yml up -d
@@ -225,7 +223,7 @@ AUTH_COOKIE_INSECURE=false
 | `BIND_ADDRESS` | `127.0.0.1` | 发布 HTTP 端口的宿主接口。位于 1Panel/OpenResty 后时保持 loopback。 |
 | `HOST_PORT` | `56789` | 映射到容器端口 `8080` 的宿主端口。 |
 | `DOCKER_SOCK_SRC` | `/dev/null` | Docker socket 源。`/dev/null` 或空值禁用 daemon 访问；`/var/run/docker.sock` 启用访问。 |
-| `DATA_VOLUME_NAME` / `HOME_VOLUME_NAME` | `dsh-data` / `dsh-home` | Compose 持久状态卷名称；推荐的路径绑定 `docker run` 部署不会使用 `DATA_VOLUME_NAME`。 |
+| `HOME_VOLUME_NAME` | `dsh-home` | Compose 持久 HOME 卷名称。 |
 
 ### 运行时环境变量
 
@@ -293,14 +291,14 @@ Go 漏洞数据库目前对历史 caddy-security findings `GO-2024-2549` 和 `GO
 - `AUTH_MODE=none` 禁用登录层，只应在另一个已审查认证边界之后使用。
 - `AUTH_MODE=dsh` 为未来 DSH 原生密码发布预留，目前 fail closed。这可以防止未来原生认证加入后两个认证系统静默叠加。
 
-生成的 JWT 签名密钥在轻量镜像中存储于 `/data/auth/jwt-secret`，在 workstation 中存储于 `/home/node/.local/share/deepseek-harness/auth/jwt-secret`。请持久化对应的路径绑定或命名卷；否则每次替换容器都会让现有会话失效。
+生成的 JWT 签名密钥在轻量镜像和 workstation 中都存储于 `/data/auth/jwt-secret`。请持久化对应的路径绑定或命名卷；否则每次替换容器都会让现有会话失效。
 
 ## 备份与恢复
 
 推荐的轻量部署把状态保存在宿主机路径绑定 `/opt/deepseek-harness/data`，而 workstation
-把状态保存在命名卷 `dsh-home`。这些路径都位于 1Panel 应用安装目录之外，因此普通
-1Panel 应用备份不包含它们。创建一致归档前请停止容器，并通过 1Panel 或宿主文件系统
-单独备份 `/opt/deepseek-harness/workspace` 路径绑定。
+把应用状态也保存在同一个路径绑定、把用户安装工具保存在命名卷 `dsh-home`。这些路径都位于
+1Panel 应用安装目录之外，因此普通 1Panel 应用备份不包含它们。创建一致归档前请停止容器，
+并通过 1Panel 或宿主文件系统单独备份 `/opt/deepseek-harness/workspace` 路径绑定。
 
 ### 轻量镜像
 
@@ -310,7 +308,7 @@ Go 漏洞数据库目前对历史 caddy-security findings `GO-2024-2549` 和 `GO
 docker stop deepseek-harness
 
 sudo tar -C /opt/deepseek-harness/data \
-  -czf /opt/deepseek-harness/dsh-data.tar.gz .
+  -czf /opt/deepseek-harness/deepseek-harness-data.tar.gz .
 
 docker start deepseek-harness
 ```
@@ -321,34 +319,12 @@ docker start deepseek-harness
 docker stop deepseek-harness
 
 sudo tar -C /opt/deepseek-harness/data \
-  -xzf /opt/deepseek-harness/dsh-data.tar.gz
+  -xzf /opt/deepseek-harness/deepseek-harness-data.tar.gz
 
 docker start deepseek-harness
 ```
 
-仓库中的 Compose 文件使用命名卷。备份该命名卷：
-
-```bash
-docker stop deepseek-harness
-
-docker run --rm --entrypoint tar \
-  -v dsh-data:/source:ro \
-  -v "$PWD":/backup \
-  ghcr.io/okxlin/deepseek-harness:latest \
-  -C /source -czf /backup/dsh-data.tar.gz .
-
-docker start deepseek-harness
-```
-
-只恢复到已停止容器，最好恢复到空卷：
-
-```bash
-docker run --rm --entrypoint tar \
-  -v dsh-data:/target \
-  -v "$PWD":/backup:ro \
-  ghcr.io/okxlin/deepseek-harness:latest \
-  -C /target -xzf /backup/dsh-data.tar.gz
-```
+仓库中的 Compose 文件使用包内的 `./data/data`、`./data/workspace` 和 `dsh-home` 布局。若在仓库本地运行 Compose，请直接备份这些目录。
 
 ### Workstation
 
@@ -376,8 +352,7 @@ docker run --rm --entrypoint tar \
 
 删除容器或执行普通 `docker compose down` 会保留命名卷。`docker compose down --volumes`、
 `docker volume rm` 和 `docker volume prune` 可能删除命名卷。绑定到
-`/opt/deepseek-harness/data` 的宿主机目录不是 Docker volume，不会被这些命令删除；只有
-在确认不再需要其中数据后，才应单独删除或替换该宿主机目录。
+`/opt/deepseek-harness/data` 的宿主机目录不是 Docker volume，不会被这些命令删除；只有在确认不再需要其中数据后，才应单独删除或替换该宿主机目录。
 
 ## 资源使用
 
@@ -398,7 +373,7 @@ deepseek-harness-builder/scripts/smoke-test.sh \
   --variant runtime
 ```
 
-测试使用命名测试卷且不占用宿主端口。workstation 会把 HOME 直接挂到 `/home/node`，把测试 workspace 直接挂到 `/workspace`；轻量 runtime 保留 `/data` 和 `/workspace` 卷。它会模拟 1Panel/OpenResty 头，并检查登录重定向、浏览器自动填充属性、错误密码拒绝、受保护 Cookie、伪造 identity header、两个 DSH WebSocket、登出、loopback 绑定、secret 隔离、JWT 状态持久化、容器重建持久化、资源使用、fail-closed 配置错误、pnpm 和所选镜像变体。
+测试使用临时宿主 bind 的 `/data`，以及 HOME 和 workspace 的命名测试卷。workstation 会把 HOME 直接挂到 `/home/node`，把测试 workspace 直接挂到 `/workspace`；它会模拟 1Panel/OpenResty 头，并检查登录重定向、浏览器自动填充属性、错误密码拒绝、受保护 Cookie、伪造 identity header、两个 DSH WebSocket、登出、loopback 绑定、secret 隔离、JWT 状态持久化、容器重建持久化、资源使用、fail-closed 配置错误、pnpm 和所选镜像变体。
 
 运行轻量 Compose 合约：
 
@@ -406,7 +381,7 @@ deepseek-harness-builder/scripts/smoke-test.sh \
 deepseek-harness-builder/scripts/check-compose.sh
 ```
 
-它会证明一个命名卷挂载到 `/data`、包内 workspace 挂载到 `/workspace`、默认 socket 源是 `/dev/null`、启用源是 `/var/run/docker.sock`、不存在 workstation HOME 卷，并且 HTTP 端口保持 loopback 绑定。
+它会证明包内状态 bind 挂载到 `/data`、包内 workspace 挂载到 `/workspace`、默认 socket 源是 `/dev/null`、启用源是 `/var/run/docker.sock`，并且 HTTP 端口保持 loopback 绑定。
 
 运行两个 workstation 合约：
 
@@ -422,7 +397,7 @@ deepseek-harness-builder/scripts/workstation-smoke-test.sh \
   --image deepseek-harness-workstation:local
 ```
 
-Compose 合约检查会解析 socket 开关的两种状态，并证明一个命名卷直接挂载到 `/home/node`、包内 workspace 直接挂载到 `/workspace`、默认 socket 源是 `/dev/null`、启用源是 `/var/run/docker.sock`，且 HTTP 端口保持 loopback 绑定。workstation 专用镜像测试会编译并运行 C、C++、Go、Rust 探针，创建 Python 虚拟环境，检查普通和登录 shell 的 PATH 行为，验证 CLI 集合，确认所有 Docker 客户端二进制文件都使用 Go `1.26.6` 且不包含旧 daemon 模块，确认 Docker 默认没有 daemon 访问，使用隔离 Unix socket 刻画可选 socket group 映射，验证镜像只声明 `/home/node`，并确认 HOME、应用状态和 workspace 都是真实可写目录而不是符号链接。它还会在 `no-new-privileges` 下运行已安装的 DSH sandbox executor：`workspace-write` 必须允许项目写入并拒绝 workspace 外可写路径，而显式 `danger-full-access` 重试必须允许外部写入且不增加容器特权。
+Compose 合约检查会解析 socket 开关的两种状态，并证明包内状态 bind 直接挂载到 `/data`、一个命名卷直接挂载到 `/home/node`、包内 workspace 直接挂载到 `/workspace`、默认 socket 源是 `/dev/null`、启用源是 `/var/run/docker.sock`，且 HTTP 端口保持 loopback 绑定。workstation 专用镜像测试会编译并运行 C、C++、Go、Rust 探针，创建 Python 虚拟环境，检查普通和登录 shell 的 PATH 行为，验证 CLI 集合，确认所有 Docker 客户端二进制文件都使用 Go `1.26.6` 且不包含旧 daemon 模块，确认 Docker 默认没有 daemon 访问，使用隔离 Unix socket 刻画可选 socket group 映射，验证镜像只声明 `/home/node`，并确认 HOME、应用状态和 workspace 都是真实可写目录而不是符号链接。它还会在 `no-new-privileges` 下运行已安装的 DSH sandbox executor：`workspace-write` 必须允许项目写入并拒绝 workspace 外可写路径，而显式 `danger-full-access` 重试必须允许外部写入且不增加容器特权。
 
 构建镜像后运行 Caddy 漏洞门禁：
 

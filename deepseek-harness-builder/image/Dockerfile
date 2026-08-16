@@ -304,11 +304,11 @@ ARG PNPM_VERSION=11.21.0
 ARG RUST_VERSION=1.97.1
 
 ENV CARGO_HOME=/home/node/.cargo \
-    AUTH_STATE_DIR=/home/node/.local/share/deepseek-harness/auth \
-    CADDY_CONFIG_HOME=/home/node/.local/share/deepseek-harness/caddy/config \
-    CADDY_DATA_HOME=/home/node/.local/share/deepseek-harness/caddy/data \
+    AUTH_STATE_DIR=/data/auth \
+    CADDY_CONFIG_HOME=/data/caddy/config \
+    CADDY_DATA_HOME=/data/caddy/data \
     DSH_IMAGE_VARIANT=workstation \
-    DSH_HOME=/home/node/.local/share/deepseek-harness/dsh \
+    DSH_HOME=/data/dsh \
     GOPATH=/home/node/go \
     PIPX_BIN_DIR=/home/node/.local/bin \
     PIPX_HOME=/home/node/.local/pipx \
@@ -392,10 +392,6 @@ RUN apt-get update \
         /home/node/.local \
         /home/node/.local/bin \
         /home/node/.local/pipx \
-        /home/node/.local/share/deepseek-harness/auth \
-        /home/node/.local/share/deepseek-harness/caddy/config \
-        /home/node/.local/share/deepseek-harness/caddy/data \
-        /home/node/.local/share/deepseek-harness/dsh \
         /home/node/.local/share/pnpm \
         /home/node/go \
     && chown -R node:node /home/node \
@@ -443,5 +439,3 @@ RUN rm -rf \
     && ! command -v python3 \
     && ! command -v go \
     && ! command -v rustc
-
-VOLUME ["/data", "/workspace"]

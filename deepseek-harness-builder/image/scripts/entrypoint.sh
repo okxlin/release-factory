@@ -11,6 +11,7 @@ CADDY_DATA_HOME="${CADDY_DATA_HOME:-/data/caddy/data}"
 DSH_HOME="${DSH_HOME:-/data/dsh}"
 DSH_VERSION_FILE="${DSH_VERSION_FILE:-/etc/deepseek-harness-version}"
 DSH_WORKSPACE="${DSH_WORKSPACE:-/workspace}"
+LEGACY_WORKSTATION_STATE_DIR="${LEGACY_WORKSTATION_STATE_DIR:-/home/node/.local/share/deepseek-harness}"
 CADDY_AUTH_CONFIG="/etc/caddy/Caddyfile"
 CADDY_PASSTHROUGH_CONFIG="/etc/caddy/Caddyfile.passthrough"
 
@@ -82,7 +83,9 @@ prepare_directories() {
         "${DSH_HOME}"; do
         prepare_owned_directory "${path}"
     done
+}
 
+validate_auth_state_files() {
     if [[ -L "${AUTH_DB_PATH}" || -L "${AUTH_JWT_SECRET_PATH}" ]]; then
         fatal "authentication state files must not be symbolic links"
     fi
@@ -92,6 +95,26 @@ prepare_directories() {
     if [[ -e "${AUTH_JWT_SECRET_PATH}" && ! -f "${AUTH_JWT_SECRET_PATH}" ]]; then
         fatal "authentication signing key path must be a regular file"
     fi
+}
+
+migrate_legacy_workstation_state() {
+    local legacy_root="${LEGACY_WORKSTATION_STATE_DIR}"
+
+    [[ "${AUTH_STATE_DIR}" == /data/* ]] || return 0
+    [[ -d "${legacy_root}" ]] || return 0
+    [[ ! -L "${legacy_root}" ]] \
+        || fatal "legacy workstation state path must be a regular directory, not a symbolic link"
+
+    if [[ -e "${AUTH_DB_PATH}" || -e "${AUTH_JWT_SECRET_PATH}" ]]; then
+        return 0
+    fi
+
+    if ! find "${legacy_root}" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+        return 0
+    fi
+
+    log "migrating legacy workstation application state from ${legacy_root} to /data"
+    cp -a -n "${legacy_root}/." /data/
 }
 
 parse_public_url() {
@@ -283,6 +306,9 @@ AUTH_TOKEN_LIFETIME=$((10#${AUTH_TOKEN_LIFETIME}))
     || fatal "AUTH_USERNAME contains unsupported characters"
 
 prepare_directories
+validate_auth_state_files
+migrate_legacy_workstation_state
+validate_auth_state_files
 if [[ -x /usr/local/bin/configure-docker-socket-access.sh ]]; then
     /usr/local/bin/configure-docker-socket-access.sh
 fi
