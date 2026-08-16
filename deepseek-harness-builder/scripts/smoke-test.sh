@@ -141,6 +141,7 @@ fail() {
 cleanup() {
     local status=$?
     trap - EXIT
+    local cleanup_dir
 
     if (( status != 0 )) && docker container inspect "${container_name}" >/dev/null 2>&1; then
         printf '[smoke] container logs after failure:\n' >&2
@@ -152,8 +153,17 @@ cleanup() {
         "${home_volume}" \
         "${workspace_volume}" \
         "${secret_volume}" >/dev/null 2>&1 || true
-    rm -rf -- "${data_bind_dir}"
-    rm -rf -- "${layout_attack_data_dir}"
+    for cleanup_dir in "${data_bind_dir}" "${layout_attack_data_dir}"; do
+        if [[ -d "${cleanup_dir}" ]]; then
+            docker run --rm \
+                --user 0 \
+                --entrypoint sh \
+                -v "${cleanup_dir}:/cleanup" \
+                "${IMAGE}" \
+                -c 'find /cleanup -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +'
+            rmdir "${cleanup_dir}" >/dev/null 2>&1 || true
+        fi
+    done
     exit "${status}"
 }
 trap cleanup EXIT
