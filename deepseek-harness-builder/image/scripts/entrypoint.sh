@@ -75,6 +75,7 @@ prepare_owned_directory() {
 prepare_directories() {
     local path
     for path in \
+        /data \
         /home/node \
         "${DSH_WORKSPACE}" \
         "${AUTH_STATE_DIR}" \
