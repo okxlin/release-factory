@@ -95,15 +95,22 @@ workstation 镜像继承相同的 DSH/认证运行时，并额外包含：
 复制 `image/.env.example` 到私有环境文件，并至少修改 `PUBLIC_URL` 和 `AUTH_PASSWORD`。不要提交这个文件。
 
 ```bash
+sudo install -d -m 0750 /opt/deepseek-harness/data /opt/deepseek-harness/workspace
+
 docker run -d \
   --name deepseek-harness \
   --restart unless-stopped \
   -p 127.0.0.1:56789:8080 \
   --env-file /opt/deepseek-harness/runtime.env \
-  -v dsh-data:/data \
+  -v /opt/deepseek-harness/data:/data \
   -v /opt/deepseek-harness/workspace:/workspace \
   ghcr.io/okxlin/deepseek-harness:latest
 ```
+
+轻量镜像建议把宿主机目录绑定到 `/data`。这样认证、Caddy、JWT 和 DSH
+状态会直接保存在 `/opt/deepseek-harness/data`，宿主机的备份和迁移工具可以
+直接访问。entrypoint 会为 `node` 用户（UID/GID `1000:1000`）创建所需的子目录
+和文件；请保持绑定源是普通目录，并在复制或恢复数据时保留其所有权和权限。
 
 `/opt/deepseek-harness` 是示例宿主路径，可以替换为你控制的任意持久目录。
 
@@ -132,7 +139,10 @@ entrypoint 会在可能时把 socket 的数字 group 映射给非特权 `node` �
 
 两个 Compose 文件都采用相同的可选 Docker socket 合约。复制 `image/.env.example` 到 `image/.env`，并至少设置 `PUBLIC_URL` 和 `AUTH_PASSWORD`，然后在 Docker 访问禁用状态下启动任一变体。
 
-轻量镜像把 Caddy、认证、JWT 和 DSH 状态持久化到命名卷 `dsh-data`，并把项目目录绑定到包内 `data/workspace`：
+仓库中的轻量 Compose 文件仍保留命名卷 `dsh-data`，用于兼容性和契约测试。上面的
+手动 `docker run` 示例使用推荐的 `/opt/deepseek-harness/data:/data` 路径绑定。
+如果通过 Compose 部署，请在本地 Compose override 或本地副本中使用相同的路径绑定；
+不要把特定环境的宿主路径提交到仓库：
 
 ```bash
 docker compose -f deepseek-harness-builder/compose.yml up -d
@@ -215,7 +225,7 @@ AUTH_COOKIE_INSECURE=false
 | `BIND_ADDRESS` | `127.0.0.1` | 发布 HTTP 端口的宿主接口。位于 1Panel/OpenResty 后时保持 loopback。 |
 | `HOST_PORT` | `56789` | 映射到容器端口 `8080` 的宿主端口。 |
 | `DOCKER_SOCK_SRC` | `/dev/null` | Docker socket 源。`/dev/null` 或空值禁用 daemon 访问；`/var/run/docker.sock` 启用访问。 |
-| `DATA_VOLUME_NAME` / `HOME_VOLUME_NAME` | `dsh-data` / `dsh-home` | 持久状态卷名称。 |
+| `DATA_VOLUME_NAME` / `HOME_VOLUME_NAME` | `dsh-data` / `dsh-home` | Compose 持久状态卷名称；推荐的路径绑定 `docker run` 部署不会使用 `DATA_VOLUME_NAME`。 |
 
 ### 运行时环境变量
 
@@ -283,15 +293,40 @@ Go 漏洞数据库目前对历史 caddy-security findings `GO-2024-2549` 和 `GO
 - `AUTH_MODE=none` 禁用登录层，只应在另一个已审查认证边界之后使用。
 - `AUTH_MODE=dsh` 为未来 DSH 原生密码发布预留，目前 fail closed。这可以防止未来原生认证加入后两个认证系统静默叠加。
 
-生成的 JWT 签名密钥在轻量镜像中存储于 `/data/auth/jwt-secret`，在 workstation 中存储于 `/home/node/.local/share/deepseek-harness/auth/jwt-secret`。请持久化对应卷；否则每次替换容器都会让现有会话失效。
+生成的 JWT 签名密钥在轻量镜像中存储于 `/data/auth/jwt-secret`，在 workstation 中存储于 `/home/node/.local/share/deepseek-harness/auth/jwt-secret`。请持久化对应的路径绑定或命名卷；否则每次替换容器都会让现有会话失效。
 
 ## 备份与恢复
 
-轻量 `dsh-data` 卷和 workstation `dsh-home` 卷都位于 1Panel 应用安装目录之外，因此普通 1Panel 应用备份不包含它们。创建一致归档前请停止容器，并通过 1Panel 或宿主文件系统单独备份包内 `data/workspace` bind。
+推荐的轻量部署把状态保存在宿主机路径绑定 `/opt/deepseek-harness/data`，而 workstation
+把状态保存在命名卷 `dsh-home`。这些路径都位于 1Panel 应用安装目录之外，因此普通
+1Panel 应用备份不包含它们。创建一致归档前请停止容器，并通过 1Panel 或宿主文件系统
+单独备份 `/opt/deepseek-harness/workspace` 路径绑定。
 
 ### 轻量镜像
 
-命名卷 `dsh-data` 保存 Caddy、认证、JWT 和 DSH 状态。容器停止后再备份：
+推荐的宿主机路径绑定保存 Caddy、认证、JWT 和 DSH 状态。容器停止后再备份：
+
+```bash
+docker stop deepseek-harness
+
+sudo tar -C /opt/deepseek-harness/data \
+  -czf /opt/deepseek-harness/dsh-data.tar.gz .
+
+docker start deepseek-harness
+```
+
+只恢复到已停止容器，最好恢复到空的数据目录，并保留现有 `node` 所有权和文件权限：
+
+```bash
+docker stop deepseek-harness
+
+sudo tar -C /opt/deepseek-harness/data \
+  -xzf /opt/deepseek-harness/dsh-data.tar.gz
+
+docker start deepseek-harness
+```
+
+仓库中的 Compose 文件使用命名卷。备份该命名卷：
 
 ```bash
 docker stop deepseek-harness
@@ -339,7 +374,10 @@ docker run --rm --entrypoint tar \
   -C /target -xzf /backup/dsh-home.tar.gz
 ```
 
-删除容器或执行普通 `docker compose down` 会保留命名卷。`docker compose down --volumes`、`docker volume rm` 和 `docker volume prune` 可能删除它。
+删除容器或执行普通 `docker compose down` 会保留命名卷。`docker compose down --volumes`、
+`docker volume rm` 和 `docker volume prune` 可能删除命名卷。绑定到
+`/opt/deepseek-harness/data` 的宿主机目录不是 Docker volume，不会被这些命令删除；只有
+在确认不再需要其中数据后，才应单独删除或替换该宿主机目录。
 
 ## 资源使用
 
