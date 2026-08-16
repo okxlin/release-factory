@@ -110,9 +110,10 @@ docker run -d \
 The lightweight runtime is recommended with a host bind at `/data`. It keeps
 authentication, Caddy, JWT, and DSH state in
 `/opt/deepseek-harness/data`, where host backup and migration tools can access
-it directly. The entrypoint creates the required subdirectories and files for
-the `node` user (UID/GID `1000:1000`); keep the bind source a regular directory
-and preserve its ownership and permissions when copying or restoring data.
+it directly. The entrypoint normalizes the bind root and creates the required
+subdirectories and files for the `node` user (UID/GID `1000:1000`); keep the
+bind source a regular directory and preserve its ownership and permissions when
+copying or restoring data.
 
 The workstation uses the same ports and authentication variables. It persists application state through `/data`, HOME through one named volume, and mounts the project directory directly:
 
