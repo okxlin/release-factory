@@ -399,6 +399,24 @@ async function login() {
   return jar;
 }
 
+async function settingsDescribe(jar) {
+  const body = JSON.stringify({
+    type: 'client-request',
+    rpcId: 'smoke-settings-describe',
+    method: 'settings.describe',
+    payload: {},
+  });
+  return request('/api/settings.describe', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body),
+      Origin: publicOrigin.origin,
+    },
+    body,
+  }, jar);
+}
+
 function websocket(path, jar) {
   return new Promise((resolve, reject) => {
     const req = http.request({
@@ -459,6 +477,12 @@ function websocket(path, jar) {
   const jar = await login();
 
   if (profile === 'full') {
+    const settings = await settingsDescribe(jar);
+    assert(settings.status === 200,
+      'authenticated settings API reaches DeepSeek Harness through Caddy');
+    assert(JSON.parse(settings.body).result?.ok === true,
+      'authenticated settings API returns the provider catalog payload');
+
     assert(await websocket('/api/events.mux', jar) === 101,
       'multiplex WebSocket upgrades through the proxy contract');
     assert(await websocket('/api/events.host', jar) === 101,
