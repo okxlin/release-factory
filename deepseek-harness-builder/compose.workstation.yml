@@ -9,6 +9,7 @@ services:
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-56789}:8080"
     volumes:
+      - ./data/data:/data
       - dsh-home:/home/node
       - ./data/workspace:/workspace
       - ${DOCKER_SOCK_SRC:-/dev/null}:/var/run/docker.sock

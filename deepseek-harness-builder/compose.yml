@@ -9,7 +9,8 @@ services:
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-56789}:8080"
     volumes:
-      - dsh-data:/data
+      - ./data/data:/data
+      - dsh-home:/home/node
       - ./data/workspace:/workspace
       - ${DOCKER_SOCK_SRC:-/dev/null}:/var/run/docker.sock
     healthcheck:
@@ -20,5 +21,5 @@ services:
       start_period: 15s
 
 volumes:
-  dsh-data:
-    name: ${DATA_VOLUME_NAME:-dsh-data}
+  dsh-home:
+    name: ${HOME_VOLUME_NAME:-dsh-home}

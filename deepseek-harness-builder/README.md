@@ -46,7 +46,7 @@ browser
   -> DeepSeek Harness on 127.0.0.1:3080 inside the container
 ```
 
-Only Caddy listens on the container interface. The DSH port is not exposed to sibling containers or the host network. The lightweight image persists Caddy, authentication, JWT, and DSH state in `/data` and user work in `/workspace`. The workstation mounts one named volume directly at `/home/node`, stores authentication, Caddy, and DSH state below `/home/node/.local/share/deepseek-harness`, and uses a separate direct `/workspace` mount for projects. Neither workstation path is a symbolic link.
+Only Caddy listens on the container interface. The DSH port is not exposed to sibling containers or the host network. The lightweight image persists Caddy, authentication, JWT, and DSH state in `/data` and user work in `/workspace`. The workstation keeps authentication, Caddy, and DSH state in `/data`, keeps user-installed tools in one named HOME volume at `/home/node`, and uses a separate direct `/workspace` mount for projects. Neither workstation path is a symbolic link.
 
 ## Build
 
@@ -114,7 +114,7 @@ it directly. The entrypoint creates the required subdirectories and files for
 the `node` user (UID/GID `1000:1000`); keep the bind source a regular directory
 and preserve its ownership and permissions when copying or restoring data.
 
-The workstation uses the same ports and authentication variables. It persists HOME through one named volume and mounts the project directory directly:
+The workstation uses the same ports and authentication variables. It persists application state through `/data`, HOME through one named volume, and mounts the project directory directly:
 
 ```bash
 docker run -d \
@@ -122,12 +122,13 @@ docker run -d \
   --restart unless-stopped \
   -p 127.0.0.1:56789:8080 \
   --env-file /opt/deepseek-harness/runtime.env \
+  -v /opt/deepseek-harness/data:/data \
   -v dsh-home:/home/node \
   -v /opt/deepseek-harness/workspace:/workspace \
   ghcr.io/okxlin/deepseek-harness:workstation
 ```
 
-The HOME volume contains user-installed pnpm, pipx, Cargo, and Go tools plus authentication, Caddy, and DSH state. The workspace bind is intended for project files and host-side backup or file access.
+The HOME volume contains user-installed pnpm, pipx, Cargo, and Go tools. Application state lives under `/data`. The workspace bind is intended for project files and host-side backup or file access.
 
 Docker CLI, Compose, and Buildx work against a remote `DOCKER_HOST` without additional mounts. To control the host Docker daemon, explicitly add:
 
@@ -139,17 +140,17 @@ The entrypoint maps the socket's numeric group to the unprivileged `node` user w
 
 Both Compose files apply the same opt-in Docker socket contract. Copy `image/.env.example` to `image/.env` and set at least `PUBLIC_URL` and `AUTH_PASSWORD` before starting either variant with Docker access disabled.
 
-The checked-in lightweight Compose file retains the named `dsh-data` volume for
-compatibility and contract tests. The manual `docker run` example above uses
-the recommended `/opt/deepseek-harness/data:/data` bind instead. If you deploy
-through Compose, apply the same bind in a local Compose override or local copy;
-do not commit an environment-specific host path to the repository:
+The checked-in Compose files use package-local binds for application state and
+workspace data. The manual `docker run` example above uses the recommended
+`/opt/deepseek-harness/data:/data` bind instead. If you deploy through Compose,
+apply the same bind in a local Compose override or local copy; do not commit an
+environment-specific host path to the repository:
 
 ```bash
 docker compose -f deepseek-harness-builder/compose.yml up -d
 ```
 
-The workstation persists HOME, user-installed toolchains, and application state in the named `dsh-home` volume and binds the project directory to the package-local `data/workspace`:
+The workstation persists application state under `./data/data`, HOME in the named `dsh-home` volume, and binds the project directory to `./data/workspace`:
 
 ```bash
 docker compose -f deepseek-harness-builder/compose.workstation.yml up -d
@@ -226,7 +227,7 @@ Set these in the shell or a `.env` file next to the Compose file to customize a 
 | `BIND_ADDRESS` | `127.0.0.1` | Host interface to publish the HTTP port on. Keep loopback behind 1Panel/OpenResty. |
 | `HOST_PORT` | `56789` | Host port mapped to container port `8080`. |
 | `DOCKER_SOCK_SRC` | `/dev/null` | Docker socket source. `/dev/null` or empty disables daemon access; `/var/run/docker.sock` enables it. |
-| `DATA_VOLUME_NAME` / `HOME_VOLUME_NAME` | `dsh-data` / `dsh-home` | Names of the Compose persistent state volumes; `DATA_VOLUME_NAME` is not used by the recommended bind-mounted `docker run` deployment. |
+| `HOME_VOLUME_NAME` | `dsh-home` | Name of the Compose persistent HOME volume used by the workstation. |
 
 ### Runtime environment variables
 
@@ -294,17 +295,21 @@ Other modes:
 - `AUTH_MODE=none` disables the login layer and should be used only behind another reviewed authentication boundary.
 - `AUTH_MODE=dsh` is reserved for a future DSH native-password release and currently fails closed. This prevents two authentication systems from silently stacking when native auth is added later.
 
-The generated JWT signing key is stored at `/data/auth/jwt-secret` in the lightweight image and at `/home/node/.local/share/deepseek-harness/auth/jwt-secret` in the workstation. Persist the corresponding bind path or volume; otherwise existing sessions are invalidated whenever the container is replaced.
+The generated JWT signing key is stored at `/data/auth/jwt-secret` in both images. Persist the corresponding bind path or volume; otherwise existing sessions are invalidated whenever the container is replaced.
 
 ## Backup and restore
 
 The recommended lightweight deployment stores its state in the host bind
-`/opt/deepseek-harness/data`, while the workstation stores its state in the
-named `dsh-home` volume. These paths are outside a 1Panel application's
-installation directory, so a normal 1Panel application backup does not include
-them. Stop the container before creating a consistent archive, and back up the
-`/opt/deepseek-harness/workspace` bind through 1Panel or the host filesystem
-separately.
+`/opt/deepseek-harness/data`, while the workstation stores application state in
+the same bind and user-installed tools in the named `dsh-home` volume. These
+paths are outside a 1Panel application's installation directory, so a normal
+1Panel application backup does not include them. Stop the container before
+creating a consistent archive, and back up the `/opt/deepseek-harness/workspace`
+bind through 1Panel or the host filesystem separately.
+
+The checked-in Compose files use the same layout with package-local
+`./data/data`, `./data/workspace`, and `dsh-home` paths. Copy those directories
+directly if you run the repository Compose files locally.
 
 ### Lightweight
 
@@ -315,7 +320,7 @@ it up while the container is stopped:
 docker stop deepseek-harness
 
 sudo tar -C /opt/deepseek-harness/data \
-  -czf /opt/deepseek-harness/dsh-data.tar.gz .
+  -czf /opt/deepseek-harness/deepseek-harness-data.tar.gz .
 
 docker start deepseek-harness
 ```
@@ -327,34 +332,9 @@ and preserve the existing `node` ownership and file modes:
 docker stop deepseek-harness
 
 sudo tar -C /opt/deepseek-harness/data \
-  -xzf /opt/deepseek-harness/dsh-data.tar.gz
+  -xzf /opt/deepseek-harness/deepseek-harness-data.tar.gz
 
 docker start deepseek-harness
-```
-
-The checked-in Compose file uses a named volume instead. Back up that volume
-with:
-
-```bash
-docker stop deepseek-harness
-
-docker run --rm --entrypoint tar \
-  -v dsh-data:/source:ro \
-  -v "$PWD":/backup \
-  ghcr.io/okxlin/deepseek-harness:latest \
-  -C /source -czf /backup/dsh-data.tar.gz .
-
-docker start deepseek-harness
-```
-
-Restore only into a stopped container and preferably into an empty volume:
-
-```bash
-docker run --rm --entrypoint tar \
-  -v dsh-data:/target \
-  -v "$PWD":/backup:ro \
-  ghcr.io/okxlin/deepseek-harness:latest \
-  -C /target -xzf /backup/dsh-data.tar.gz
 ```
 
 ### Workstation
@@ -407,7 +387,7 @@ deepseek-harness-builder/scripts/smoke-test.sh \
   --variant runtime
 ```
 
-The test uses named test volumes and no host port. The workstation mounts HOME directly at `/home/node` and the test workspace directly at `/workspace`; the lightweight runtime retains its `/data` and `/workspace` volumes. It simulates the 1Panel/OpenResty headers and checks login redirects, browser autofill attributes, wrong-password rejection, protected cookies, forged identity headers, both DSH WebSockets, logout, loopback binding, secret isolation, persistent JWT state, container-recreation persistence, resource use, fail-closed configuration errors, pnpm, and the selected image variant.
+The test uses a temporary host bind for `/data` and named test volumes for HOME and workspace. Both variants mount the test workspace directly at `/workspace`; the workstation also mounts HOME directly at `/home/node`. It simulates the 1Panel/OpenResty headers and checks login redirects, browser autofill attributes, wrong-password rejection, protected cookies, forged identity headers, both DSH WebSockets, logout, loopback binding, secret isolation, persistent JWT state, container-recreation persistence, resource use, fail-closed configuration errors, pnpm, and the selected image variant.
 
 Run the lightweight Compose contract:
 
@@ -415,7 +395,7 @@ Run the lightweight Compose contract:
 deepseek-harness-builder/scripts/check-compose.sh
 ```
 
-It proves that one named volume is mounted at `/data`, the package-local workspace is mounted at `/workspace`, the default socket source is `/dev/null`, the enabled source is `/var/run/docker.sock`, no workstation HOME volume is present, and the HTTP port remains loopback-bound.
+It proves that the package-local state bind is mounted at `/data`, the package-local workspace is mounted at `/workspace`, the default socket source is `/dev/null`, the enabled source is `/var/run/docker.sock`, and the HTTP port remains loopback-bound.
 
 Run both workstation contracts:
 
@@ -431,7 +411,7 @@ deepseek-harness-builder/scripts/workstation-smoke-test.sh \
   --image deepseek-harness-workstation:local
 ```
 
-The Compose contract check parses both socket-switch states and proves that one named volume is mounted directly at `/home/node`, the package-local workspace is mounted directly at `/workspace`, the default socket source is `/dev/null`, the enabled source is `/var/run/docker.sock`, and the HTTP port remains loopback-bound. The workstation-specific image test compiles and runs C, C++, Go, and Rust probes, creates a Python virtual environment, checks normal and login-shell PATH behavior, verifies the CLI set, confirms all Docker client binaries use Go `1.26.6` without the legacy daemon module, confirms Docker has no daemon access by default, characterizes optional socket-group mapping with an isolated Unix socket, verifies that the image declares only `/home/node`, and confirms that HOME, application state, and workspace are real writable directories rather than symbolic links. It also runs the installed DSH sandbox executor under `no-new-privileges`: `workspace-write` must permit a project write and deny a writable path outside the workspace, while an explicit `danger-full-access` retry must permit that outside write without adding container privileges.
+The Compose contract check parses both socket-switch states and proves that the package-local state bind is mounted directly at `/data`, that one named volume is mounted directly at `/home/node`, that the package-local workspace is mounted directly at `/workspace`, the default socket source is `/dev/null`, the enabled source is `/var/run/docker.sock`, and the HTTP port remains loopback-bound. The workstation-specific image test compiles and runs C, C++, Go, and Rust probes, creates a Python virtual environment, checks normal and login-shell PATH behavior, verifies the CLI set, confirms all Docker client binaries use Go `1.26.6` without the legacy daemon module, confirms Docker has no daemon access by default, characterizes optional socket-group mapping with an isolated Unix socket, verifies that the image declares only `/home/node`, and confirms that HOME, application state, and workspace are real writable directories rather than symbolic links. It also runs the installed DSH sandbox executor under `no-new-privileges`: `workspace-write` must permit a project write and deny a writable path outside the workspace, while an explicit `danger-full-access` retry must permit that outside write without adding container privileges.
 
 Run the Caddy vulnerability gate after building the image:
 

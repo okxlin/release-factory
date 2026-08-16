@@ -118,13 +118,15 @@ run_id="${run_id:0:28}"
 }
 
 container_name="deepseek-harness-smoke-${run_id}"
-data_volume="deepseek-harness-smoke-data-${run_id}"
 home_volume="deepseek-harness-smoke-home-${run_id}"
 workspace_volume="deepseek-harness-smoke-workspace-${run_id}"
 secret_volume="deepseek-harness-smoke-secret-${run_id}"
-layout_attack_volume="deepseek-harness-smoke-layout-${run_id}"
+data_bind_dir="$(mktemp -d "/tmp/deepseek-harness-smoke-data-${run_id}.XXXXXX")"
+layout_attack_data_dir="$(mktemp -d "/tmp/deepseek-harness-smoke-layout-data-${run_id}.XXXXXX")"
 test_username="smoke-admin"
 test_password="smoke-password-12345"
+legacy_jwt_secret="legacy-smoke-jwt-secret-0123456789abcdef"
+legacy_marker="legacy-state-${run_id}"
 failure_counter=0
 
 pass() {
@@ -147,11 +149,11 @@ cleanup() {
 
     docker rm -f "${container_name}" >/dev/null 2>&1 || true
     docker volume rm \
-        "${data_volume}" \
         "${home_volume}" \
-        "${layout_attack_volume}" \
         "${workspace_volume}" \
         "${secret_volume}" >/dev/null 2>&1 || true
+    rm -rf -- "${data_bind_dir}"
+    rm -rf -- "${layout_attack_data_dir}"
     exit "${status}"
 }
 trap cleanup EXIT
@@ -721,17 +723,12 @@ printf '[smoke] image=%s profile=%s variant=%s public_url=%s\n' \
     "${IMAGE}" "${PROFILE}" "${VARIANT}" "${PUBLIC_URL}"
 
 mount_args=(
+    -v "${data_bind_dir}:/data"
     -v "${secret_volume}:/run/secrets:ro"
 )
-if [[ "${VARIANT}" == "runtime" ]]; then
-    auth_state_dir="/data/auth"
-    docker volume create "${data_volume}" >/dev/null
-    mount_args+=( -v "${data_volume}:/data" )
-else
-    auth_state_dir="/home/node/.local/share/deepseek-harness/auth"
-    docker volume create "${home_volume}" >/dev/null
-    mount_args+=( -v "${home_volume}:/home/node" )
-fi
+auth_state_dir="/data/auth"
+docker volume create "${home_volume}" >/dev/null
+mount_args+=( -v "${home_volume}:/home/node" )
 docker volume create "${workspace_volume}" >/dev/null
 mount_args+=( -v "${workspace_volume}:/workspace" )
 docker volume create "${secret_volume}" >/dev/null
@@ -741,6 +738,22 @@ printf '%s\n' "${test_password}" \
         -v "${secret_volume}:/run/secrets" \
         "${IMAGE}" \
         -c 'umask 077; cat > /run/secrets/dsh_password'
+if [[ "${PROFILE}" == "full" ]]; then
+    docker run --rm \
+        --entrypoint sh \
+        -e LEGACY_JWT_SECRET="${legacy_jwt_secret}" \
+        -e LEGACY_MARKER="${legacy_marker}" \
+        -v "${home_volume}:/home/node" \
+        "${IMAGE}" \
+        -c 'set -eu
+            install -d -m 0750 -o node -g node \
+                /home/node/.local/share/deepseek-harness/auth \
+                /home/node/.local/share/deepseek-harness/dsh
+            printf "%s" "${LEGACY_JWT_SECRET}" > /home/node/.local/share/deepseek-harness/auth/jwt-secret
+            printf "%s" "${LEGACY_MARKER}" > /home/node/.local/share/deepseek-harness/dsh/legacy-migration-marker
+            chown -R node:node /home/node/.local/share/deepseek-harness
+            chmod 0600 /home/node/.local/share/deepseek-harness/auth/jwt-secret'
+fi
 start_test_container() {
     docker run -d \
         --name "${container_name}" \
@@ -762,11 +775,15 @@ run_http_contract
 check_auth_file_permissions
 
 if [[ "${PROFILE}" == "full" ]]; then
+    [[ "$(docker exec "${container_name}" cat "${auth_state_dir}/jwt-secret")" == "${legacy_jwt_secret}" ]] \
+        || fail "legacy workstation JWT signing key was not migrated into /data"
+    [[ "$(docker exec "${container_name}" cat /data/dsh/legacy-migration-marker)" == "${legacy_marker}" ]] \
+        || fail "legacy workstation DSH state was not migrated into /data"
+    pass "legacy workstation application state migrates from HOME into /data"
+
     jwt_before="$(docker exec "${container_name}" sha256sum "${auth_state_dir}/jwt-secret" | awk '{print $1}')"
-    if [[ "${VARIANT}" == "workstation" ]]; then
-        docker exec -u node "${container_name}" sh -c \
-            'printf "%s\n" "#!/bin/sh" "printf user-install-persisted" > "$HOME/.local/bin/dsh-user-install-probe" && chmod 0750 "$HOME/.local/bin/dsh-user-install-probe"'
-    fi
+    docker exec -u node "${container_name}" sh -c \
+        'printf "%s\n" "#!/bin/sh" "printf user-install-persisted" > "$HOME/.local/bin/dsh-user-install-probe" && chmod 0750 "$HOME/.local/bin/dsh-user-install-probe"'
     docker exec -u node "${container_name}" sh -c \
         'printf workspace-persisted > /workspace/.dsh-workspace-persistence-probe'
     docker rm -f "${container_name}" >/dev/null
@@ -775,11 +792,9 @@ if [[ "${PROFILE}" == "full" ]]; then
     jwt_after="$(docker exec "${container_name}" sha256sum "${auth_state_dir}/jwt-secret" | awk '{print $1}')"
     [[ "${jwt_before}" == "${jwt_after}" ]] || fail "JWT signing key changed across container recreation"
     pass "JWT signing key persists across container recreation"
-    if [[ "${VARIANT}" == "workstation" ]]; then
-        [[ "$(docker exec -u node "${container_name}" sh -c 'dsh-user-install-probe')" == "user-install-persisted" ]] \
-            || fail "user-installed HOME executable did not persist across container recreation"
-        pass "user-installed HOME executables persist across container recreation"
-    fi
+    [[ "$(docker exec -u node "${container_name}" sh -c 'dsh-user-install-probe')" == "user-install-persisted" ]] \
+        || fail "user-installed HOME executable did not persist across container recreation"
+    pass "user-installed HOME executables persist across container recreation"
     [[ "$(docker exec -u node "${container_name}" cat /workspace/.dsh-workspace-persistence-probe)" == "workspace-persisted" ]] \
         || fail "workspace data did not persist across container recreation"
     pass "workspace data persists across container recreation"
@@ -817,20 +832,21 @@ if [[ "${PROFILE}" == "full" ]]; then
         -e AUTH_PASSWORD="${test_password}" \
         -e AUTH_TOKEN_LIFETIME=2592001
 
-    if [[ "${VARIANT}" == "workstation" ]]; then
-        docker volume create "${layout_attack_volume}" >/dev/null
-        docker run --rm \
-            --entrypoint sh \
-            -v "${layout_attack_volume}:/home/node" \
-            "${IMAGE}" \
-            -c 'rm -rf /home/node/.local/share/deepseek-harness/auth && ln -s /home/node/.local/share/deepseek-harness/dsh /home/node/.local/share/deepseek-harness/auth'
-        expect_start_failure \
-            "workstation rejects redirected authentication state" \
-            "/home/node/.local/share/deepseek-harness/auth must be a regular directory, not a symbolic link" \
-            -e PUBLIC_URL="${PUBLIC_URL}" \
-            -e AUTH_PASSWORD="${test_password}" \
-            -v "${layout_attack_volume}:/home/node"
-    fi
+    docker run --rm \
+        --entrypoint sh \
+        -v "${layout_attack_data_dir}:/data" \
+        "${IMAGE}" \
+        -c 'set -eu
+            install -d -m 0750 /data/dsh
+            ln -s dsh /data/auth'
+    expect_start_failure \
+        "shared /data layout rejects redirected authentication state" \
+        "/data/auth must be a regular directory, not a symbolic link" \
+        -e PUBLIC_URL="${PUBLIC_URL}" \
+        -e AUTH_PASSWORD="${test_password}" \
+        -v "${layout_attack_data_dir}:/data" \
+        -v "${home_volume}:/home/node" \
+        -v "${workspace_volume}:/workspace"
 fi
 
 printf '[smoke] ALL TESTS PASSED\n'
