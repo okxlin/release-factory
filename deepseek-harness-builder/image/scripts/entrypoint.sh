@@ -269,6 +269,57 @@ append_trusted_hosts() {
     done
 }
 
+configure_trusted_proxies() {
+    local raw="${CADDY_TRUSTED_PROXIES:-private_ranges}"
+    local token
+    local -a proxy_tokens=()
+
+    raw="$(trim "${raw}")"
+    [[ -n "${raw}" ]] || raw="private_ranges"
+    if [[ "${raw}" == "none" ]]; then
+        # Keep the static Caddy stanza valid without trusting any possible peer.
+        CADDY_TRUSTED_PROXIES="0.0.0.0/32"
+        export CADDY_TRUSTED_PROXIES
+        log "trusted proxy parsing disabled; authentication limits use the direct peer address"
+        return
+    fi
+    if [[ "${raw}" =~ [[:cntrl:]] ]]; then
+        fatal "CADDY_TRUSTED_PROXIES must be a space-separated list of CIDRs or private_ranges"
+    fi
+
+    read -r -a proxy_tokens <<< "${raw}"
+    (( ${#proxy_tokens[@]} <= 256 )) \
+        || fatal "CADDY_TRUSTED_PROXIES accepts at most 256 entries"
+    for token in "${proxy_tokens[@]}"; do
+        [[ "${token}" != "none" ]] \
+            || fatal "CADDY_TRUSTED_PROXIES=none cannot be combined with other entries"
+        [[ ! "${token}" =~ /0+$ ]] \
+            || fatal "CADDY_TRUSTED_PROXIES must not include unrestricted /0 ranges"
+    done
+    if ! node - "${proxy_tokens[@]}" <<'NODE'
+const net = require('node:net');
+const tokens = process.argv.slice(2);
+
+for (const token of tokens) {
+  if (token === 'private_ranges') continue;
+  const separator = token.lastIndexOf('/');
+  if (separator <= 0) process.exit(1);
+  const address = token.slice(0, separator);
+  const prefix = token.slice(separator + 1);
+  const family = net.isIP(address);
+  const maximum = family === 4 ? 32 : family === 6 ? 128 : -1;
+  if (!/^\d{1,3}$/.test(prefix) || Number(prefix) > maximum) process.exit(1);
+}
+NODE
+    then
+        fatal "CADDY_TRUSTED_PROXIES must be a space-separated list of CIDRs or private_ranges"
+    fi
+
+    CADDY_TRUSTED_PROXIES="${proxy_tokens[*]}"
+    export CADDY_TRUSTED_PROXIES
+    log "configured ${#proxy_tokens[@]} trusted proxy range entries for authentication limits"
+}
+
 wait_for_dsh() {
     local _
     for _ in {1..60}; do
@@ -329,6 +380,7 @@ append_trusted_hosts
 
 case "${AUTH_MODE}" in
     caddy-security)
+        configure_trusted_proxies
         resolve_password_hash
         resolve_jwt_secret
         CADDY_CONFIG="${CADDY_AUTH_CONFIG}"

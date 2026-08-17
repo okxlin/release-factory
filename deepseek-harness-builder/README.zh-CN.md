@@ -2,7 +2,7 @@
 
 [English](README.md) | **简体中文**
 
-这个构建器把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 与自定义 [Caddy](https://github.com/caddyserver/caddy) 和 [caddy-security](https://github.com/greenpau/caddy-security) 打包到同一个镜像体系中。它在 DSH 前提供浏览器登录表单，同时让 DSH 应用本身只绑定到容器内 loopback。
+这个构建器把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 与自定义 [Caddy](https://github.com/caddyserver/caddy)、[caddy-security](https://github.com/greenpau/caddy-security) 和 [caddy-ratelimit](https://github.com/mholt/caddy-ratelimit) 打包到同一个镜像体系中。它在 DSH 前提供浏览器登录表单和源站侧爆破防护，同时让 DSH 应用本身只绑定到容器内 loopback。
 
 一个 Dockerfile 会产出两个独立测试的变体，并发布到同一个镜像仓库：
 
@@ -29,7 +29,7 @@ workstation 中的三个 Docker 客户端二进制文件使用已固定的 Go �
 browser
   -> HTTPS reverse proxy (1Panel/OpenResty)
   -> host loopback port, for example 127.0.0.1:56789
-  -> Caddy + caddy-security on container port 8080
+  -> Caddy + 认证限速 + caddy-security on container port 8080
   -> DeepSeek Harness on 127.0.0.1:3080 inside the container
 ```
 
@@ -53,7 +53,9 @@ deepseek-harness-builder/scripts/build-local.sh \
 
 生产依赖闭包由活跃构建上下文中的 `pnpm-lock.yaml` 固定。pnpm 生命周期脚本 fail-closed，并限制在 `pnpm-workspace.yaml` 中已审查的软件包内。
 
-自定义 Caddy 构建会校验 go-authcrunch 源码归档 checksum，移除未使用的 GPG 公钥解析器，并在链接前运行上游 identity 包测试。caddy-security 仍保留 SSH 公钥支持，同时生成的 `CADDY_GO_PACKAGES.txt` 清单不得包含 `golang.org/x/crypto/openpgp` 包。构建还会把 `grpc`、`klauspost/compress` 和 `x/text` 提升到已修复版本。
+镜像构建会对 DSH browse 目录选择器应用一个范围很小、并且会校验源码形状的兼容性补丁，使网页的 **Add workspace** 对话框在未指定路径时从 `DSH_WORKSPACE` 开始，而不是从进程 `HOME` 开始。如果上游实现发生变化，构建会 fail-closed，直到重新审查补丁和 smoke 合约。该补丁不会改变 workstation 的 `HOME` 值或工具持久化路径。
+
+自定义 Caddy 构建会校验 go-authcrunch 源码归档 checksum，移除未使用的 GPG 公钥解析器，并在链接前运行上游 identity 包测试。caddy-security 仍保留 SSH 公钥支持，同时生成的 `CADDY_GO_PACKAGES.txt` 清单不得包含 `golang.org/x/crypto/openpgp` 包。限速模块及其许可证也会在同一构建中固定和校验。构建还会把 `grpc`、`klauspost/compress` 和 `x/text` 提升到已修复版本。
 
 两个镜像都包含校验和固定的独立 pnpm bundle，并移除 npm 和 Corepack。这会保留单一、已审计的 Node.js 包管理器面，避免所选 pnpm 版本静默跟随包管理器通道。
 
@@ -122,7 +124,7 @@ docker run -d \
   ghcr.io/okxlin/deepseek-harness:workstation
 ```
 
-HOME 卷包含用户安装的 pnpm、pipx、Cargo、Go 工具。应用状态位于 `/data`。workspace bind 用于项目文件，以及宿主侧备份或文件访问。
+HOME 卷包含用户安装的 pnpm、pipx、Cargo、Go 工具。应用状态位于 `/data`。镜像工作目录和 `DSH_WORKSPACE` 都默认是 `/workspace`；网页的 **Add workspace** 对话框也会从这里打开，里面的 `Home` 快捷入口也解析到 `/workspace`。`/home/node` 是用户 HOME 和工具持久卷，不是默认项目目录。workspace bind 用于项目文件，以及宿主侧备份或文件访问。
 
 Docker CLI、Compose 和 Buildx 可以通过远程 `DOCKER_HOST` 工作，不需要额外挂载。若要控制宿主 Docker daemon，必须显式加入：
 
@@ -195,11 +197,16 @@ location / {
 ```dotenv
 PUBLIC_URL=https://dsh.example.com
 AUTH_COOKIE_INSECURE=false
+CADDY_TRUSTED_PROXIES=private_ranges
 ```
 
 有意拒绝 `https://example.com/dsh` 这类子路径部署。请使用独立域名或子域名。
 
-请在 1Panel WAF 或外层 OpenResty 中对 `/auth/login` 和 `/auth/sandbox/*` 做限速。镜像不会在 Caddy 中再添加额外 rate-limit 插件。当站点位于 Cloudflare 或其他 CDN 后时，应先配置可信真实客户端 IP 链再应用基于 IP 的限速；否则所有用户可能共享同一个边缘 IP 配额。
+镜像会按解析后的客户端 IP 对用户名阶段 POST 限制为每分钟 30 次，对密码阶段 POST 限制为每 10 分钟 10 次；被拒绝的请求返回 HTTP 429 和 `Retry-After`。仍建议在 1Panel WAF 或外层 OpenResty 中保留同类限速，作为纵深防御。
+
+这两个额度是镜像默认值，定义在 [`image/Caddyfile`](image/Caddyfile) 中，有意不从运行时环境变量读取。若要修改，必须编辑该文件、重新构建镜像，并重新运行 smoke 测试；`CADDY_TRUSTED_PROXIES` 则可以单独在运行时配置。
+
+`CADDY_TRUSTED_PROXIES` 定义 Caddy 解析 `X-Forwarded-For` 时可以信任的代理节点。Caddy 会按追加式代理链的推荐方式严格从右向左解析。默认 `private_ranges` 适用于本文档规定的 loopback/私网反代部署；若客户端直接连接 Caddy，应设为 `none`。若 Cloudflare 或其他 CDN 位于 OpenResty 前，应在外层代理规范化真实客户端 IP，或把 CDN 与直接上游代理的全部可信 CIDR 都加入此变量。entrypoint 会拒绝无限制的 `/0` 范围，因为它们会允许任意对端伪造限速键。参见 Caddy 的 [`trusted_proxies`](https://caddyserver.com/docs/caddyfile/options#trusted-proxies) 与 [`trusted_proxies_strict`](https://caddyserver.com/docs/caddyfile/options#trusted-proxies-strict) 文档。
 
 `/healthz` 有意不需要认证，只返回 `ok`，因此 1Panel 和 Docker 可以在没有会话的情况下探测就绪状态。
 
@@ -232,6 +239,7 @@ AUTH_COOKIE_INSECURE=false
 | `AUTH_PASSWORD_FILE` | *未设置* | 可读 secret 文件路径，例如 Docker secret。 |
 | `AUTH_PASSWORD_HASH` | *未设置* | `bcrypt:<cost>:<hash>`，cost 为 `12-31`。 |
 | `AUTH_TOKEN_LIFETIME` | `3600` | 访问 token 和 Cookie 生命周期，范围 `300`-`2592000` 秒。 |
+| `CADDY_TRUSTED_PROXIES` | `private_ranges` | 空格分隔的可信代理 CIDR、`private_ranges`，或用于客户端直连的 `none`。 |
 | `AUTH_COOKIE_INSECURE` | `false` | 仅用于隔离 HTTP 测试；会移除 `Secure` 和 `HttpOnly`。 |
 | `DSH_TRUSTED_HOSTS` | *空* | 逗号分隔的额外 DSH Host authority。 |
 | `PORT` | `8080` | Caddy 监听的容器端口；通过 loopback 发布。 |
@@ -367,7 +375,7 @@ deepseek-harness-builder/scripts/smoke-test.sh \
   --variant runtime
 ```
 
-测试使用临时宿主 bind 的 `/data`，以及 HOME 和 workspace 的命名测试卷。workstation 会把 HOME 直接挂到 `/home/node`，把测试 workspace 直接挂到 `/workspace`；它会模拟 1Panel/OpenResty 头，并检查登录重定向、浏览器自动填充属性、错误密码拒绝、受保护 Cookie、伪造 identity header、两个 DSH WebSocket、登出、loopback 绑定、secret 隔离、JWT 状态持久化、容器重建持久化、资源使用、fail-closed 配置错误、pnpm 和所选镜像变体。
+测试使用临时宿主 bind 的 `/data`，以及 HOME 和 workspace 的命名测试卷。workstation 会把 HOME 直接挂到 `/home/node`，把测试 workspace 直接挂到 `/workspace`；它会模拟 1Panel/OpenResty 头，并检查登录重定向、浏览器自动填充属性、错误密码拒绝、受保护 Cookie、伪造 identity header、两个 DSH WebSocket、登出、loopback 绑定、secret 隔离、JWT 状态持久化、容器重建持久化、目录选择器默认打开 `/workspace`、资源使用、fail-closed 配置错误、pnpm 和所选镜像变体。
 
 运行轻量 Compose 合约：
 

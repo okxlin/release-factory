@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-This builder packages [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) with a custom [Caddy](https://github.com/caddyserver/caddy) build and [caddy-security](https://github.com/greenpau/caddy-security). It provides a browser login form in front of DSH while keeping the application itself bound to container loopback.
+This builder packages [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) with a custom [Caddy](https://github.com/caddyserver/caddy) build, [caddy-security](https://github.com/greenpau/caddy-security), and [caddy-ratelimit](https://github.com/mholt/caddy-ratelimit). It provides a browser login form and origin-side brute-force protection in front of DSH while keeping the application itself bound to container loopback.
 
 One Dockerfile produces two independently tested variants under one image repository:
 
@@ -29,7 +29,7 @@ The image is built and tested for `linux/amd64` and `linux/arm64`.
 browser
   -> HTTPS reverse proxy (1Panel/OpenResty)
   -> host loopback port, for example 127.0.0.1:56789
-  -> Caddy + caddy-security on container port 8080
+  -> Caddy + authentication rate limiting + caddy-security on container port 8080
   -> DeepSeek Harness on 127.0.0.1:3080 inside the container
 ```
 
@@ -53,7 +53,9 @@ The local build helper resolves the requested `@deepseek-ai/dsh` npm version, up
 
 The production dependency closure is pinned by `pnpm-lock.yaml` in the active build context. pnpm lifecycle scripts are fail-closed and limited to the reviewed packages in `pnpm-workspace.yaml`.
 
-The custom Caddy build verifies the go-authcrunch source archive checksum, removes its unused GPG public-key parser, and runs the upstream identity-package tests before linking. SSH public-key support remains available to caddy-security, while the generated `CADDY_GO_PACKAGES.txt` manifest must contain no `golang.org/x/crypto/openpgp` package. The build also raises `grpc`, `klauspost/compress`, and `x/text` to their fixed versions.
+The image build applies a narrowly scoped, source-shape-checked compatibility patch to the DSH browse directory picker so the web **Add workspace** dialog starts at `DSH_WORKSPACE` instead of the process `HOME`. If the upstream implementation changes, the build fails closed until the patch and smoke contract are reviewed. This does not change the workstation `HOME` value or its tool persistence path.
+
+The custom Caddy build verifies the go-authcrunch source archive checksum, removes its unused GPG public-key parser, and runs the upstream identity-package tests before linking. SSH public-key support remains available to caddy-security, while the generated `CADDY_GO_PACKAGES.txt` manifest must contain no `golang.org/x/crypto/openpgp` package. The rate-limit module and its license are pinned and verified during the same build. The build also raises `grpc`, `klauspost/compress`, and `x/text` to their fixed versions.
 
 Both images include a checksum-pinned standalone pnpm bundle and remove npm and Corepack. This keeps one audited Node.js package-manager surface and prevents the selected pnpm version from silently following a package-manager channel.
 
@@ -123,7 +125,7 @@ docker run -d \
   ghcr.io/okxlin/deepseek-harness:workstation
 ```
 
-The HOME volume contains user-installed pnpm, pipx, Cargo, and Go tools. Application state lives under `/data`. The workspace bind is intended for project files and host-side backup or file access.
+The HOME volume contains user-installed pnpm, pipx, Cargo, and Go tools. Application state lives under `/data`. The image working directory and `DSH_WORKSPACE` both default to `/workspace`; the web **Add workspace** dialog also opens there, and its `Home` shortcut resolves to `/workspace`. `/home/node` is the user HOME and persistent tool volume, not the default project directory. The workspace bind is intended for project files and host-side backup or file access.
 
 Docker CLI, Compose, and Buildx work against a remote `DOCKER_HOST` without additional mounts. To control the host Docker daemon, explicitly add:
 
@@ -200,11 +202,16 @@ Set `PUBLIC_URL` to the exact browser origin, for example:
 ```dotenv
 PUBLIC_URL=https://dsh.example.com
 AUTH_COOKIE_INSECURE=false
+CADDY_TRUSTED_PROXIES=private_ranges
 ```
 
 Subpath deployments such as `https://example.com/dsh` are intentionally rejected. Use a dedicated domain or subdomain.
 
-Rate-limit `/auth/login` and `/auth/sandbox/*` in the 1Panel WAF or the outer OpenResty layer. The image does not add another rate-limit plugin to Caddy. When the site is behind Cloudflare or another CDN, configure the trusted real-client-IP chain before applying an IP-based limit; otherwise all users may share an edge IP quota.
+The image limits username-stage POSTs to 30 per minute and password-stage POSTs to 10 per 10 minutes for each resolved client IP. Rejected requests return HTTP 429 with `Retry-After`. Keep a matching limit in the 1Panel WAF or outer OpenResty layer as defense in depth.
+
+These budgets are image defaults defined in [`image/Caddyfile`](image/Caddyfile); they are intentionally not read from the runtime environment. Changing them requires editing that file, rebuilding the image, and rerunning the smoke tests. `CADDY_TRUSTED_PROXIES` is independently configurable at runtime.
+
+`CADDY_TRUSTED_PROXIES` defines the proxy hops Caddy may trust while parsing `X-Forwarded-For`. Caddy uses strict right-to-left parsing, as recommended for append-style proxy chains. The default `private_ranges` matches the documented loopback/private reverse-proxy deployment; set it to `none` if clients connect directly to Caddy. If Cloudflare or another CDN sits before OpenResty, either normalize the real client IP in that outer proxy or add every trusted CDN and immediate-proxy CIDR to this value. The entrypoint rejects unrestricted `/0` ranges because they would let arbitrary peers spoof the rate-limit key. See Caddy's [`trusted_proxies`](https://caddyserver.com/docs/caddyfile/options#trusted-proxies) and [`trusted_proxies_strict`](https://caddyserver.com/docs/caddyfile/options#trusted-proxies-strict) documentation.
 
 `/healthz` is intentionally unauthenticated and returns only `ok`, so 1Panel and Docker can probe readiness without a session.
 
@@ -237,6 +244,7 @@ Copy `image/.env.example` to `RUNTIME_ENV_FILE` (default `image/.env`) and set a
 | `AUTH_PASSWORD_FILE` | *(unset)* | Path to a readable secret file, e.g. a Docker secret. |
 | `AUTH_PASSWORD_HASH` | *(unset)* | `bcrypt:<cost>:<hash>` with cost `12-31`. |
 | `AUTH_TOKEN_LIFETIME` | `3600` | Access token and cookie lifetime, `300`-`2592000` seconds. |
+| `CADDY_TRUSTED_PROXIES` | `private_ranges` | Space-separated trusted proxy CIDRs, `private_ranges`, or `none` for direct client connections. |
 | `AUTH_COOKIE_INSECURE` | `false` | `true` only for isolated HTTP tests; drops `Secure` and `HttpOnly`. |
 | `DSH_TRUSTED_HOSTS` | *(empty)* | Comma-separated additional DSH Host authorities. |
 | `PORT` | `8080` | Container port Caddy listens on; publish via loopback. |
@@ -382,7 +390,7 @@ deepseek-harness-builder/scripts/smoke-test.sh \
   --variant runtime
 ```
 
-The test uses a temporary host bind for `/data` and named test volumes for HOME and workspace. Both variants mount the test workspace directly at `/workspace`; the workstation also mounts HOME directly at `/home/node`. It simulates the 1Panel/OpenResty headers and checks login redirects, browser autofill attributes, wrong-password rejection, protected cookies, forged identity headers, both DSH WebSockets, logout, loopback binding, secret isolation, persistent JWT state, container-recreation persistence, resource use, fail-closed configuration errors, pnpm, and the selected image variant.
+The test uses a temporary host bind for `/data` and named test volumes for HOME and workspace. Both variants mount the test workspace directly at `/workspace`; the workstation also mounts HOME directly at `/home/node`. It simulates the 1Panel/OpenResty headers and checks login redirects, browser autofill attributes, wrong-password rejection, protected cookies, forged identity headers, both DSH WebSockets, logout, loopback binding, secret isolation, persistent JWT state, container-recreation persistence, the `/workspace` directory-picker default, resource use, fail-closed configuration errors, pnpm, and the selected image variant.
 
 Run the lightweight Compose contract:
 
