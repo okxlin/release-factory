@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-This builder packages [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) with a custom Caddy build and `caddy-security`. It provides a browser login form in front of DSH while keeping the application itself bound to container loopback.
+This builder packages [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) with a custom [Caddy](https://github.com/caddyserver/caddy) build and [caddy-security](https://github.com/greenpau/caddy-security). It provides a browser login form in front of DSH while keeping the application itself bound to container loopback.
 
 One Dockerfile produces two independently tested variants under one image repository:
 
@@ -13,26 +13,13 @@ One Dockerfile produces two independently tested variants under one image reposi
 
 Both workflows publish the same tags to `ghcr.io/okxlin/deepseek-harness` and to `docker.io/$DOCKERHUB_USERNAME/deepseek-harness`. Configure `DOCKERHUB_USERNAME` as a GitHub Actions repository variable or secret and configure `DOCKERHUB_TOKEN` as a repository secret. The Docker Hub token is used only by the registry login action and is never passed to the image build.
 
-Scheduled runs resolve the current npm `@deepseek-ai/dsh` version, update the image build context, and publish matching tags such as `0.1.0-rc.6` and `0.1.0-rc.6-workstation`. Manual workflow runs can still override the DSH version or the published tag. Use a floating tag for an AppStore `latest` channel and the matching version tag for a numbered AppStore version.
+Scheduled runs resolve the current npm `@deepseek-ai/dsh` version, update the image build context, and publish matching `<DSH_VERSION>` and `<DSH_VERSION>-workstation` tags. Manual workflow runs can still override the DSH version or the published tag. Use a floating tag for an AppStore `latest` channel and the matching version tag for a numbered AppStore version.
 
-Checked-in baseline versions:
-
-- DeepSeek Harness `0.1.0-rc.6`
-- Node.js `24.19.0`
-- pnpm `11.22.0`
-- Caddy `2.11.4`
-- caddy-security `1.1.64`
-- go-authcrunch `1.1.41` with the image-local OpenPGP removal patch
-
-Workstation-only pins:
-
-- Docker CLI `29.7.2`, Docker Compose `5.4.0`, and Docker Buildx `0.36.1`
-- Go `1.26.6`
-- Rust and Cargo `1.97.1`
+Exact component pins are defined in [the Dockerfile](image/Dockerfile), [package.json](image/package.json), [pnpm-lock.yaml](image/pnpm-lock.yaml), and the [runtime](../.github/workflows/build-deepseek-harness.yml) and [workstation](../.github/workflows/build-deepseek-harness-workstation.yml) workflows. Those build inputs are the source of truth; this README intentionally describes capabilities and update policy without duplicating version numbers.
 
 Go is aligned with the official stable version endpoint at <https://go.dev/VERSION?m=text>. Rust is aligned with the official stable channel manifest at <https://static.rust-lang.org/dist/channel-rust-stable.toml>. Their Docker Official Image indexes are digest-pinned for reproducible `amd64` and `arm64` selection.
 
-The three workstation Docker client binaries are rebuilt with Go `1.26.6` from checksum-pinned official source archives. Buildx `0.36.1` imports the legacy `github.com/docker/docker` module only for its frozen random-name generator; the build retains that exact vendored package locally and removes the unrelated daemon module before compiling Buildx and Compose. This keeps the daemon-only AuthZ issue [CVE-2026-34040](https://github.com/moby/moby/security/advisories/GHSA-x744-4wpc-v9h2) out of the client dependency graph instead of weakening the image scan threshold.
+The three workstation Docker client binaries are rebuilt with the pinned Go release from checksum-pinned official source archives. The Buildx source closure imports the legacy `github.com/docker/docker` module only for its frozen random-name generator; the build retains that exact vendored package locally and removes the unrelated daemon module before compiling Buildx and Compose. This keeps the daemon-only AuthZ issue [CVE-2026-34040](https://github.com/moby/moby/security/advisories/GHSA-x744-4wpc-v9h2) out of the client dependency graph instead of weakening the image scan threshold.
 
 The image is built and tested for `linux/amd64` and `linux/arm64`.
 
@@ -62,29 +49,29 @@ deepseek-harness-builder/scripts/build-local.sh \
   --tag deepseek-harness-workstation:local
 ```
 
-The local build helper resolves the requested `@deepseek-ai/dsh` npm version, updates `package.json` and `pnpm-lock.yaml` in a temporary build context, and passes the resolved version as Docker `DSH_VERSION`. Use `--version 0.1.0-rc.6` or another npm dist-tag to build a specific DSH release. Direct `docker build` remains supported for the checked-in baseline context, and derives `DSH_VERSION` from `package.json` when no build argument is supplied.
+The local build helper resolves the requested `@deepseek-ai/dsh` npm version, updates `package.json` and `pnpm-lock.yaml` in a temporary build context, and passes the resolved version as Docker `DSH_VERSION`. Use `--version <release>` or an npm dist-tag to select a DSH release. Direct `docker build` remains supported for the checked-in baseline context, and derives `DSH_VERSION` from `package.json` when no build argument is supplied.
 
 The production dependency closure is pinned by `pnpm-lock.yaml` in the active build context. pnpm lifecycle scripts are fail-closed and limited to the reviewed packages in `pnpm-workspace.yaml`.
 
 The custom Caddy build verifies the go-authcrunch source archive checksum, removes its unused GPG public-key parser, and runs the upstream identity-package tests before linking. SSH public-key support remains available to caddy-security, while the generated `CADDY_GO_PACKAGES.txt` manifest must contain no `golang.org/x/crypto/openpgp` package. The build also raises `grpc`, `klauspost/compress`, and `x/text` to their fixed versions.
 
-Both images include a checksum-pinned standalone pnpm `11.22.0` bundle and remove npm and Corepack. This keeps one audited Node.js package-manager surface and prevents the selected pnpm version from silently following a package-manager channel.
+Both images include a checksum-pinned standalone pnpm bundle and remove npm and Corepack. This keeps one audited Node.js package-manager surface and prevents the selected pnpm version from silently following a package-manager channel.
 
 ## Development environments
 
 The lightweight image adds these low-overhead basics to the existing Bash, Git, and curl runtime:
 
 - OpenSSH client, jq, ripgrep, less, procps, file, and unzip
-- standalone pnpm `11.22.0`
+- standalone pnpm
 
 It intentionally omits npm, Python, Go, Rust, GCC/G++, and Make.
 
 The workstation image inherits the same DSH/authentication runtime and adds:
 
-- Node.js `24.19.0` and pnpm `11.22.0`
+- Node.js and pnpm
 - Python 3 with pip, venv, pipx, pytest, and development headers
-- Go `1.26.6`; Rust and Cargo `1.97.1`
-- Docker CLI `29.7.2`, Compose `5.4.0`, and Buildx `0.36.1` (client tools only)
+- Go, Rust, and Cargo
+- Docker CLI, Compose, and Buildx (client tools only)
 - GCC/G++, Clang, GDB, CMake, Ninja, Autoconf/Automake, libtool, pkg-config, and common native-library headers
 - Git LFS, GitHub CLI, ShellCheck, shfmt, yamllint, pre-commit, fd, bat, fzf, tmux, Vim, SQLite, and common network/debug/archive tools
 
@@ -266,7 +253,7 @@ An IP authority is accepted by `PUBLIC_URL`; the smoke suite verifies the HTTPS 
 - A plain HTTP IP origin requires `AUTH_COOKIE_INSECURE=true`. This has no transport confidentiality and, with the current caddy-security behavior, removes both `Secure` and `HttpOnly` from its cookies. Restrict it to an isolated test network.
 - Caddy's `tls internal` can create a private certificate for an IP, but every browser must first trust the container's private CA; otherwise users receive a certificate warning. Caddy documents this local-CA behavior at <https://caddyserver.com/docs/automatic-https#local-https>.
 
-Let's Encrypt made public IPv4/IPv6 certificates generally available in 2026, but they are 160-hour certificates and require the ACME `shortlived` profile: <https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability/>. Caddy `2.11.4` supports that profile, but successful issuance still requires public `http-01` or `tls-alpn-01` validation on the IP. This image does not enable direct ACME in its default mode because 1Panel/OpenResty already owns ports 80/443 and public TLS. A future direct-TLS mode should be a separate explicit deployment profile, not an automatic fallback.
+Let's Encrypt made public IPv4/IPv6 certificates generally available in 2026, but they are 160-hour certificates and require the ACME `shortlived` profile: <https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability/>. The pinned Caddy release supports that profile, but successful issuance still requires public `http-01` or `tls-alpn-01` validation on the IP. This image does not enable direct ACME in its default mode because 1Panel/OpenResty already owns ports 80/443 and public TLS. A future direct-TLS mode should be a separate explicit deployment profile, not an automatic fallback.
 
 ## Authentication
 
@@ -296,7 +283,7 @@ The login form marks the fields with `autocomplete="username"` and `autocomplete
 
 caddy-security also creates an internal `webadmin` record with a random password when the local identity database is initialized. The DSH authorization policy allows only `authp/user`; that internal admin role cannot access DSH.
 
-The Go vulnerability database currently has a range discrepancy for the historical caddy-security findings `GO-2024-2549` and `GO-2024-2557` through `GO-2024-2565`: its records have no fixed event, while the corresponding GitHub advisories limit affected releases to `<=1.1.20`, `<=1.1.23`, or `<=1.0.42`. This image pins `1.1.64`, and Trivy evaluates the published version ranges and reports no affected caddy-security finding. The discrepancy is documented in the repository security scan policy instead of being silently ignored.
+Current Caddy and caddy-security dependencies are evaluated by the repository [security scan policy](../SECURITY_SCAN.md) and CI vulnerability gates. Consult the latest workflow run for advisory-specific results instead of relying on a static README snapshot.
 
 Other modes:
 
@@ -378,7 +365,7 @@ is no longer needed.
 
 ## Resource use
 
-The authenticated amd64 smoke tests currently settle around `167-180 MiB` and about `20-21` PIDs with DSH `0.1.0-rc.6`. The workstation toolchains are dormant, so they do not materially raise idle memory, but they do raise disk use: the current local amd64 Docker sizes are about `700 MB` for the lightweight image and `2.59 GB` for the workstation image before registry compression. Debian rebuilds can move those figures.
+The authenticated amd64 smoke tests currently settle around `167-180 MiB` and about `20-21` PIDs. The workstation toolchains are dormant, so they do not materially raise idle memory, but they do raise disk use: the current local amd64 Docker sizes are about `700 MB` for the lightweight image and `2.59 GB` for the workstation image before registry compression. Debian rebuilds can move those figures.
 
 The CI ceiling remains `256 MiB` for the idle flow. This is not a workload limit: terminals, repositories, language servers, compilers, and model tools can require substantially more memory.
 
@@ -419,7 +406,7 @@ deepseek-harness-builder/scripts/workstation-smoke-test.sh \
   --image deepseek-harness-workstation:local
 ```
 
-The Compose contract check parses both socket-switch states and proves that the package-local state bind is mounted directly at `/data`, that one named volume is mounted directly at `/home/node`, that the package-local workspace is mounted directly at `/workspace`, the default socket source is `/dev/null`, the enabled source is `/var/run/docker.sock`, and the HTTP port remains loopback-bound. The workstation-specific image test compiles and runs C, C++, Go, and Rust probes, creates a Python virtual environment, checks normal and login-shell PATH behavior, verifies the CLI set, confirms all Docker client binaries use Go `1.26.6` without the legacy daemon module, confirms Docker has no daemon access by default, characterizes optional socket-group mapping with an isolated Unix socket, verifies that the image declares only `/home/node`, and confirms that HOME, application state, and workspace are real writable directories rather than symbolic links. It also runs the installed DSH sandbox executor under `no-new-privileges`: `workspace-write` must permit a project write and deny a writable path outside the workspace, while an explicit `danger-full-access` retry must permit that outside write without adding container privileges.
+The Compose contract check parses both socket-switch states and proves that the package-local state bind is mounted directly at `/data`, that one named volume is mounted directly at `/home/node`, that the package-local workspace is mounted directly at `/workspace`, the default socket source is `/dev/null`, the enabled source is `/var/run/docker.sock`, and the HTTP port remains loopback-bound. The workstation-specific image test compiles and runs C, C++, Go, and Rust probes, creates a Python virtual environment, checks normal and login-shell PATH behavior, verifies the CLI set, confirms all Docker client binaries use the pinned Go toolchain without the legacy daemon module, confirms Docker has no daemon access by default, characterizes optional socket-group mapping with an isolated Unix socket, verifies that the image declares only `/home/node`, and confirms that HOME, application state, and workspace are real writable directories rather than symbolic links. It also runs the installed DSH sandbox executor under `no-new-privileges`: `workspace-write` must permit a project write and deny a writable path outside the workspace, while an explicit `danger-full-access` retry must permit that outside write without adding container privileges.
 
 Run the Caddy vulnerability gate after building the image:
 

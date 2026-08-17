@@ -2,7 +2,7 @@
 
 [English](README.md) | **简体中文**
 
-这个构建器把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 与自定义 Caddy 和 `caddy-security` 打包到同一个镜像体系中。它在 DSH 前提供浏览器登录表单，同时让 DSH 应用本身只绑定到容器内 loopback。
+这个构建器把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 与自定义 [Caddy](https://github.com/caddyserver/caddy) 和 [caddy-security](https://github.com/greenpau/caddy-security) 打包到同一个镜像体系中。它在 DSH 前提供浏览器登录表单，同时让 DSH 应用本身只绑定到容器内 loopback。
 
 一个 Dockerfile 会产出两个独立测试的变体，并发布到同一个镜像仓库：
 
@@ -13,26 +13,13 @@
 
 两个工作流都会把相同标签发布到 `ghcr.io/okxlin/deepseek-harness` 和 `docker.io/$DOCKERHUB_USERNAME/deepseek-harness`。请把 `DOCKERHUB_USERNAME` 配置为 GitHub Actions 仓库变量或 Secret，并把 `DOCKERHUB_TOKEN` 配置为仓库 Secret。Docker Hub token 只用于 Registry 登录，不会传入镜像构建上下文。
 
-定时任务会解析当前 npm `@deepseek-ai/dsh` 版本，更新镜像构建上下文，并发布匹配标签，例如 `0.1.0-rc.6` 和 `0.1.0-rc.6-workstation`。手动工作流仍可覆盖 DSH 版本或发布标签。AppStore `latest` 通道使用浮动标签，编号 AppStore 版本使用匹配的版本标签。
+定时任务会解析当前 npm `@deepseek-ai/dsh` 版本，更新镜像构建上下文，并发布匹配的 `<DSH_VERSION>` 和 `<DSH_VERSION>-workstation` 标签。手动工作流仍可覆盖 DSH 版本或发布标签。AppStore `latest` 通道使用浮动标签，编号 AppStore 版本使用匹配的版本标签。
 
-当前提交基线版本：
-
-- DeepSeek Harness `0.1.0-rc.6`
-- Node.js `24.19.0`
-- pnpm `11.22.0`
-- Caddy `2.11.4`
-- caddy-security `1.1.64`
-- go-authcrunch `1.1.41`，带镜像内 OpenPGP 移除补丁
-
-仅 workstation 固定的版本：
-
-- Docker CLI `29.7.2`、Docker Compose `5.4.0`、Docker Buildx `0.36.1`
-- Go `1.26.6`
-- Rust 和 Cargo `1.97.1`
+组件的准确固定版本由 [Dockerfile](image/Dockerfile)、[package.json](image/package.json)、[pnpm-lock.yaml](image/pnpm-lock.yaml)，以及 [runtime](../.github/workflows/build-deepseek-harness.yml) 和 [workstation](../.github/workflows/build-deepseek-harness-workstation.yml) 工作流定义。这些构建输入是唯一版本来源；README 只说明能力和更新策略，不重复维护具体版本号。
 
 Go 跟随官方稳定版本端点 <https://go.dev/VERSION?m=text>。Rust 跟随官方稳定通道清单 <https://static.rust-lang.org/dist/channel-rust-stable.toml>。它们的 Docker Official Image index 均固定 digest，用于可复现地选择 `amd64` 和 `arm64`。
 
-workstation 中的三个 Docker 客户端二进制文件使用 Go `1.26.6` 从校验和固定的官方源码归档重新构建。Buildx `0.36.1` 只为了冻结的随机名称生成器而导入旧 `github.com/docker/docker` 模块；构建会在本地保留该 vendored 包，并在编译 Buildx 和 Compose 前移除无关 daemon 模块。这样可以把 daemon-only AuthZ 问题 [CVE-2026-34040](https://github.com/moby/moby/security/advisories/GHSA-x744-4wpc-v9h2) 排除在客户端依赖图之外，而不是放宽镜像扫描阈值。
+workstation 中的三个 Docker 客户端二进制文件使用已固定的 Go 版本从校验和固定的官方源码归档重新构建。Buildx 源码闭包只为了冻结的随机名称生成器而导入旧 `github.com/docker/docker` 模块；构建会在本地保留该 vendored 包，并在编译 Buildx 和 Compose 前移除无关 daemon 模块。这样可以把 daemon-only AuthZ 问题 [CVE-2026-34040](https://github.com/moby/moby/security/advisories/GHSA-x744-4wpc-v9h2) 排除在客户端依赖图之外，而不是放宽镜像扫描阈值。
 
 镜像会为 `linux/amd64` 和 `linux/arm64` 构建并测试。
 
@@ -62,29 +49,29 @@ deepseek-harness-builder/scripts/build-local.sh \
   --tag deepseek-harness-workstation:local
 ```
 
-本地构建辅助脚本会解析请求的 `@deepseek-ai/dsh` npm 版本，在临时构建上下文中更新 `package.json` 和 `pnpm-lock.yaml`，并把解析后的版本作为 Docker `DSH_VERSION` 传入。使用 `--version 0.1.0-rc.6` 或其他 npm dist-tag 可以构建指定 DSH 版本。直接 `docker build` 仍支持已提交的基线上下文；未提供构建参数时会从 `package.json` 推导 `DSH_VERSION`。
+本地构建辅助脚本会解析请求的 `@deepseek-ai/dsh` npm 版本，在临时构建上下文中更新 `package.json` 和 `pnpm-lock.yaml`，并把解析后的版本作为 Docker `DSH_VERSION` 传入。使用 `--version <release>` 或 npm dist-tag 可以选择 DSH 版本。直接 `docker build` 仍支持已提交的基线上下文；未提供构建参数时会从 `package.json` 推导 `DSH_VERSION`。
 
 生产依赖闭包由活跃构建上下文中的 `pnpm-lock.yaml` 固定。pnpm 生命周期脚本 fail-closed，并限制在 `pnpm-workspace.yaml` 中已审查的软件包内。
 
 自定义 Caddy 构建会校验 go-authcrunch 源码归档 checksum，移除未使用的 GPG 公钥解析器，并在链接前运行上游 identity 包测试。caddy-security 仍保留 SSH 公钥支持，同时生成的 `CADDY_GO_PACKAGES.txt` 清单不得包含 `golang.org/x/crypto/openpgp` 包。构建还会把 `grpc`、`klauspost/compress` 和 `x/text` 提升到已修复版本。
 
-两个镜像都包含校验和固定的独立 pnpm `11.22.0` bundle，并移除 npm 和 Corepack。这会保留单一、已审计的 Node.js 包管理器面，避免所选 pnpm 版本静默跟随包管理器通道。
+两个镜像都包含校验和固定的独立 pnpm bundle，并移除 npm 和 Corepack。这会保留单一、已审计的 Node.js 包管理器面，避免所选 pnpm 版本静默跟随包管理器通道。
 
 ## 开发环境
 
 轻量镜像在现有 Bash、Git、curl 运行时基础上加入这些低开销基础工具：
 
 - OpenSSH client、jq、ripgrep、less、procps、file、unzip
-- 独立 pnpm `11.22.0`
+- 独立 pnpm
 
 它有意不包含 npm、Python、Go、Rust、GCC/G++ 和 Make。
 
 workstation 镜像继承相同的 DSH/认证运行时，并额外包含：
 
-- Node.js `24.19.0` 和 pnpm `11.22.0`
+- Node.js 和 pnpm
 - Python 3，含 pip、venv、pipx、pytest 和开发头文件
-- Go `1.26.6`；Rust 和 Cargo `1.97.1`
-- Docker CLI `29.7.2`、Compose `5.4.0`、Buildx `0.36.1`，仅客户端工具
+- Go、Rust 和 Cargo
+- Docker CLI、Compose 和 Buildx，仅客户端工具
 - GCC/G++、Clang、GDB、CMake、Ninja、Autoconf/Automake、libtool、pkg-config 和常见原生库头文件
 - Git LFS、GitHub CLI、ShellCheck、shfmt、yamllint、pre-commit、fd、bat、fzf、tmux、Vim、SQLite，以及常见网络、调试、归档工具
 
@@ -261,7 +248,7 @@ AUTH_COOKIE_INSECURE=false
 - 明文 HTTP IP origin 需要 `AUTH_COOKIE_INSECURE=true`。它没有传输保密性，并且在当前 caddy-security 行为下会同时移除 Cookie 的 `Secure` 和 `HttpOnly`。请仅限隔离测试网络使用。
 - Caddy 的 `tls internal` 可以为 IP 创建私有证书，但每个浏览器都必须先信任容器的私有 CA，否则用户会看到证书警告。Caddy 在 <https://caddyserver.com/docs/automatic-https#local-https> 记录了这个本地 CA 行为。
 
-Let's Encrypt 在 2026 年开放了公共 IPv4/IPv6 证书，但证书有效期为 160 小时，并要求 ACME `shortlived` profile：<https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability/>。Caddy `2.11.4` 支持该 profile，但成功签发仍要求该 IP 上的公开 `http-01` 或 `tls-alpn-01` 校验。本镜像默认模式不启用直接 ACME，因为 1Panel/OpenResty 已经拥有 80/443 和公网 TLS。未来如果加入 direct-TLS 模式，应作为单独显式部署 profile，而不是自动 fallback。
+Let's Encrypt 在 2026 年开放了公共 IPv4/IPv6 证书，但证书有效期为 160 小时，并要求 ACME `shortlived` profile：<https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability/>。当前固定的 Caddy 版本支持该 profile，但成功签发仍要求该 IP 上的公开 `http-01` 或 `tls-alpn-01` 校验。本镜像默认模式不启用直接 ACME，因为 1Panel/OpenResty 已经拥有 80/443 和公网 TLS。未来如果加入 direct-TLS 模式，应作为单独显式部署 profile，而不是自动 fallback。
 
 ## 认证
 
@@ -291,7 +278,7 @@ docker run ... -e "AUTH_PASSWORD_HASH=bcrypt:12:${password_hash}" ...
 
 caddy-security 在本地身份库初始化时还会创建一个带随机密码的内部 `webadmin` 记录。DSH 授权策略只允许 `authp/user`；该内部 admin 角色不能访问 DSH。
 
-Go 漏洞数据库目前对历史 caddy-security findings `GO-2024-2549` 和 `GO-2024-2557` 到 `GO-2024-2565` 存在范围差异：数据库记录没有 fixed event，而对应 GitHub advisories 把受影响版本限制在 `<=1.1.20`、`<=1.1.23` 或 `<=1.0.42`。本镜像固定 `1.1.64`，Trivy 会评估已发布版本范围并报告没有受影响的 caddy-security finding。这个差异记录在仓库安全扫描策略中，而不是静默忽略。
+当前 Caddy 和 caddy-security 依赖由仓库的 [安全扫描策略](../SECURITY_SCAN.md)和 CI 漏洞门禁评估。具体 advisory 结果应查看最新工作流运行，不依赖 README 中的静态快照。
 
 其他模式：
 
@@ -363,7 +350,7 @@ docker run --rm --entrypoint tar \
 
 ## 资源使用
 
-当前 amd64 认证烟雾测试在 DSH `0.1.0-rc.6` 下稳定在约 `167-180 MiB` 和约 `20-21` 个 PID。workstation 工具链空闲时不会显著提高内存，但会提高磁盘占用：当前本地 amd64 Docker size 在 registry 压缩前约为轻量镜像 `700 MB`、workstation `2.59 GB`。Debian 重建可能改变这些数字。
+当前 amd64 认证烟雾测试稳定在约 `167-180 MiB` 和约 `20-21` 个 PID。workstation 工具链空闲时不会显著提高内存，但会提高磁盘占用：当前本地 amd64 Docker size 在 registry 压缩前约为轻量镜像 `700 MB`、workstation `2.59 GB`。Debian 重建可能改变这些数字。
 
 CI 对空闲流程的上限仍为 `256 MiB`。这不是工作负载限制：终端、仓库、语言服务器、编译器和模型工具可能需要更多内存。
 
@@ -404,7 +391,7 @@ deepseek-harness-builder/scripts/workstation-smoke-test.sh \
   --image deepseek-harness-workstation:local
 ```
 
-Compose 合约检查会解析 socket 开关的两种状态，并证明包内状态 bind 直接挂载到 `/data`、一个命名卷直接挂载到 `/home/node`、包内 workspace 直接挂载到 `/workspace`、默认 socket 源是 `/dev/null`、启用源是 `/var/run/docker.sock`，且 HTTP 端口保持 loopback 绑定。workstation 专用镜像测试会编译并运行 C、C++、Go、Rust 探针，创建 Python 虚拟环境，检查普通和登录 shell 的 PATH 行为，验证 CLI 集合，确认所有 Docker 客户端二进制文件都使用 Go `1.26.6` 且不包含旧 daemon 模块，确认 Docker 默认没有 daemon 访问，使用隔离 Unix socket 刻画可选 socket group 映射，验证镜像只声明 `/home/node`，并确认 HOME、应用状态和 workspace 都是真实可写目录而不是符号链接。它还会在 `no-new-privileges` 下运行已安装的 DSH sandbox executor：`workspace-write` 必须允许项目写入并拒绝 workspace 外可写路径，而显式 `danger-full-access` 重试必须允许外部写入且不增加容器特权。
+Compose 合约检查会解析 socket 开关的两种状态，并证明包内状态 bind 直接挂载到 `/data`、一个命名卷直接挂载到 `/home/node`、包内 workspace 直接挂载到 `/workspace`、默认 socket 源是 `/dev/null`、启用源是 `/var/run/docker.sock`，且 HTTP 端口保持 loopback 绑定。workstation 专用镜像测试会编译并运行 C、C++、Go、Rust 探针，创建 Python 虚拟环境，检查普通和登录 shell 的 PATH 行为，验证 CLI 集合，确认所有 Docker 客户端二进制文件都使用已固定的 Go 工具链且不包含旧 daemon 模块，确认 Docker 默认没有 daemon 访问，使用隔离 Unix socket 刻画可选 socket group 映射，验证镜像只声明 `/home/node`，并确认 HOME、应用状态和 workspace 都是真实可写目录而不是符号链接。它还会在 `no-new-privileges` 下运行已安装的 DSH sandbox executor：`workspace-write` 必须允许项目写入并拒绝 workspace 外可写路径，而显式 `danger-full-access` 重试必须允许外部写入且不增加容器特权。
 
 构建镜像后运行 Caddy 漏洞门禁：
 
