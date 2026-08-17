@@ -8,6 +8,7 @@ ARG GO_AUTHCRUNCH_VERSION=1.1.41
 ARG GRPC_VERSION=1.83.0
 ARG KLAUSPOST_COMPRESS_VERSION=1.19.2
 ARG X_TEXT_VERSION=0.41.0
+ARG CADDY_RATELIMIT_REF=5625512f24f6f59d6f64fb3aafe5eecff0b286db
 
 COPY patches/go-authcrunch-disable-openpgp.patch /tmp/go-authcrunch-disable-openpgp.patch
 
@@ -29,6 +30,7 @@ RUN wget -qO /tmp/go-authcrunch.tar.gz \
 
 RUN xcaddy build "v${CADDY_VERSION}" \
         --with "github.com/greenpau/caddy-security@v${CADDY_SECURITY_VERSION}" \
+        --with "github.com/mholt/caddy-ratelimit@${CADDY_RATELIMIT_REF}" \
         --replace "github.com/greenpau/go-authcrunch@v${GO_AUTHCRUNCH_VERSION}=/usr/src/go-authcrunch-${GO_AUTHCRUNCH_VERSION}" \
         --replace "google.golang.org/grpc=google.golang.org/grpc@v${GRPC_VERSION}" \
         --replace "github.com/klauspost/compress=github.com/klauspost/compress@v${KLAUSPOST_COMPRESS_VERSION}" \
@@ -36,7 +38,8 @@ RUN xcaddy build "v${CADDY_VERSION}" \
     && ./caddy version \
     && ./caddy list-modules | grep -Fx 'security' \
     && ./caddy list-modules | grep -Fx 'http.handlers.authenticator' \
-    && ./caddy list-modules | grep -Fx 'http.authentication.providers.authorizer'
+    && ./caddy list-modules | grep -Fx 'http.authentication.providers.authorizer' \
+    && ./caddy list-modules | grep -Fx 'http.handlers.rate_limit'
 
 RUN PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'google\.golang\.org/grpc[[:space:]]+v1\.83\.0' \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'github\.com/klauspost/compress[[:space:]]+v1\.19\.2' \
@@ -65,7 +68,12 @@ RUN mkdir -p /licenses \
         "https://raw.githubusercontent.com/greenpau/go-authcrunch/v${GO_AUTHCRUNCH_VERSION}/LICENSE" \
     && printf '%s  %s\n' \
         'c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4' \
-        /licenses/GO_AUTHCRUNCH_LICENSE | sha256sum -c -
+        /licenses/GO_AUTHCRUNCH_LICENSE | sha256sum -c - \
+    && wget -qO /licenses/CADDY_RATELIMIT_LICENSE \
+        "https://raw.githubusercontent.com/mholt/caddy-ratelimit/${CADDY_RATELIMIT_REF}/LICENSE" \
+    && printf '%s  %s\n' \
+        '094bedda295c0702807d1027a00e1134f4cb71d523dc49f6d4b3caf589053068' \
+        /licenses/CADDY_RATELIMIT_LICENSE | sha256sum -c -
 
 FROM node:24.19.0-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS dsh-deps
 
@@ -81,12 +89,15 @@ RUN apt-get update \
 
 WORKDIR /opt/dsh
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY scripts/patch-dsh-directory-picker.mjs /tmp/patch-dsh-directory-picker.mjs
 
 RUN corepack enable \
     && corepack prepare "pnpm@${PNPM_VERSION}" --activate \
     && resolved_dsh_version="${DSH_VERSION:-$(node -p "require('./package.json').dependencies['@deepseek-ai/dsh']")}" \
     && test "$(node -p "require('./package.json').dependencies['@deepseek-ai/dsh']")" = "${resolved_dsh_version}" \
     && pnpm install --prod --frozen-lockfile --trust-lockfile \
+    && node /tmp/patch-dsh-directory-picker.mjs \
+    && rm -f /tmp/patch-dsh-directory-picker.mjs \
     && pnpm exec dsh --version | grep -Fx "${resolved_dsh_version}" \
     && find node_modules/.pnpm \
         -path '*/node_modules/node-pty/build/Release/pty.node' \
@@ -225,6 +236,7 @@ ENV AUTH_MODE=caddy-security \
     AUTH_STATE_DIR=/data/auth \
     AUTH_COOKIE_INSECURE=false \
     AUTH_TOKEN_LIFETIME=3600 \
+    CADDY_TRUSTED_PROXIES=private_ranges \
     CADDY_CONFIG_HOME=/data/caddy/config \
     CADDY_DATA_HOME=/data/caddy/data \
     DSH_HOME=/data/dsh \

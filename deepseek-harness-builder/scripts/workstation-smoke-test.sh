@@ -58,6 +58,16 @@ if [[ "${declared_volumes}" != "/home/node" ]]; then
 fi
 printf '[workstation-smoke] PASS: workstation image declares one persistent HOME volume\n'
 
+working_dir="$(docker image inspect --format '{{.Config.WorkingDir}}' "${IMAGE}")"
+if [[ "${working_dir}" != "/workspace" ]]; then
+    printf 'ERROR: workstation image working directory must be /workspace, got: %s\n' "${working_dir}" >&2
+    exit 1
+fi
+docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${IMAGE}" \
+    | grep -Fxq 'DSH_WORKSPACE=/workspace' \
+    || { printf 'ERROR: workstation DSH_WORKSPACE must be /workspace\n' >&2; exit 1; }
+printf '[workstation-smoke] PASS: workstation defaults to /workspace while HOME remains /home/node\n'
+
 docker run --rm --entrypoint bash -i "${IMAGE}" -s <<'SOCKET_TEST'
 set -Eeuo pipefail
 

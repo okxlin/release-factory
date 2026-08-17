@@ -219,6 +219,56 @@ expect_start_failure() {
     pass "${label}"
 }
 
+assert_directory_picker_workspace_default() {
+    docker exec \
+        --user node \
+        -i "${container_name}" node --input-type=module - <<'NODE'
+import assert from 'node:assert/strict';
+import { mkdir, readdir, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const pnpmRoot = '/opt/dsh/node_modules/.pnpm';
+const packagePrefix = '@deepseek-ai+dsh-host-directory-picker-browse@';
+const packages = (await readdir(pnpmRoot, { withFileTypes: true }))
+  .filter((entry) => entry.isDirectory() && entry.name.startsWith(packagePrefix));
+assert.equal(packages.length, 1, 'directory picker package count');
+
+const modulePath = join(
+  pnpmRoot,
+  packages[0].name,
+  'node_modules',
+  '@deepseek-ai',
+  'dsh-host-directory-picker-browse',
+  'lib',
+  'index.js',
+);
+const workspaceProbe = '/workspace/dsh-picker-workspace-probe';
+const homeProbe = '/home/node/dsh-picker-home-probe';
+
+assert.equal(process.env.DSH_WORKSPACE, '/workspace', 'image DSH_WORKSPACE default');
+await mkdir(workspaceProbe, { recursive: true });
+await mkdir(homeProbe, { recursive: true });
+try {
+  const { default: BrowseDirectoryPicker } = await import(pathToFileURL(modulePath));
+  const context = { reflect: { provide() {} } };
+  const picker = new BrowseDirectoryPicker(context, { maxEntries: 1000 });
+  const listing = await picker.capability().list();
+  const names = listing.entries.map((entry) => entry.name);
+
+  assert.equal(listing.path, '/workspace', 'default directory picker path');
+  assert.equal(listing.home, '/workspace', 'directory picker Home path');
+  assert(names.includes('dsh-picker-workspace-probe'), 'workspace probe is listed');
+  assert(!names.includes('dsh-picker-home-probe'), 'HOME probe is not listed');
+} finally {
+  await rm(workspaceProbe, { recursive: true, force: true });
+  await rm(homeProbe, { recursive: true, force: true });
+}
+
+process.stdout.write('[smoke] PASS: directory picker defaults to /workspace\n');
+NODE
+}
+
 run_http_contract() {
     docker exec \
         -e SMOKE_PROFILE="${PROFILE}" \
@@ -238,9 +288,12 @@ const username = process.env.TEST_USERNAME;
 const publicOrigin = new URL(publicUrl);
 const proxyHeaders = {
   Host: publicOrigin.host,
+  'X-Forwarded-For': '203.0.113.10, 198.51.100.10',
   'X-Forwarded-Host': publicOrigin.host,
   'X-Forwarded-Proto': publicOrigin.protocol.slice(0, -1),
 };
+let usernamePostEvents = 0;
+let passwordPostEvents = 0;
 
 class CookieJar {
   constructor() {
@@ -326,6 +379,21 @@ async function followToPage(response, jar) {
   throw new Error('redirect limit exceeded');
 }
 
+async function submitUsername(jar, extraHeaders = {}) {
+  const usernameBody = new URLSearchParams({username, realm: 'local'}).toString();
+  const response = await request(`/auth/login?redirect_url=${encodeURIComponent(`${publicOrigin.origin}/`)}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Length': Buffer.byteLength(usernameBody),
+      ...extraHeaders,
+    },
+    body: usernameBody,
+  }, jar);
+  usernamePostEvents += 1;
+  return response;
+}
+
 async function passwordForm(jar) {
   let response = await request('/', {}, jar);
   assert(response.status === 302, 'unauthenticated root redirects to authentication');
@@ -340,15 +408,7 @@ async function passwordForm(jar) {
   assert(response.body.includes('autocomplete="username"'),
     'username field supports browser password managers');
 
-  const usernameBody = new URLSearchParams({username, realm: 'local'}).toString();
-  response = await request(`/auth/login?redirect_url=${encodeURIComponent(`${publicOrigin.origin}/`)}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Content-Length': Buffer.byteLength(usernameBody),
-    },
-    body: usernameBody,
-  }, jar);
+  response = await submitUsername(jar);
   assert(response.status === 303, 'username phase advances to the password sandbox');
 
   response = await request(publicPath(response.headers.location), {}, jar);
@@ -362,20 +422,23 @@ async function passwordForm(jar) {
   return {action, jar, sandboxId};
 }
 
-async function submitPassword(form, secret) {
+async function submitPassword(form, secret, extraHeaders = {}) {
   const passwordBody = new URLSearchParams({
     secret,
     sandbox_id: form.sandboxId,
     submit: 'Sign In',
   }).toString();
-  return request(form.action, {
+  const response = await request(form.action, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
       'Content-Length': Buffer.byteLength(passwordBody),
+      ...extraHeaders,
     },
     body: passwordBody,
   }, form.jar);
+  passwordPostEvents += 1;
+  return response;
 }
 
 async function login() {
@@ -510,6 +573,56 @@ function websocket(path, jar) {
       'logout redirect remains on the HTTPS public origin');
     const afterLogout = await request('/', {}, jar);
     assert(afterLogout.status === 302, 'logged-out session cannot access DeepSeek Harness');
+
+    while (passwordPostEvents < 10) {
+      const attempt = passwordPostEvents + 1;
+      const rateLimitJar = new CookieJar();
+      const rateLimitForm = await passwordForm(rateLimitJar);
+      const rejected = await submitPassword(
+        rateLimitForm,
+        `rate-limit-wrong-${attempt}`,
+        {'X-Forwarded-For': `192.0.2.${attempt}, 203.0.113.10, 198.51.100.10`},
+      );
+      if (rejected.status !== 401) {
+        throw new Error(`password attempt ${attempt}: expected 401, got ${rejected.status}`);
+      }
+    }
+    assert(passwordPostEvents === 10,
+      'the first ten password-stage POSTs remain available to one resolved client IP');
+
+    const blockedJar = new CookieJar();
+    const blockedForm = await passwordForm(blockedJar);
+    const blocked = await submitPassword(
+      blockedForm,
+      'rate-limit-blocked',
+      {'X-Forwarded-For': '192.0.2.250, 203.0.113.10, 198.51.100.10'},
+    );
+    assert(blocked.status === 429,
+      'the eleventh password failure is rate limited despite a spoofed leftmost XFF value');
+    assert(Boolean(blocked.headers['retry-after']),
+      'rate-limited authentication responses include Retry-After');
+
+    while (usernamePostEvents < 30) {
+      const attempt = usernamePostEvents + 1;
+      const response = await submitUsername(
+        new CookieJar(),
+        {'X-Forwarded-For': `192.0.2.${attempt}, 203.0.113.10, 198.51.100.10`},
+      );
+      if (response.status === 429) {
+        throw new Error(`username attempt ${attempt}: rate limited before the configured budget`);
+      }
+    }
+    assert(usernamePostEvents === 30,
+      'the first thirty username-stage POSTs remain available to one resolved client IP');
+
+    const blockedUsername = await submitUsername(
+      new CookieJar(),
+      {'X-Forwarded-For': '192.0.2.250, 203.0.113.10, 198.51.100.10'},
+    );
+    assert(blockedUsername.status === 429,
+      'the thirty-first username POST is rate limited despite a spoofed leftmost XFF value');
+    assert(Boolean(blockedUsername.headers['retry-after']),
+      'rate-limited username responses include Retry-After');
   }
 })().catch(error => {
   process.stderr.write(`[smoke] FAIL: ${error.message}\n`);
@@ -694,11 +807,15 @@ check_runtime_versions() {
         || fail "Caddy version is not pinned to v2.11.4"
     local caddy_modules
     caddy_modules="$(docker exec "${container_name}" caddy list-modules)"
-    for module in security http.handlers.authenticator http.authentication.providers.authorizer; do
+    for module in \
+        security \
+        http.handlers.authenticator \
+        http.authentication.providers.authorizer \
+        http.handlers.rate_limit; do
         grep -Fxq "${module}" <<< "${caddy_modules}" \
             || fail "Caddy module is missing: ${module}"
     done
-    pass "Caddy and caddy-security modules are present"
+    pass "Caddy authentication and rate-limit modules are present"
 }
 
 check_idle_resources() {
@@ -782,6 +899,7 @@ start_test_container() {
         -e AUTH_USERNAME="${test_username}" \
         -e AUTH_PASSWORD_FILE=/run/secrets/dsh_password \
         -e AUTH_TOKEN_LIFETIME="${TOKEN_LIFETIME}" \
+        -e 'CADDY_TRUSTED_PROXIES=127.0.0.1/32 198.51.100.10/32' \
         "${mount_args[@]}" \
         "${IMAGE}" >/dev/null
 }
@@ -791,6 +909,7 @@ start_test_container
 wait_for_health
 pass "container became healthy"
 check_runtime_versions
+assert_directory_picker_workspace_default
 run_process_contract
 run_http_contract
 check_auth_file_permissions
@@ -858,6 +977,27 @@ if [[ "${PROFILE}" == "full" ]]; then
         -e PUBLIC_URL="${PUBLIC_URL}" \
         -e AUTH_PASSWORD="${test_password}" \
         -e AUTH_TOKEN_LIFETIME=2592001
+    expect_start_failure \
+        "invalid trusted proxy list fails closed" \
+        "CADDY_TRUSTED_PROXIES must be a space-separated list of CIDRs or private_ranges" \
+        -v "${data_bind_dir}:/data" \
+        -e PUBLIC_URL="${PUBLIC_URL}" \
+        -e AUTH_PASSWORD="${test_password}" \
+        -e 'CADDY_TRUSTED_PROXIES=private_ranges not-a-cidr'
+    expect_start_failure \
+        "direct-client mode cannot be combined with trusted proxy ranges" \
+        "CADDY_TRUSTED_PROXIES=none cannot be combined with other entries" \
+        -v "${data_bind_dir}:/data" \
+        -e PUBLIC_URL="${PUBLIC_URL}" \
+        -e AUTH_PASSWORD="${test_password}" \
+        -e 'CADDY_TRUSTED_PROXIES=none 127.0.0.1/32'
+    expect_start_failure \
+        "unrestricted trusted proxy range fails closed" \
+        "CADDY_TRUSTED_PROXIES must not include unrestricted /0 ranges" \
+        -v "${data_bind_dir}:/data" \
+        -e PUBLIC_URL="${PUBLIC_URL}" \
+        -e AUTH_PASSWORD="${test_password}" \
+        -e 'CADDY_TRUSTED_PROXIES=0.0.0.0/0'
 
     docker run --rm \
         --entrypoint sh \

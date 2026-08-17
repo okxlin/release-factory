@@ -3,6 +3,12 @@
 	auto_https off
 	grace_period 10s
 
+	servers {
+		trusted_proxies static {$CADDY_TRUSTED_PROXIES}
+		trusted_proxies_strict
+		client_ip_headers X-Forwarded-For
+	}
+
 	security {
 		local identity store dsh_local {
 			realm local
@@ -62,6 +68,28 @@
 	}
 
 	route /auth* {
+		rate_limit {
+			zone dsh_auth_usernames {
+				match {
+					method POST
+					path /auth/login
+				}
+				key {http.request.client_ip}
+				window 1m
+				events 30
+				ipv6_prefix 64
+			}
+			zone dsh_auth_passwords {
+				match {
+					method POST
+					path /auth/sandbox/*
+				}
+				key {http.request.client_ip}
+				window 10m
+				events 10
+				ipv6_prefix 64
+			}
+		}
 		header Cache-Control "no-store"
 		authenticate with dsh_portal
 	}
