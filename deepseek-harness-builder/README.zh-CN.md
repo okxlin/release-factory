@@ -18,8 +18,8 @@
 当前提交基线版本：
 
 - DeepSeek Harness `0.1.0-rc.6`
-- Node.js `24.18.0`
-- pnpm `11.21.0`
+- Node.js `24.19.0`
+- pnpm `11.22.0`
 - Caddy `2.11.4`
 - caddy-security `1.1.64`
 - go-authcrunch `1.1.41`，带镜像内 OpenPGP 移除补丁
@@ -68,20 +68,20 @@ deepseek-harness-builder/scripts/build-local.sh \
 
 自定义 Caddy 构建会校验 go-authcrunch 源码归档 checksum，移除未使用的 GPG 公钥解析器，并在链接前运行上游 identity 包测试。caddy-security 仍保留 SSH 公钥支持，同时生成的 `CADDY_GO_PACKAGES.txt` 清单不得包含 `golang.org/x/crypto/openpgp` 包。构建还会把 `grpc`、`klauspost/compress` 和 `x/text` 提升到已修复版本。
 
-两个镜像都包含校验和固定的独立 pnpm `11.21.0` bundle，并移除 npm 和 Corepack。这会保留单一、已审计的 Node.js 包管理器面，避免所选 pnpm 版本静默跟随包管理器通道。
+两个镜像都包含校验和固定的独立 pnpm `11.22.0` bundle，并移除 npm 和 Corepack。这会保留单一、已审计的 Node.js 包管理器面，避免所选 pnpm 版本静默跟随包管理器通道。
 
 ## 开发环境
 
 轻量镜像在现有 Bash、Git、curl 运行时基础上加入这些低开销基础工具：
 
 - OpenSSH client、jq、ripgrep、less、procps、file、unzip
-- 独立 pnpm `11.21.0`
+- 独立 pnpm `11.22.0`
 
 它有意不包含 npm、Python、Go、Rust、GCC/G++ 和 Make。
 
 workstation 镜像继承相同的 DSH/认证运行时，并额外包含：
 
-- Node.js `24.18.0` 和 pnpm `11.21.0`
+- Node.js `24.19.0` 和 pnpm `11.22.0`
 - Python 3，含 pip、venv、pipx、pytest 和开发头文件
 - Go `1.26.6`；Rust 和 Cargo `1.97.1`
 - Docker CLI `29.7.2`、Compose `5.4.0`、Buildx `0.36.1`，仅客户端工具
@@ -93,6 +93,12 @@ workstation 镜像继承相同的 DSH/认证运行时，并额外包含：
 ## 在 1Panel/OpenResty 后运行
 
 复制 `image/.env.example` 到私有环境文件，并至少修改 `PUBLIC_URL` 和 `AUTH_PASSWORD`。不要提交这个文件。
+
+**升级时注意：持久化路径已变更。** 当前镜像把应用状态保存到 `/data`，
+并要求把 `/data` 挂载为宿主机路径或 Docker 命名卷。仅映射旧的
+`/home/node/.local/share/deepseek-harness` 无法持久化新版本。为了防止静默丢失状态，
+当 `/data` 未挂载时，entrypoint 会输出中英文错误并终止启动；请重新创建容器并加入
+持久化的 `/data` 挂载。
 
 ```bash
 sudo install -d -m 0750 /opt/deepseek-harness/data /opt/deepseek-harness/workspace
@@ -412,5 +418,10 @@ Caddy 生产二进制文件已 stripped。Go 文档说明，在没有可提取�
 两个 arm64 CI lane 使用 QEMU 在可发布多平台镜像前验证原生 `node-pty` 构建、Caddy 插件模块、认证流程、架构和 loopback 边界。workstation lane 也会在 arm64 上运行编译器探针。由于 Landlock enforcement 取决于宿主内核且在 QEMU user-mode emulation 下不可靠，该 lane 只明确跳过 DSH sandbox enforcement 探针；amd64 workstation lane 仍运行完整探针。
 
 ## 升级行为
+
+两个镜像变体都必须挂载 `/data`。升级旧 workstation 部署时，首次启动请保留原有的
+`/home/node` 卷或直接挂载的 `/home/node/.local/share/deepseek-harness`，同时新增
+`/data` 挂载。如果新的认证状态为空，entrypoint 会把旧 workstation 应用状态复制到
+`/data`。确认迁移数据后，后续容器仍必须挂载 `/data`；旧路径不能替代它。
 
 Caddy 和 caddy-security 会一起编译并固定版本。不能假设只更新 Caddy 是安全的。定时工作流会解析 npm `@deepseek-ai/dsh@latest`，在构建 workspace 中临时更新 `package.json` 和 `pnpm-lock.yaml`，把解析出的版本作为 Docker `DSH_VERSION` 构建参数，并把 `runtime` target 发布为 `latest` 加 `<DSH_VERSION>`，把 `workstation` target 发布为 `workstation` 加 `<DSH_VERSION>-workstation`。手动运行可以覆盖 DSH 包版本或最终镜像标签，同时保留相同验证和可选浮动标签行为。每个工作流都会先审计冻结的 pnpm 生产依赖树、重建并验证插件、运行 Caddy 依赖图和 `govulncheck` 门禁、执行 amd64 和 arm64 烟雾合约，并对两个架构应用零可修复 HIGH/CRITICAL Trivy 门禁，然后才把验证过的多平台 manifest 推送到 GHCR 和 Docker Hub。任一 registry 登录或发布失败，工作流都会失败，而不是报告完整发布。

@@ -188,7 +188,8 @@ wait_for_health() {
 
 expect_start_failure() {
     local label="$1"
-    local expected_message="$2"
+    local expected_messages="$2"
+    local expected_message
     shift 2
 
     failure_counter=$((failure_counter + 1))
@@ -208,10 +209,13 @@ expect_start_failure() {
     if (( status == 124 )); then
         fail "${label}: container unexpectedly kept running"
     fi
-    if ! grep -Fq "${expected_message}" <<< "${output}"; then
-        printf '%s\n' "${output}" >&2
-        fail "${label}: expected error was not reported"
-    fi
+    while IFS= read -r expected_message; do
+        [[ -n "${expected_message}" ]] || continue
+        if ! grep -Fq "${expected_message}" <<< "${output}"; then
+            printf '%s\n' "${output}" >&2
+            fail "${label}: expected error was not reported: ${expected_message}"
+        fi
+    done <<< "${expected_messages}"
     pass "${label}"
 }
 
@@ -633,12 +637,12 @@ check_runtime_versions() {
         || fail "DeepSeek Harness version is not ${EXPECTED_DSH_VERSION}"
     pass "DeepSeek Harness version matches ${EXPECTED_DSH_VERSION}"
 
-    [[ "$(docker exec "${container_name}" node --version)" == "v24.18.0" ]] \
-        || fail "Node.js version is not pinned to v24.18.0"
+    [[ "$(docker exec "${container_name}" node --version)" == "v24.19.0" ]] \
+        || fail "Node.js version is not pinned to v24.19.0"
     pass "Node.js version is pinned"
 
-    [[ "$(docker exec "${container_name}" pnpm --version)" == "11.21.0" ]] \
-        || fail "pnpm version is not pinned to 11.21.0"
+    [[ "$(docker exec "${container_name}" pnpm --version)" == "11.22.0" ]] \
+        || fail "pnpm version is not pinned to 11.22.0"
     pass "standalone pnpm version is pinned"
 
     if docker exec "${container_name}" sh -c 'command -v corepack >/dev/null 2>&1'; then
@@ -748,6 +752,13 @@ printf '%s\n' "${test_password}" \
         -v "${secret_volume}:/run/secrets" \
         "${IMAGE}" \
         -c 'umask 077; cat > /run/secrets/dsh_password'
+expect_start_failure \
+    "missing /data persistence mount fails closed" \
+    $'persistence path has changed\n持久化路径已变更' \
+    -e PUBLIC_URL="${PUBLIC_URL}" \
+    -e AUTH_PASSWORD="${test_password}" \
+    -v "${home_volume}:/home/node" \
+    -v "${workspace_volume}:/workspace"
 if [[ "${PROFILE}" == "full" ]]; then
     docker run --rm \
         --entrypoint sh \
@@ -814,30 +825,36 @@ if [[ "${PROFILE}" == "full" ]]; then
     expect_start_failure \
         "future native-auth mode fails closed" \
         "AUTH_MODE=dsh is reserved" \
+        -v "${data_bind_dir}:/data" \
         -e PUBLIC_URL="${PUBLIC_URL}" \
         -e AUTH_MODE=dsh
     expect_start_failure \
         "missing password fails closed" \
         "AUTH_PASSWORD, AUTH_PASSWORD_FILE, or AUTH_PASSWORD_HASH is required" \
+        -v "${data_bind_dir}:/data" \
         -e PUBLIC_URL="${PUBLIC_URL}"
     expect_start_failure \
         "invalid public URL fails closed" \
         "PUBLIC_URL must be an http(s) origin" \
+        -v "${data_bind_dir}:/data" \
         -e PUBLIC_URL="https://dsh.example.test/subpath" \
         -e AUTH_PASSWORD="${test_password}"
     expect_start_failure \
         "invalid password hash fails closed" \
         "AUTH_PASSWORD_HASH must be an exact bcrypt" \
+        -v "${data_bind_dir}:/data" \
         -e PUBLIC_URL="${PUBLIC_URL}" \
         -e 'AUTH_PASSWORD_HASH=bcrypt:12:not-a-valid-bcrypt-hash'
     expect_start_failure \
         "HTTP origin requires explicit insecure-cookie opt-in" \
         "PUBLIC_URL uses HTTP" \
+        -v "${data_bind_dir}:/data" \
         -e PUBLIC_URL=http://dsh.example.test \
         -e AUTH_PASSWORD="${test_password}"
     expect_start_failure \
         "login lifetime above 30 days fails closed" \
         "AUTH_TOKEN_LIFETIME must be between 300 and 2592000 seconds" \
+        -v "${data_bind_dir}:/data" \
         -e PUBLIC_URL="${PUBLIC_URL}" \
         -e AUTH_PASSWORD="${test_password}" \
         -e AUTH_TOKEN_LIFETIME=2592001

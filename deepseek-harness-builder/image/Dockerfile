@@ -5,9 +5,9 @@ FROM caddy:2.11.4-builder-alpine@sha256:2b9994510fadb5dfa5257a5357cbe26a2c4a3298
 ARG CADDY_VERSION=2.11.4
 ARG CADDY_SECURITY_VERSION=1.1.64
 ARG GO_AUTHCRUNCH_VERSION=1.1.41
-ARG GRPC_VERSION=1.82.1
-ARG KLAUSPOST_COMPRESS_VERSION=1.18.7
-ARG X_TEXT_VERSION=0.39.0
+ARG GRPC_VERSION=1.83.0
+ARG KLAUSPOST_COMPRESS_VERSION=1.19.2
+ARG X_TEXT_VERSION=0.41.0
 
 COPY patches/go-authcrunch-disable-openpgp.patch /tmp/go-authcrunch-disable-openpgp.patch
 
@@ -38,9 +38,9 @@ RUN xcaddy build "v${CADDY_VERSION}" \
     && ./caddy list-modules | grep -Fx 'http.handlers.authenticator' \
     && ./caddy list-modules | grep -Fx 'http.authentication.providers.authorizer'
 
-RUN PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'google\.golang\.org/grpc[[:space:]]+v1\.82\.1' \
-    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'github\.com/klauspost/compress[[:space:]]+v1\.18\.7' \
-    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'golang\.org/x/text[[:space:]]+v0\.39\.0' \
+RUN PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'google\.golang\.org/grpc[[:space:]]+v1\.83\.0' \
+    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'github\.com/klauspost/compress[[:space:]]+v1\.19\.2' \
+    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'golang\.org/x/text[[:space:]]+v0\.41\.0' \
     && set -- /tmp/buildenv_* \
     && test "$#" -eq 1 \
     && test -d "$1" \
@@ -67,10 +67,10 @@ RUN mkdir -p /licenses \
         'c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4' \
         /licenses/GO_AUTHCRUNCH_LICENSE | sha256sum -c -
 
-FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS dsh-deps
+FROM node:24.19.0-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS dsh-deps
 
 ARG DSH_VERSION=
-ARG PNPM_VERSION=11.21.0
+ARG PNPM_VERSION=11.22.0
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -92,14 +92,14 @@ RUN corepack enable \
         -path '*/node_modules/node-pty/build/Release/pty.node' \
         -type f -print -quit | grep -q .
 
-FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS pnpm-bundle
+FROM node:24.19.0-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS pnpm-bundle
 
-ARG PNPM_VERSION=11.21.0
+ARG PNPM_VERSION=11.22.0
 
 # The registry tarball is checksum-pinned so the runtime can provide pnpm
 # without retaining npm or Corepack.
-ADD --checksum=sha256:87237d37eadb79dc626a0576eb3a52d23d70422c323ae5e00fc05c91f4323780 \
-    https://registry.npmjs.org/pnpm/-/pnpm-11.21.0.tgz /tmp/pnpm.tgz
+ADD --checksum=sha256:57a97e6f23a3faffc03153a4ef8c770a0552612b8640aebe39bfdd5754d0ebdc \
+    https://registry.npmjs.org/pnpm/-/pnpm-11.22.0.tgz /tmp/pnpm.tgz
 
 RUN mkdir -p /opt/pnpm \
     && tar -xzf /tmp/pnpm.tgz -C /opt/pnpm --strip-components=1 \
@@ -214,12 +214,12 @@ FROM rust:1.97.1-slim-bookworm@sha256:2775a09d208ff0d7c1f50490c45b62db929e87ba1d
 RUN rustc --version | grep -F 'rustc 1.97.1 ' \
     && cargo --version | grep -F 'cargo 1.97.1 '
 
-FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS runtime-base
+FROM node:24.19.0-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS runtime-base
 
 ARG CADDY_VERSION=2.11.4
 ARG CADDY_SECURITY_VERSION=1.1.64
 ARG DSH_VERSION=
-ARG PNPM_VERSION=11.21.0
+ARG PNPM_VERSION=11.22.0
 
 ENV AUTH_MODE=caddy-security \
     AUTH_STATE_DIR=/data/auth \
@@ -279,7 +279,7 @@ RUN install -d -m 0750 -o node -g node \
     && caddy version | grep -F "v${CADDY_VERSION}" \
     && caddy list-modules | grep -Fx 'security' \
     && dsh --version | grep -Fx "${resolved_dsh_version}" \
-    && node --version | grep -Fx 'v24.18.0' \
+    && node --version | grep -Fx 'v24.19.0' \
     && pnpm --version | grep -Fx "${PNPM_VERSION}"
 
 ENV DSH_VERSION_FILE=/etc/deepseek-harness-version
@@ -300,7 +300,7 @@ ARG DOCKER_BUILDX_VERSION=0.36.1
 ARG DOCKER_COMPOSE_VERSION=5.4.0
 ARG DOCKER_VERSION=29.7.2
 ARG GO_VERSION=1.26.6
-ARG PNPM_VERSION=11.21.0
+ARG PNPM_VERSION=11.22.0
 ARG RUST_VERSION=1.97.1
 
 ENV CARGO_HOME=/home/node/.cargo \
@@ -421,7 +421,7 @@ VOLUME ["/home/node"]
 
 FROM runtime-base AS runtime
 
-ARG PNPM_VERSION=11.21.0
+ARG PNPM_VERSION=11.22.0
 
 ENV DSH_IMAGE_VARIANT=runtime
 
