@@ -219,8 +219,8 @@ done
 [[ "${DSH_HOME}" == "/data/dsh" ]] \
     || fail "DeepSeek Harness state is not stored under /data"
 pass "home, /data application state, and workspace use direct directories without symbolic links"
-[[ "$(node --version)" == "v24.18.0" ]] || fail "Node.js version drifted"
-[[ "$(pnpm --version)" == "11.21.0" ]] || fail "pnpm version drifted"
+[[ "$(node --version)" == "v24.19.0" ]] || fail "Node.js version drifted"
+[[ "$(pnpm --version)" == "11.22.0" ]] || fail "pnpm version drifted"
 [[ "$(go version)" == go\ version\ go1.26.6* ]] || fail "Go version drifted"
 [[ "$(rustc --version)" == rustc\ 1.97.1* ]] || fail "Rust version drifted"
 python3 --version | grep -Eq '^Python 3\.' || fail "Python 3 is unavailable"

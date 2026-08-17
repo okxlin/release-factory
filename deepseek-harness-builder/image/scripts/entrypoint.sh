@@ -34,6 +34,16 @@ fatal() {
     exit 1
 }
 
+require_persistent_data_mount() {
+    if [[ ! -r /proc/self/mountinfo ]] \
+        || ! awk '$5 == "/data" { found = 1 } END { exit found ? 0 : 1 }' /proc/self/mountinfo; then
+        printf '[entrypoint] ERROR: persistence path has changed: this image now stores application state under /data, but /data is not mounted. Mounting only the legacy /home/node/.local/share/deepseek-harness path does not persist the new layout; recreate the container with a persistent /data mount.\n' >&2
+        printf '[entrypoint] 错误：持久化路径已变更：此镜像现在将应用状态保存到 /data，但当前未挂载 /data。仅映射旧的 /home/node/.local/share/deepseek-harness 无法持久化新版本；请重新创建容器并挂载持久化的 /data。\n' >&2
+        printf '[entrypoint] Example / 示例：-v /opt/deepseek-harness/data:/data\n' >&2
+        exit 1
+    fi
+}
+
 trim() {
     local value="$1"
     value="${value#"${value%%[![:space:]]*}"}"
@@ -306,6 +316,7 @@ AUTH_TOKEN_LIFETIME=$((10#${AUTH_TOKEN_LIFETIME}))
 [[ "${AUTH_USERNAME}" =~ ^[A-Za-z0-9][A-Za-z0-9_.@-]{0,63}$ ]] \
     || fatal "AUTH_USERNAME contains unsupported characters"
 
+require_persistent_data_mount
 prepare_directories
 validate_auth_state_files
 migrate_legacy_workstation_state

@@ -18,8 +18,8 @@ Scheduled runs resolve the current npm `@deepseek-ai/dsh` version, update the im
 Checked-in baseline versions:
 
 - DeepSeek Harness `0.1.0-rc.6`
-- Node.js `24.18.0`
-- pnpm `11.21.0`
+- Node.js `24.19.0`
+- pnpm `11.22.0`
 - Caddy `2.11.4`
 - caddy-security `1.1.64`
 - go-authcrunch `1.1.41` with the image-local OpenPGP removal patch
@@ -68,20 +68,20 @@ The production dependency closure is pinned by `pnpm-lock.yaml` in the active bu
 
 The custom Caddy build verifies the go-authcrunch source archive checksum, removes its unused GPG public-key parser, and runs the upstream identity-package tests before linking. SSH public-key support remains available to caddy-security, while the generated `CADDY_GO_PACKAGES.txt` manifest must contain no `golang.org/x/crypto/openpgp` package. The build also raises `grpc`, `klauspost/compress`, and `x/text` to their fixed versions.
 
-Both images include a checksum-pinned standalone pnpm `11.21.0` bundle and remove npm and Corepack. This keeps one audited Node.js package-manager surface and prevents the selected pnpm version from silently following a package-manager channel.
+Both images include a checksum-pinned standalone pnpm `11.22.0` bundle and remove npm and Corepack. This keeps one audited Node.js package-manager surface and prevents the selected pnpm version from silently following a package-manager channel.
 
 ## Development environments
 
 The lightweight image adds these low-overhead basics to the existing Bash, Git, and curl runtime:
 
 - OpenSSH client, jq, ripgrep, less, procps, file, and unzip
-- standalone pnpm `11.21.0`
+- standalone pnpm `11.22.0`
 
 It intentionally omits npm, Python, Go, Rust, GCC/G++, and Make.
 
 The workstation image inherits the same DSH/authentication runtime and adds:
 
-- Node.js `24.18.0` and pnpm `11.21.0`
+- Node.js `24.19.0` and pnpm `11.22.0`
 - Python 3 with pip, venv, pipx, pytest, and development headers
 - Go `1.26.6`; Rust and Cargo `1.97.1`
 - Docker CLI `29.7.2`, Compose `5.4.0`, and Buildx `0.36.1` (client tools only)
@@ -93,6 +93,13 @@ It does not add code-server, Codex/Claude CLIs, proxy daemons, `sudo`, or a Dock
 ## Run behind 1Panel/OpenResty
 
 Copy `image/.env.example` to a private environment file and change at least `PUBLIC_URL` and `AUTH_PASSWORD`. Do not commit that file.
+
+**Important for upgrades:** the persistence path has changed. Current images
+store application state under `/data`, and `/data` must be a bind mount or named
+volume. Mounting only the legacy
+`/home/node/.local/share/deepseek-harness` path does not persist the new layout.
+To prevent silent state loss, the entrypoint exits with a bilingual error when
+`/data` is not mounted; recreate the container with a persistent `/data` mount.
 
 ```bash
 sudo install -d -m 0750 /opt/deepseek-harness/data /opt/deepseek-harness/workspace
@@ -426,5 +433,13 @@ Caddy's production binary is stripped. Go documents that binary scans without ex
 Both arm64 CI lanes use QEMU to prove the native `node-pty` build, Caddy plugin modules, authentication flow, architecture, and loopback boundary before a multi-platform image can be published. The workstation lane also runs its compiler probes on arm64. Because Landlock enforcement depends on the host kernel and is not reliably available under QEMU user-mode emulation, that lane explicitly skips only the DSH sandbox enforcement probe; the amd64 workstation lane still runs the full probe.
 
 ## Upgrade behavior
+
+The `/data` mount is required for both image variants. When upgrading an older
+workstation deployment, keep its legacy `/home/node` volume or direct
+`/home/node/.local/share/deepseek-harness` mount attached for the first start and
+add the new `/data` mount. If the new authentication state is empty, the
+entrypoint copies the legacy workstation application state into `/data`. After
+verifying the migrated data, subsequent containers still require `/data`; the
+legacy path alone is not a replacement for it.
 
 Caddy and caddy-security are compiled together and pinned. Updating Caddy alone is not assumed safe. Scheduled workflows resolve npm `@deepseek-ai/dsh@latest`, temporarily update `package.json` and `pnpm-lock.yaml` in the build workspace, pass the resolved version as the Docker `DSH_VERSION` build argument, and publish the `runtime` target as `latest` plus `<DSH_VERSION>` and the `workstation` target as `workstation` plus `<DSH_VERSION>-workstation`. Manual runs may override either the DSH package version or the final image tag while retaining the same validation and optional floating tag behavior. Each workflow pushes its verified multi-platform manifest to both GHCR and Docker Hub only after auditing the frozen pnpm production tree, rebuilding and validating the plugin, running the Caddy dependency-graph/govulncheck gate, executing its amd64 and arm64 smoke contracts, and applying zero-fixable HIGH/CRITICAL Trivy gates to both architectures. If either registry login or publication fails, the workflow fails instead of reporting a complete release.
