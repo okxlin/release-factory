@@ -135,8 +135,13 @@ RUN corepack enable \
     && node /tmp/patch-dsh-directory-picker.mjs \
     && rm -f /tmp/patch-dsh-directory-picker.mjs \
     && pnpm exec dsh --version | grep -Fx "${resolved_dsh_version}" \
+    && node_pty_arch="$(node -p "process.arch")" \
+    && case "${node_pty_arch}" in x64|arm64) ;; *) exit 1 ;; esac \
     && find node_modules/.pnpm \
-        -path '*/node_modules/node-pty/build/Release/pty.node' \
+        \( \
+            -path '*/node_modules/node-pty/build/Release/pty.node' \
+            -o -path "*/node_modules/node-pty/prebuilds/linux-${node_pty_arch}/pty.node" \
+        \) \
         -type f -print -quit | grep -q .
 
 FROM node:24.19.0-trixie-slim@sha256:0711b541c1c33a8a530ac4f0d391baa9a15b3d804695b1b24a47daa5fb60e74d AS pnpm-bundle
