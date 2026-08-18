@@ -233,11 +233,12 @@ pass "home, /data application state, and workspace use direct directories withou
 [[ "$(pnpm --version)" == "11.22.0" ]] || fail "pnpm version drifted"
 [[ "$(go version)" == go\ version\ go1.26.6* ]] || fail "Go version drifted"
 [[ "$(rustc --version)" == rustc\ 1.97.1* ]] || fail "Rust version drifted"
-python3 --version | grep -Eq '^Python 3\.' || fail "Python 3 is unavailable"
+python3 --version | grep -Fxq 'Python 3.12.14' || fail "Python is not pinned to 3.12.14"
+python3 -m pytest --version | grep -Fxq 'pytest 9.1.1' || fail "pytest is not available for Python 3.12.14"
 pass "pinned language runtimes are executable"
 
 docker --version | grep -Fq 'Docker version 29.7.2,' || fail "Docker CLI version drifted"
-docker compose version | grep -Fq 'Docker Compose version v5.4.0' \
+docker compose version | grep -Fq 'Docker Compose version v5.5.0' \
     || fail "Docker Compose version drifted"
 docker buildx version | grep -Fq 'github.com/docker/buildx v0.36.1 ' \
     || fail "Docker Buildx version drifted"

@@ -292,8 +292,6 @@ const proxyHeaders = {
   'X-Forwarded-Host': publicOrigin.host,
   'X-Forwarded-Proto': publicOrigin.protocol.slice(0, -1),
 };
-let usernamePostEvents = 0;
-let passwordPostEvents = 0;
 
 class CookieJar {
   constructor() {
@@ -390,11 +388,10 @@ async function submitUsername(jar, extraHeaders = {}) {
     },
     body: usernameBody,
   }, jar);
-  usernamePostEvents += 1;
   return response;
 }
 
-async function passwordForm(jar) {
+async function passwordForm(jar, usernameHeaders = {}) {
   let response = await request('/', {}, jar);
   assert(response.status === 302, 'unauthenticated root redirects to authentication');
 
@@ -408,7 +405,7 @@ async function passwordForm(jar) {
   assert(response.body.includes('autocomplete="username"'),
     'username field supports browser password managers');
 
-  response = await submitUsername(jar);
+  response = await submitUsername(jar, usernameHeaders);
   assert(response.status === 303, 'username phase advances to the password sandbox');
 
   response = await request(publicPath(response.headers.location), {}, jar);
@@ -437,7 +434,6 @@ async function submitPassword(form, secret, extraHeaders = {}) {
     },
     body: passwordBody,
   }, form.jar);
-  passwordPostEvents += 1;
   return response;
 }
 
@@ -574,56 +570,189 @@ function websocket(path, jar) {
     const afterLogout = await request('/', {}, jar);
     assert(afterLogout.status === 302, 'logged-out session cannot access DeepSeek Harness');
 
-    while (passwordPostEvents < 10) {
-      const attempt = passwordPostEvents + 1;
-      const rateLimitJar = new CookieJar();
-      const rateLimitForm = await passwordForm(rateLimitJar);
-      const rejected = await submitPassword(
-        rateLimitForm,
-        `rate-limit-wrong-${attempt}`,
-        {'X-Forwarded-For': `192.0.2.${attempt}, 203.0.113.10, 198.51.100.10`},
-      );
-      if (rejected.status !== 401) {
-        throw new Error(`password attempt ${attempt}: expected 401, got ${rejected.status}`);
-      }
-    }
-    assert(passwordPostEvents === 10,
-      'the first ten password-stage POSTs remain available to one resolved client IP');
-
-    const blockedJar = new CookieJar();
-    const blockedForm = await passwordForm(blockedJar);
-    const blocked = await submitPassword(
-      blockedForm,
-      'rate-limit-blocked',
-      {'X-Forwarded-For': '192.0.2.250, 203.0.113.10, 198.51.100.10'},
-    );
-    assert(blocked.status === 429,
-      'the eleventh password failure is rate limited despite a spoofed leftmost XFF value');
-    assert(Boolean(blocked.headers['retry-after']),
-      'rate-limited authentication responses include Retry-After');
-
-    while (usernamePostEvents < 30) {
-      const attempt = usernamePostEvents + 1;
-      const response = await submitUsername(
-        new CookieJar(),
-        {'X-Forwarded-For': `192.0.2.${attempt}, 203.0.113.10, 198.51.100.10`},
-      );
-      if (response.status === 429) {
-        throw new Error(`username attempt ${attempt}: rate limited before the configured budget`);
-      }
-    }
-    assert(usernamePostEvents === 30,
-      'the first thirty username-stage POSTs remain available to one resolved client IP');
-
-    const blockedUsername = await submitUsername(
-      new CookieJar(),
-      {'X-Forwarded-For': '192.0.2.250, 203.0.113.10, 198.51.100.10'},
-    );
-    assert(blockedUsername.status === 429,
-      'the thirty-first username POST is rate limited despite a spoofed leftmost XFF value');
-    assert(Boolean(blockedUsername.headers['retry-after']),
-      'rate-limited username responses include Retry-After');
   }
+})().catch(error => {
+  process.stderr.write(`[smoke] FAIL: ${error.message}\n`);
+  process.exit(1);
+});
+NODE
+}
+
+run_rate_limit_contract() {
+    docker exec \
+        -e TEST_PUBLIC_URL="${PUBLIC_URL}" \
+        -e TEST_USERNAME="${test_username}" \
+        -i "${container_name}" node - <<'NODE'
+const http = require('node:http');
+
+const publicOrigin = new URL(process.env.TEST_PUBLIC_URL);
+const username = process.env.TEST_USERNAME;
+const proxyHeaders = {
+  Host: publicOrigin.host,
+  'X-Forwarded-For': '203.0.113.10, 198.51.100.10',
+  'X-Forwarded-Host': publicOrigin.host,
+  'X-Forwarded-Proto': publicOrigin.protocol.slice(0, -1),
+};
+
+class CookieJar {
+  constructor() {
+    this.cookies = new Map();
+  }
+
+  store(lines = []) {
+    for (const line of lines) {
+      const first = line.split(';', 1)[0];
+      const separator = first.indexOf('=');
+      if (separator < 1) continue;
+      this.cookies.set(first.slice(0, separator), first.slice(separator + 1));
+    }
+  }
+
+  header() {
+    return [...this.cookies]
+      .map(([name, value]) => `${name}=${value}`)
+      .join('; ');
+  }
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+  process.stdout.write(`[smoke] PASS: ${message}\n`);
+}
+
+function request(path, options = {}, jar = new CookieJar()) {
+  return new Promise((resolve, reject) => {
+    const headers = {...proxyHeaders, ...(options.headers || {})};
+    const cookie = jar.header();
+    if (cookie) headers.Cookie = cookie;
+
+    const req = http.request({
+      host: '127.0.0.1',
+      port: 8080,
+      path,
+      method: options.method || 'GET',
+      headers,
+      timeout: 10000,
+    }, response => {
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => {
+        jar.store(response.headers['set-cookie']);
+        resolve({
+          status: response.statusCode,
+          headers: response.headers,
+          body: Buffer.concat(chunks).toString('utf8'),
+          jar,
+        });
+      });
+    });
+
+    req.on('timeout', () => req.destroy(new Error('HTTP request timed out')));
+    req.on('error', reject);
+    req.end(options.body);
+  });
+}
+
+async function submitUsername(jar, extraHeaders = {}) {
+  const body = new URLSearchParams({username, realm: 'local'}).toString();
+  return request(`/auth/login?redirect_url=${encodeURIComponent(`${publicOrigin.origin}/`)}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Length': Buffer.byteLength(body),
+      ...extraHeaders,
+    },
+    body,
+  }, jar);
+}
+
+async function passwordForm(jar, usernameHeaders = {}) {
+  const usernameResponse = await submitUsername(jar, usernameHeaders);
+  assert(usernameResponse.status === 303, 'username stage opens a password sandbox for rate-limit testing');
+
+  const passwordPath = new URL(usernameResponse.headers.location, publicOrigin);
+  const passwordResponse = await request(passwordPath.pathname + passwordPath.search, {}, jar);
+  assert(passwordResponse.status === 200, 'password sandbox opens for rate-limit testing');
+
+  const action = (passwordResponse.body.match(/<form[^>]+action="([^"]+)"/) || [])[1];
+  const sandboxId = (passwordResponse.body.match(/name="sandbox_id"[^>]+value="([^"]+)"/) || [])[1];
+  assert(Boolean(action && sandboxId), 'password sandbox exposes a reusable form contract');
+  return {action, jar, sandboxId};
+}
+
+async function submitPassword(form, secret, extraHeaders = {}) {
+  const body = new URLSearchParams({
+    secret,
+    sandbox_id: form.sandboxId,
+    submit: 'Sign In',
+  }).toString();
+  return request(form.action, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Length': Buffer.byteLength(body),
+      ...extraHeaders,
+    },
+    body,
+  }, form.jar);
+}
+
+(async () => {
+  let passwordAttempts = 0;
+  while (passwordAttempts < 10) {
+    const attempt = passwordAttempts + 1;
+    const form = await passwordForm(new CookieJar(), {
+      'X-Forwarded-For': `192.0.2.${100 + attempt}, 203.0.113.${100 + attempt}, 198.51.100.10`,
+    });
+    const response = await submitPassword(
+      form,
+      `rate-limit-wrong-${attempt}`,
+      {'X-Forwarded-For': `192.0.2.${attempt}, 203.0.113.20, 198.51.100.10`},
+    );
+    if (response.status !== 401) {
+      throw new Error(`password attempt ${attempt}: expected 401, got ${response.status}`);
+    }
+    passwordAttempts += 1;
+  }
+  assert(passwordAttempts === 10,
+    'the first ten password-stage POSTs remain available to one resolved client IP');
+
+  const blockedForm = await passwordForm(new CookieJar(), {
+    'X-Forwarded-For': '192.0.2.121, 203.0.113.121, 198.51.100.10',
+  });
+  const blockedPassword = await submitPassword(
+    blockedForm,
+    'rate-limit-blocked',
+    {'X-Forwarded-For': '192.0.2.250, 203.0.113.20, 198.51.100.10'},
+  );
+  assert(blockedPassword.status === 429,
+    'the eleventh password failure is rate limited despite a spoofed leftmost XFF value');
+  assert(Boolean(blockedPassword.headers['retry-after']),
+    'rate-limited authentication responses include Retry-After');
+
+  let usernameAttempts = 0;
+  while (usernameAttempts < 10) {
+    const attempt = usernameAttempts + 1;
+    const response = await submitUsername(
+      new CookieJar(),
+      {'X-Forwarded-For': `192.0.2.${attempt}, 203.0.113.30, 198.51.100.10`},
+    );
+    if (response.status !== 303) {
+      throw new Error(`username attempt ${attempt}: expected 303, got ${response.status}`);
+    }
+    usernameAttempts += 1;
+  }
+  assert(usernameAttempts === 10,
+    'the first ten username-stage POSTs remain available to one resolved client IP');
+
+  const blockedUsername = await submitUsername(
+    new CookieJar(),
+    {'X-Forwarded-For': '192.0.2.250, 203.0.113.30, 198.51.100.10'},
+  );
+  assert(blockedUsername.status === 429,
+    'the eleventh username POST is rate limited despite a spoofed leftmost XFF value');
+  assert(Boolean(blockedUsername.headers['retry-after']),
+    'rate-limited username responses include Retry-After');
 })().catch(error => {
   process.stderr.write(`[smoke] FAIL: ${error.message}\n`);
   process.exit(1);
@@ -789,8 +918,8 @@ check_runtime_versions() {
             || fail "Rust version is not pinned to 1.97.1"
         [[ "$(docker exec "${container_name}" docker --version)" == Docker\ version\ 29.7.2,* ]] \
             || fail "Docker CLI is not pinned to 29.7.2"
-        docker exec "${container_name}" docker compose version | grep -Fq 'Docker Compose version v5.4.0' \
-            || fail "Docker Compose is not pinned to 5.4.0"
+        docker exec "${container_name}" docker compose version | grep -Fq 'Docker Compose version v5.5.0' \
+            || fail "Docker Compose is not pinned to 5.5.0"
         docker exec "${container_name}" docker buildx version | grep -Fq 'github.com/docker/buildx v0.36.1 ' \
             || fail "Docker Buildx is not pinned to 0.36.1"
         if docker exec "${container_name}" test -S /var/run/docker.sock; then
@@ -940,6 +1069,7 @@ if [[ "${PROFILE}" == "full" ]]; then
     pass "workspace data persists across container recreation"
     check_auth_file_permissions
     check_idle_resources
+    run_rate_limit_contract
 
     expect_start_failure \
         "future native-auth mode fails closed" \

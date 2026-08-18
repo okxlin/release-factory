@@ -74,9 +74,9 @@
 					method POST
 					path /auth/login
 				}
-				key {http.request.client_ip}
+				key {http.vars.client_ip}
 				window 1m
-				events 30
+				events 10
 				ipv6_prefix 64
 			}
 			zone dsh_auth_passwords {
@@ -84,7 +84,7 @@
 					method POST
 					path /auth/sandbox/*
 				}
-				key {http.request.client_ip}
+				key {http.vars.client_ip}
 				window 10m
 				events 10
 				ipv6_prefix 64
