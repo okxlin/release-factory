@@ -29,11 +29,11 @@ concurrency:
 
 env:
   AUDIT_IMAGE: deepseek-harness-workstation:ci-dependency-audit
-  GOVULNCHECK_VERSION: "1.6.0"
+  GOVULNCHECK_VERSION: "1.7.0"
   IMAGE_REPO: deepseek-harness
   TEST_IMAGE_AMD64: deepseek-harness-workstation:ci-amd64
   TEST_IMAGE_ARM64: deepseek-harness-workstation:ci-arm64
-  TRIVY_DOCKER_IMAGE: aquasec/trivy:0.72.0
+  TRIVY_DOCKER_IMAGE: aquasec/trivy:0.74.0
 
 jobs:
   build-test-and-push:

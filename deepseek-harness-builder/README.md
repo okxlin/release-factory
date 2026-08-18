@@ -71,7 +71,7 @@ It intentionally omits npm, Python, Go, Rust, GCC/G++, and Make.
 The workstation image inherits the same DSH/authentication runtime and adds:
 
 - Node.js and pnpm
-- Python 3 with pip, venv, pipx, pytest, and development headers
+- Python 3.12.14 with pip, venv, pipx, pytest, and development headers
 - Go, Rust, and Cargo
 - Docker CLI, Compose, and Buildx (client tools only)
 - GCC/G++, Clang, GDB, CMake, Ninja, Autoconf/Automake, libtool, pkg-config, and common native-library headers
@@ -207,7 +207,7 @@ CADDY_TRUSTED_PROXIES=private_ranges
 
 Subpath deployments such as `https://example.com/dsh` are intentionally rejected. Use a dedicated domain or subdomain.
 
-The image limits username-stage POSTs to 30 per minute and password-stage POSTs to 10 per 10 minutes for each resolved client IP. Rejected requests return HTTP 429 with `Retry-After`. Keep a matching limit in the 1Panel WAF or outer OpenResty layer as defense in depth.
+The image limits username-stage POSTs to 10 per minute and password-stage POSTs to 10 per 10 minutes for each resolved client IP. Rejected requests return HTTP 429 with `Retry-After`. Keep a matching limit in the 1Panel WAF or outer OpenResty layer as defense in depth.
 
 These budgets are image defaults defined in [`image/Caddyfile`](image/Caddyfile); they are intentionally not read from the runtime environment. Changing them requires editing that file, rebuilding the image, and rerunning the smoke tests. `CADDY_TRUSTED_PROXIES` is independently configurable at runtime.
 

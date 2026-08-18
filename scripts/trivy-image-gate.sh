@@ -77,7 +77,7 @@ if command -v trivy >/dev/null 2>&1; then
     --timeout "${timeout}" \
     "${image}"
 else
-  trivy_image="${TRIVY_DOCKER_IMAGE:-aquasec/trivy:0.63.0}"
+  trivy_image="${TRIVY_DOCKER_IMAGE:-aquasec/trivy:0.74.0}"
   cache_dir="${TRIVY_CACHE_DIR:-/tmp/trivy-cache}"
   mkdir -p "${cache_dir}"
   docker run --rm \

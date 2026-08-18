@@ -71,7 +71,7 @@ deepseek-harness-builder/scripts/build-local.sh \
 workstation 镜像继承相同的 DSH/认证运行时，并额外包含：
 
 - Node.js 和 pnpm
-- Python 3，含 pip、venv、pipx、pytest 和开发头文件
+- Python 3.12.14，含 pip、venv、pipx、pytest 和开发头文件
 - Go、Rust 和 Cargo
 - Docker CLI、Compose 和 Buildx，仅客户端工具
 - GCC/G++、Clang、GDB、CMake、Ninja、Autoconf/Automake、libtool、pkg-config 和常见原生库头文件
@@ -202,7 +202,7 @@ CADDY_TRUSTED_PROXIES=private_ranges
 
 有意拒绝 `https://example.com/dsh` 这类子路径部署。请使用独立域名或子域名。
 
-镜像会按解析后的客户端 IP 对用户名阶段 POST 限制为每分钟 30 次，对密码阶段 POST 限制为每 10 分钟 10 次；被拒绝的请求返回 HTTP 429 和 `Retry-After`。仍建议在 1Panel WAF 或外层 OpenResty 中保留同类限速，作为纵深防御。
+镜像会按解析后的客户端 IP 对用户名阶段 POST 限制为每分钟 10 次，对密码阶段 POST 限制为每 10 分钟 10 次；被拒绝的请求返回 HTTP 429 和 `Retry-After`。仍建议在 1Panel WAF 或外层 OpenResty 中保留同类限速，作为纵深防御。
 
 这两个额度是镜像默认值，定义在 [`image/Caddyfile`](image/Caddyfile) 中，有意不从运行时环境变量读取。若要修改，必须编辑该文件、重新构建镜像，并重新运行 smoke 测试；`CADDY_TRUSTED_PROXIES` 则可以单独在运行时配置。
 

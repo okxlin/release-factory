@@ -33,14 +33,14 @@ The OpenClaw upstream workflow passes `OPENCLAW_IMAGE_APT_PACKAGES=libgnutls30`
 so the upstream Dockerfile refreshes the runtime GnuTLS package before the
 vulnerability gate runs.
 When the host does not provide `trivy`, the gate uses the pinned
-`aquasec/trivy:0.63.0` container image. Set `TRIVY_DOCKER_IMAGE` when bumping
+`aquasec/trivy:0.74.0` container image. Set `TRIVY_DOCKER_IMAGE` when bumping
 Trivy intentionally.
 
 ## DeepSeek Harness Caddy gate
 
 Both DeepSeek Harness workflows additionally run
 `deepseek-harness-builder/scripts/check-caddy-vulnerabilities.sh` with
-`govulncheck 1.6.0`. Its custom Caddy build:
+`govulncheck 1.7.0`. Its custom Caddy build:
 
 - patches go-authcrunch `1.1.41` to remove the unused GPG public-key parser;
 - retains `golang.org/x/crypto/ssh`;
@@ -70,12 +70,12 @@ caddy-security findings. Examples:
 - <https://github.com/advisories/GHSA-vj36-3ccr-6563>
 - <https://github.com/advisories/GHSA-c7vf-m394-m4x4>
 
-The workflow pins its fallback scanner to `aquasec/trivy:0.72.0`; changing that
+The workflow pins its fallback scanner to `aquasec/trivy:0.74.0`; changing that
 pin or the accepted govulncheck exception requires a reviewed source update.
 
 ## DeepSeek Harness workstation Docker client gate
 
-The workstation image rebuilds Docker CLI `29.7.2`, Compose `5.4.0`, and
+The workstation image rebuilds Docker CLI `29.7.2`, Compose `5.5.0`, and
 Buildx `0.36.1` from checksum-pinned official source archives with Go `1.26.6`.
 The upstream prebuilt binaries were compiled with Go `1.26.5`, which is inside
 the affected ranges for `CVE-2026-39821` and `CVE-2026-46600`.

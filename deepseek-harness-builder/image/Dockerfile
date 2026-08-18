@@ -1,6 +1,6 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.26.0@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
 
-FROM caddy:2.11.4-builder-alpine@sha256:2b9994510fadb5dfa5257a5357cbe26a2c4a3298f8cc675796a6570218280ce7 AS caddy-builder
+FROM caddy:2.11.4-builder-alpine@sha256:c2433c74c0648b47d8a844ff1792661f93996c553687101bbdf89c63a09dccef AS caddy-builder
 
 ARG CADDY_VERSION=2.11.4
 ARG CADDY_SECURITY_VERSION=1.1.64
@@ -75,17 +75,53 @@ RUN mkdir -p /licenses \
         '094bedda295c0702807d1027a00e1134f4cb71d523dc49f6d4b3caf589053068' \
         /licenses/CADDY_RATELIMIT_LICENSE | sha256sum -c -
 
-FROM node:24.19.0-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS dsh-deps
+FROM python:3.12.14-slim-trixie@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a AS python-toolchain
+
+ARG PYTHON_VERSION=3.12.14
+ARG PYTEST_VERSION=9.1.1
+
+RUN python3 --version | grep -Fx "Python ${PYTHON_VERSION}" \
+    && test "$(python3 -c 'import platform; print(platform.python_version())')" = "${PYTHON_VERSION}" \
+    && python3 -m pip --version | grep -F '(python 3.12)' \
+    && python3 -m venv /tmp/python-venv \
+    && /tmp/python-venv/bin/python --version | grep -Fx "Python ${PYTHON_VERSION}" \
+    && printf '%s\n' \
+        "pytest==${PYTEST_VERSION} --hash=sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c" \
+        'iniconfig==2.3.0 --hash=sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12' \
+        'packaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c' \
+        'pluggy==1.6.0 --hash=sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746' \
+        'Pygments==2.21.0 --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9' \
+        > /tmp/python-requirements.txt \
+    && python3 -m pip install \
+        --no-cache-dir \
+        --disable-pip-version-check \
+        --only-binary=:all: \
+        --require-hashes \
+        --requirement /tmp/python-requirements.txt \
+    && python3 -m pytest --version | grep -Fx "pytest ${PYTEST_VERSION}" \
+    && rm -f /tmp/python-requirements.txt
+
+FROM node:24.19.0-trixie-slim@sha256:0711b541c1c33a8a530ac4f0d391baa9a15b3d804695b1b24a47daa5fb60e74d AS dsh-deps
 
 ARG DSH_VERSION=
+ARG PYTHON_VERSION=3.12.14
+ARG PYTEST_VERSION=9.1.1
 ARG PNPM_VERSION=11.22.0
+
+ENV PYTHON=/usr/local/bin/python3
+
+COPY --from=python-toolchain /usr/local /usr/local
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         g++ \
         make \
-        python3 \
     && rm -rf /var/lib/apt/lists/*
+
+RUN python3 --version | grep -Fx "Python ${PYTHON_VERSION}" \
+    && test "$(python3 -c 'import platform; print(platform.python_version())')" = "${PYTHON_VERSION}" \
+    && python3 -m pip --version | grep -F '(python 3.12)' \
+    && python3 -m pytest --version | grep -Fx "pytest ${PYTEST_VERSION}"
 
 WORKDIR /opt/dsh
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -103,7 +139,7 @@ RUN corepack enable \
         -path '*/node_modules/node-pty/build/Release/pty.node' \
         -type f -print -quit | grep -q .
 
-FROM node:24.19.0-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS pnpm-bundle
+FROM node:24.19.0-trixie-slim@sha256:0711b541c1c33a8a530ac4f0d391baa9a15b3d804695b1b24a47daa5fb60e74d AS pnpm-bundle
 
 ARG PNPM_VERSION=11.22.0
 
@@ -118,18 +154,18 @@ RUN mkdir -p /opt/pnpm \
     && test "$(node /opt/pnpm/bin/pnpm.mjs --version)" = "${PNPM_VERSION}" \
     && rm -f /tmp/pnpm.tgz
 
-FROM golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 AS docker-tools-builder
+FROM golang:1.26.6-trixie@sha256:b75d466dd608587fd66cca705a307ba65b889827d06ad61d6a75f0482b51b7c7 AS docker-tools-builder
 
 ARG DOCKER_BUILDX_VERSION=0.36.1
-ARG DOCKER_COMPOSE_VERSION=5.4.0
+ARG DOCKER_COMPOSE_VERSION=5.5.0
 ARG DOCKER_VERSION=29.7.2
 
 COPY patches/docker-buildx-local-namesgenerator.patch /tmp/docker-buildx-local-namesgenerator.patch
 
 ADD --checksum=sha256:225b7ab2a15f5230b482df8461069cd4bce38891266fb9898d4188d0a3cbf54a \
     https://codeload.github.com/docker/cli/tar.gz/refs/tags/v29.7.2 /tmp/docker-cli.tar.gz
-ADD --checksum=sha256:142f895ba74715ea0018a20b7f93fa96e36fb6c91ea66f856a61c6e3716c4ef8 \
-    https://codeload.github.com/docker/compose/tar.gz/refs/tags/v5.4.0 /tmp/docker-compose.tar.gz
+ADD --checksum=sha256:504ed1541f4bc5c301dc9cf7b86ae8e2d26b57a558a248d9b832af188b298bba \
+    https://codeload.github.com/docker/compose/tar.gz/refs/tags/v5.5.0 /tmp/docker-compose.tar.gz
 ADD --checksum=sha256:8959987919445ab61564f50decde4dae810137063d84e2d3c969c9a4a68ecdeb \
     https://codeload.github.com/docker/buildx/tar.gz/refs/tags/v0.36.1 /tmp/docker-buildx.tar.gz
 
@@ -216,20 +252,21 @@ RUN printf '%s  %s\n' \
         'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30' \
         /licenses/DOCKER_BUILDX_LICENSE | sha256sum -c -
 
-FROM golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 AS go-toolchain
+FROM golang:1.26.6-trixie@sha256:b75d466dd608587fd66cca705a307ba65b889827d06ad61d6a75f0482b51b7c7 AS go-toolchain
 
 RUN go version | grep -F 'go1.26.6'
 
-FROM rust:1.97.1-slim-bookworm@sha256:2775a09d208ff0d7c1f50490c45b62db929e87ba1dcbc3f2132ac71a704bcdd3 AS rust-toolchain
+FROM rust:1.97.1-slim-trixie@sha256:8e8cf8f7fd54a2d23d5a743b3a03f56e26b6c774276c33fa0595111704ebb15c AS rust-toolchain
 
 RUN rustc --version | grep -F 'rustc 1.97.1 ' \
     && cargo --version | grep -F 'cargo 1.97.1 '
 
-FROM node:24.19.0-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS runtime-base
+FROM node:24.19.0-trixie-slim@sha256:0711b541c1c33a8a530ac4f0d391baa9a15b3d804695b1b24a47daa5fb60e74d AS runtime-base
 
 ARG CADDY_VERSION=2.11.4
 ARG CADDY_SECURITY_VERSION=1.1.64
 ARG DSH_VERSION=
+ARG PYTHON_VERSION=3.12.14
 ARG PNPM_VERSION=11.22.0
 
 ENV AUTH_MODE=caddy-security \
@@ -309,9 +346,11 @@ FROM runtime-base AS workstation
 WORKDIR /
 
 ARG DOCKER_BUILDX_VERSION=0.36.1
-ARG DOCKER_COMPOSE_VERSION=5.4.0
+ARG DOCKER_COMPOSE_VERSION=5.5.0
 ARG DOCKER_VERSION=29.7.2
 ARG GO_VERSION=1.26.6
+ARG PYTHON_VERSION=3.12.14
+ARG PYTEST_VERSION=9.1.1
 ARG PNPM_VERSION=11.22.0
 ARG RUST_VERSION=1.97.1
 
@@ -334,6 +373,7 @@ COPY --from=docker-tools-builder /out/docker /usr/local/bin/docker
 COPY --from=docker-tools-builder /out/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
 COPY --from=docker-tools-builder /out/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
 COPY --from=docker-tools-builder /licenses /usr/share/licenses/deepseek-harness-docker
+COPY --from=python-toolchain /usr/local /usr/local
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -372,7 +412,6 @@ RUN apt-get update \
         python3 \
         python3-dev \
         python3-pip \
-        python3-pytest \
         python3-venv \
         rsync \
         shellcheck \
@@ -414,7 +453,8 @@ RUN apt-get update \
     && go version | grep -F "go${GO_VERSION}" \
     && rustc --version | grep -F "rustc ${RUST_VERSION} " \
     && cargo --version | grep -F "cargo ${RUST_VERSION} " \
-    && python3 --version \
+    && python3 --version | grep -Fx "Python ${PYTHON_VERSION}" \
+    && python3 -m pytest --version | grep -Fx "pytest ${PYTEST_VERSION}" \
     && gcc --version \
     && ! command -v npm \
     && ! command -v corepack
