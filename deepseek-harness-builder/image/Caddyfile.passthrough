@@ -21,5 +21,21 @@
 		respond "ok" 200
 	}
 
-	reverse_proxy 127.0.0.1:{$DSH_INTERNAL_PORT}
+	# AUTH_MODE=none delegates authentication to a reviewed outer proxy. Present
+	# requests that already passed that boundary to DSH as the loopback proxy
+	# instead of treating a browser-facing Host or Origin as a direct request.
+	reverse_proxy 127.0.0.1:{$DSH_INTERNAL_PORT} {
+		header_up Host 127.0.0.1:{$DSH_INTERNAL_PORT}
+		header_up -Origin
+		header_up -Authorization
+		header_up -Remote-User
+		header_up -X-Auth-User
+		header_up -X-Authenticated-User
+		header_up -X-Email
+		header_up -X-Forwarded-User
+		header_up -X-Roles
+		header_up -X-Remote-User
+		header_up -X-User
+		header_up -X-Webauth-User
+	}
 }

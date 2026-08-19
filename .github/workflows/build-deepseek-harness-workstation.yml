@@ -221,6 +221,13 @@ jobs:
             --variant workstation \
             --public-url https://dsh.example.test
 
+      - name: Run amd64 external-auth passthrough smoke
+        run: |
+          set -euo pipefail
+          deepseek-harness-builder/scripts/passthrough-smoke-test.sh \
+            --image "${TEST_IMAGE_AMD64}" \
+            --public-url https://dsh.example.test
+
       - name: Run amd64 workstation toolchain smoke
         run: |
           set -euo pipefail
