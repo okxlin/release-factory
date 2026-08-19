@@ -290,7 +290,7 @@ caddy-security 在本地身份库初始化时还会创建一个带随机密码�
 
 其他模式：
 
-- `AUTH_MODE=none` 禁用登录层，只应在另一个已审查认证边界之后使用。
+- `AUTH_MODE=none` 禁用登录层，只应在另一个已审查认证边界之后使用。此模式下 Caddy 会把请求作为 loopback 代理转给 DSH，使 Web UI 可以管理设置和凭据；因此，任何能够访问 Caddy 的人也能访问这些特权 API。请保持 `PORT` 私有，并在流量到达容器前强制认证。
 - `AUTH_MODE=dsh` 为未来 DSH 原生密码发布预留，目前 fail closed。这可以防止未来原生认证加入后两个认证系统静默叠加。
 
 生成的 JWT 签名密钥在轻量镜像和 workstation 中都存储于 `/data/auth/jwt-secret`。请持久化对应的路径绑定或命名卷；否则每次替换容器都会让现有会话失效。
@@ -376,6 +376,16 @@ deepseek-harness-builder/scripts/smoke-test.sh \
 ```
 
 测试使用临时宿主 bind 的 `/data`，以及 HOME 和 workspace 的命名测试卷。workstation 会把 HOME 直接挂到 `/home/node`，把测试 workspace 直接挂到 `/workspace`；它会模拟 1Panel/OpenResty 头，并检查登录重定向、浏览器自动填充属性、错误密码拒绝、受保护 Cookie、伪造 identity header、两个 DSH WebSocket、登出、loopback 绑定、secret 隔离、JWT 状态持久化、容器重建持久化、目录选择器默认打开 `/workspace`、资源使用、fail-closed 配置错误、pnpm 和所选镜像变体。
+
+如果认证由外部反向代理承担，还应运行透传合约：
+
+```bash
+deepseek-harness-builder/scripts/passthrough-smoke-test.sh \
+  --image deepseek-harness:local \
+  --public-url https://dsh.example.test
+```
+
+它会以 `AUTH_MODE=none` 启动镜像，使用浏览器 origin 的 `Host` 和 `Origin` 头通过 Caddy 请求，然后验证 settings 和 credentials API 能成功到达 DSH。此测试本身不提供认证；外部代理必须在请求进入容器前强制认证。
 
 运行轻量 Compose 合约：
 
