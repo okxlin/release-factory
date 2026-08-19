@@ -1,0 +1,30 @@
+name: Validate DeepSeek Harness Component Pins
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/build-deepseek-harness.yml"
+      - ".github/workflows/build-deepseek-harness-workstation.yml"
+      - ".github/workflows/validate-deepseek-harness-component-pins.yml"
+      - ".github/workflows/verify-deepseek-harness-pr.yml"
+      - "deepseek-harness-builder/**"
+      - "SECURITY_SCAN.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate pinned component contract
+        run: bash deepseek-harness-builder/scripts/check-component-pins.sh
+
+      - name: Run component-pin checker regression tests
+        run: bash deepseek-harness-builder/scripts/test-component-pins.sh

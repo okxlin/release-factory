@@ -33,7 +33,8 @@ The OpenClaw upstream workflow passes `OPENCLAW_IMAGE_APT_PACKAGES=libgnutls30`
 so the upstream Dockerfile refreshes the runtime GnuTLS package before the
 vulnerability gate runs.
 When the host does not provide `trivy`, the gate uses the pinned
-`aquasec/trivy:0.74.0` container image. Set `TRIVY_DOCKER_IMAGE` when bumping
+`aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969`
+container image. Set `TRIVY_DOCKER_IMAGE` when bumping
 Trivy intentionally.
 
 ## DeepSeek Harness Caddy gate
@@ -73,8 +74,10 @@ caddy-security findings. Examples:
 - <https://github.com/advisories/GHSA-vj36-3ccr-6563>
 - <https://github.com/advisories/GHSA-c7vf-m394-m4x4>
 
-The workflow pins its fallback scanner to `aquasec/trivy:0.74.0`; changing that
-pin or the accepted govulncheck exception requires a reviewed source update.
+The workflow pins its fallback scanner to
+`aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969`;
+changing that pin or the accepted govulncheck exception requires a reviewed source
+update.
 
 ## DeepSeek Harness workstation Docker client gate
 

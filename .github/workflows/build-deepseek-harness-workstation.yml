@@ -33,7 +33,7 @@ env:
   IMAGE_REPO: deepseek-harness
   TEST_IMAGE_AMD64: deepseek-harness-workstation:ci-amd64
   TEST_IMAGE_ARM64: deepseek-harness-workstation:ci-arm64
-  TRIVY_DOCKER_IMAGE: aquasec/trivy:0.74.0
+  TRIVY_DOCKER_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
 
 jobs:
   build-test-and-push:
@@ -61,6 +61,9 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Validate pinned component contract
+        run: bash deepseek-harness-builder/scripts/check-component-pins.sh
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
