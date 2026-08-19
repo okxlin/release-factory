@@ -189,6 +189,7 @@ FROM golang:1.26.6-trixie@sha256:b75d466dd608587fd66cca705a307ba65b889827d06ad61
 ARG DOCKER_BUILDX_VERSION=0.36.1
 ARG DOCKER_COMPOSE_VERSION=5.5.0
 ARG DOCKER_VERSION=29.7.2
+ARG MOBY_GO_ARCHIVE_VERSION=0.3.3
 
 COPY patches/docker-buildx-local-namesgenerator.patch /tmp/docker-buildx-local-namesgenerator.patch
 
@@ -228,7 +229,9 @@ WORKDIR /usr/src/docker-buildx
 
 # Buildx uses the old github.com/docker/docker module only for its frozen random
 # name generator. Keep that exact vendored package locally and remove the broad
-# daemon module from the client dependency graph before compiling.
+# daemon module from the client dependency graph before compiling. Its v0.36.1
+# module graph also selects a vulnerable go-archive release, so raise that
+# dependency to the advisory's fixed release before compiling.
 RUN mkdir -p store/namesgenerator \
     && cp \
         vendor/github.com/docker/docker/pkg/namesgenerator/names-generator.go \
@@ -236,6 +239,7 @@ RUN mkdir -p store/namesgenerator \
     && git apply --check --unidiff-zero /tmp/docker-buildx-local-namesgenerator.patch \
     && git apply --unidiff-zero /tmp/docker-buildx-local-namesgenerator.patch \
     && go mod edit -droprequire=github.com/docker/docker \
+    && go mod edit -require="github.com/moby/go-archive@v${MOBY_GO_ARCHIVE_VERSION}" \
     && go mod tidy \
     && ! grep -Eq '^[[:space:]]*github.com/docker/docker[[:space:]]' go.mod go.sum
 
@@ -250,6 +254,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     && /out/docker-buildx version \
         | grep -F "github.com/docker/buildx v${DOCKER_BUILDX_VERSION} " \
     && go version -m /out/docker-buildx | grep -F 'go1.26.6' \
+    && go version -m /out/docker-buildx | grep -Eq \
+        "github\\.com/moby/go-archive[[:space:]]+v${MOBY_GO_ARCHIVE_VERSION}([[:space:]]|$)" \
     && ! go version -m /out/docker-buildx \
         | grep -Eq '^[[:space:]]*dep[[:space:]]+github.com/docker/docker[[:space:]]'
 
