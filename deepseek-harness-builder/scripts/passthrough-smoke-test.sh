@@ -132,7 +132,6 @@ const http = require('node:http');
 const publicOrigin = new URL(process.env.TEST_PUBLIC_URL);
 const proxyHeaders = {
   Host: publicOrigin.host,
-  Origin: publicOrigin.origin,
   'X-Forwarded-For': '203.0.113.10',
   'X-Forwarded-Host': publicOrigin.host,
   'X-Forwarded-Proto': publicOrigin.protocol.slice(0, -1),
@@ -143,7 +142,7 @@ function assert(condition, message) {
   process.stdout.write(`[passthrough-smoke] PASS: ${message}\n`);
 }
 
-function request(method, payload) {
+function request(method, payload, origin = publicOrigin.origin) {
   const body = JSON.stringify({
     type: 'client-request',
     rpcId: `passthrough-smoke-${method}`,
@@ -158,6 +157,7 @@ function request(method, payload) {
       method: 'POST',
       headers: {
         ...proxyHeaders,
+        Origin: origin,
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(body),
       },
@@ -210,6 +210,16 @@ async function assertRpcSuccess(method, payload, assertValue) {
     assert(value?.credentials?.DEEPSEEK_API_KEY !== undefined,
       'credentials.describe returns the requested valid credential reference');
   });
+  const crossOrigin = await request('settings.describe', {}, 'https://evil.example');
+  assert(crossOrigin.status === 403,
+    'Caddy rejects a mismatched Origin before loopback normalization without Sec-Fetch-Site');
+  const duplicateOrigin = await request(
+    'settings.describe',
+    {},
+    [publicOrigin.origin, 'https://evil.example'],
+  );
+  assert(duplicateOrigin.status === 403,
+    'Caddy rejects mixed duplicate Origin values before loopback normalization');
 })().catch(error => {
   process.stderr.write(`[passthrough-smoke] FAIL: ${error.message}\n`);
   process.exit(1);
