@@ -55,7 +55,7 @@ deepseek-harness-builder/scripts/build-local.sh \
 
 镜像构建会对 DSH browse 目录选择器应用一个范围很小、并且会校验源码形状的兼容性补丁，使网页的 **Add workspace** 对话框在未指定路径时从 `DSH_WORKSPACE` 开始，而不是从进程 `HOME` 开始。如果上游实现发生变化，构建会 fail-closed，直到重新审查补丁和 smoke 合约。该补丁不会改变 workstation 的 `HOME` 值或工具持久化路径。
 
-自定义 Caddy 构建会校验 go-authcrunch 源码归档 checksum，移除未使用的 GPG 公钥解析器，并在链接前运行上游 identity 包测试。caddy-security 仍保留 SSH 公钥支持，同时生成的 `CADDY_GO_PACKAGES.txt` 清单不得包含 `golang.org/x/crypto/openpgp` 包。限速模块及其许可证也会在同一构建中固定和校验。构建还会把 `grpc`、`klauspost/compress` 和 `x/text` 提升到已修复版本。
+自定义 Caddy 构建会校验 Caddy 和 go-authcrunch 源码归档 checksum，移除 go-authcrunch 未使用的 GPG 公钥解析器，并在链接前运行上游 identity 包测试。它会对固定 Caddy 源码应用上游的两行 CEL 兼容修复，再将 `cel-go` 提升到已修复版本。caddy-security 仍保留 SSH 公钥支持，同时生成的 `CADDY_GO_PACKAGES.txt` 清单不得包含 `golang.org/x/crypto/openpgp` 包。限速模块及其许可证也会在同一构建中固定和校验。构建还会把 `grpc`、`klauspost/compress` 和 `x/text` 提升到已修复版本。
 
 两个镜像都包含校验和固定的独立 pnpm bundle，并移除 npm 和 Corepack。这会保留单一、已审计的 Node.js 包管理器面，避免所选 pnpm 版本静默跟随包管理器通道。
 
@@ -385,7 +385,7 @@ deepseek-harness-builder/scripts/passthrough-smoke-test.sh \
   --public-url https://dsh.example.test
 ```
 
-它会以 `AUTH_MODE=none` 启动镜像，使用浏览器 origin 的 `Host` 和 `Origin` 头通过 Caddy 请求，然后验证 settings 和 credentials API 能成功到达 DSH。此测试本身不提供认证；外部代理必须在请求进入容器前强制认证。
+它会以 `AUTH_MODE=none` 启动镜像，使用浏览器 origin 的 `Host` 和 `Origin` 头通过 Caddy 请求，然后验证 settings 和 credentials API 能成功到达 DSH，并验证 Caddy 在规范化上游请求前拒绝不匹配的浏览器 `Origin`。此测试本身不提供认证；外部代理必须在请求进入容器前强制认证。
 
 运行轻量 Compose 合约：
 

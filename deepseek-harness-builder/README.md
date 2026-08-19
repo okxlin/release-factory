@@ -55,7 +55,7 @@ The production dependency closure is pinned by `pnpm-lock.yaml` in the active bu
 
 The image build applies a narrowly scoped, source-shape-checked compatibility patch to the DSH browse directory picker so the web **Add workspace** dialog starts at `DSH_WORKSPACE` instead of the process `HOME`. If the upstream implementation changes, the build fails closed until the patch and smoke contract are reviewed. This does not change the workstation `HOME` value or its tool persistence path.
 
-The custom Caddy build verifies the go-authcrunch source archive checksum, removes its unused GPG public-key parser, and runs the upstream identity-package tests before linking. SSH public-key support remains available to caddy-security, while the generated `CADDY_GO_PACKAGES.txt` manifest must contain no `golang.org/x/crypto/openpgp` package. The rate-limit module and its license are pinned and verified during the same build. The build also raises `grpc`, `klauspost/compress`, and `x/text` to their fixed versions.
+The custom Caddy build verifies the Caddy and go-authcrunch source archives, removes go-authcrunch's unused GPG public-key parser, and runs the upstream identity-package tests before linking. It applies the two-line Caddy upstream CEL compatibility fix to the pinned Caddy source, then raises `cel-go` to its fixed release. SSH public-key support remains available to caddy-security, while the generated `CADDY_GO_PACKAGES.txt` manifest must contain no `golang.org/x/crypto/openpgp` package. The rate-limit module and its license are pinned and verified during the same build. The build also raises `grpc`, `klauspost/compress`, and `x/text` to their fixed versions.
 
 Both images include a checksum-pinned standalone pnpm bundle and remove npm and Corepack. This keeps one audited Node.js package-manager surface and prevents the selected pnpm version from silently following a package-manager channel.
 
@@ -400,7 +400,7 @@ deepseek-harness-builder/scripts/passthrough-smoke-test.sh \
   --public-url https://dsh.example.test
 ```
 
-It starts the image with `AUTH_MODE=none` and sends browser-origin `Host` and `Origin` headers through Caddy, then verifies that the settings and credentials APIs reach DSH successfully. This test does not provide authentication; the outer proxy must enforce it before requests reach the container.
+It starts the image with `AUTH_MODE=none` and sends browser-origin `Host` and `Origin` headers through Caddy, then verifies that the settings and credentials APIs reach DSH successfully and that a mismatched browser `Origin` is rejected before Caddy normalizes the upstream request. This test does not provide authentication; the outer proxy must enforce it before requests reach the container.
 
 Run the lightweight Compose contract:
 

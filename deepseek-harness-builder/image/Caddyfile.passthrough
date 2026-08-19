@@ -21,6 +21,11 @@
 		respond "ok" 200
 	}
 
+	# Preserve the browser-origin boundary before normalizing the request for
+	# DSH's loopback-only privileged API trust check.
+	@unexpected_origin `{http.request.header.Origin} != "" && {http.request.header.Origin} != "{$PUBLIC_URL}"`
+	respond @unexpected_origin "Forbidden" 403
+
 	# AUTH_MODE=none delegates authentication to a reviewed outer proxy. Present
 	# requests that already passed that boundary to DSH as the loopback proxy
 	# instead of treating a browser-facing Host or Origin as a direct request.

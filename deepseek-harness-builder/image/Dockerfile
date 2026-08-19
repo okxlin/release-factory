@@ -3,14 +3,31 @@
 FROM caddy:2.11.4-builder-alpine@sha256:c2433c74c0648b47d8a844ff1792661f93996c553687101bbdf89c63a09dccef AS caddy-builder
 
 ARG CADDY_VERSION=2.11.4
+ARG CADDY_SOURCE_ARCHIVE_SHA256=2c3d02078286a6282cdb4d1d8744077788d556659dac0b64d8ed5886a7e5aeb9
 ARG CADDY_SECURITY_VERSION=1.1.64
+ARG CEL_GO_VERSION=0.30.0
 ARG GO_AUTHCRUNCH_VERSION=1.1.41
 ARG GRPC_VERSION=1.83.0
 ARG KLAUSPOST_COMPRESS_VERSION=1.19.2
 ARG X_TEXT_VERSION=0.41.0
 ARG CADDY_RATELIMIT_REF=5625512f24f6f59d6f64fb3aafe5eecff0b286db
 
+COPY patches/caddy-cel-go-v0.30.patch /tmp/caddy-cel-go-v0.30.patch
 COPY patches/go-authcrunch-disable-openpgp.patch /tmp/go-authcrunch-disable-openpgp.patch
+
+# Caddy v2.11.4 predates CEL's InterpretableV2 API. Apply the exact source
+# compatibility change from Caddy upstream commit b2693fb before pinning CEL
+# to the advisory's fixed release.
+RUN wget -qO /tmp/caddy.tar.gz \
+        "https://github.com/caddyserver/caddy/archive/refs/tags/v${CADDY_VERSION}.tar.gz" \
+    && printf '%s  %s\n' \
+        "${CADDY_SOURCE_ARCHIVE_SHA256}" \
+        /tmp/caddy.tar.gz | sha256sum -c - \
+    && mkdir -p /usr/src \
+    && tar -xzf /tmp/caddy.tar.gz -C /usr/src \
+    && cd "/usr/src/caddy-${CADDY_VERSION}" \
+    && git apply --check /tmp/caddy-cel-go-v0.30.patch \
+    && git apply /tmp/caddy-cel-go-v0.30.patch
 
 # caddy-security's local password flow does not use go-authcrunch's GPG public
 # key parser. Remove that parser because x/crypto/openpgp is unmaintained and
@@ -31,7 +48,9 @@ RUN wget -qO /tmp/go-authcrunch.tar.gz \
 RUN xcaddy build "v${CADDY_VERSION}" \
         --with "github.com/greenpau/caddy-security@v${CADDY_SECURITY_VERSION}" \
         --with "github.com/mholt/caddy-ratelimit@${CADDY_RATELIMIT_REF}" \
+        --replace "github.com/caddyserver/caddy/v2=/usr/src/caddy-${CADDY_VERSION}" \
         --replace "github.com/greenpau/go-authcrunch@v${GO_AUTHCRUNCH_VERSION}=/usr/src/go-authcrunch-${GO_AUTHCRUNCH_VERSION}" \
+        --replace "github.com/google/cel-go=github.com/google/cel-go@v${CEL_GO_VERSION}" \
         --replace "google.golang.org/grpc=google.golang.org/grpc@v${GRPC_VERSION}" \
         --replace "github.com/klauspost/compress=github.com/klauspost/compress@v${KLAUSPOST_COMPRESS_VERSION}" \
         --replace "golang.org/x/text=golang.org/x/text@v${X_TEXT_VERSION}" \
@@ -43,6 +62,7 @@ RUN xcaddy build "v${CADDY_VERSION}" \
 
 RUN PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'google\.golang\.org/grpc[[:space:]]+v1\.83\.0' \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'github\.com/klauspost/compress[[:space:]]+v1\.19\.2' \
+    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'github\.com/google/cel-go[[:space:]]+v0\.30\.0' \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'golang\.org/x/text[[:space:]]+v0\.41\.0' \
     && set -- /tmp/buildenv_* \
     && test "$#" -eq 1 \
@@ -64,6 +84,11 @@ RUN mkdir -p /licenses \
     && printf '%s  %s\n' \
         'c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4' \
         /licenses/CADDY_SECURITY_LICENSE | sha256sum -c - \
+    && wget -qO /licenses/CEL_GO_LICENSE \
+        "https://raw.githubusercontent.com/google/cel-go/v${CEL_GO_VERSION}/LICENSE" \
+    && printf '%s  %s\n' \
+        '4cdb9af102dfbb0ca03d87d6f650a505df098646a4080f4665b389ad9c6caa02' \
+        /licenses/CEL_GO_LICENSE | sha256sum -c - \
     && wget -qO /licenses/GO_AUTHCRUNCH_LICENSE \
         "https://raw.githubusercontent.com/greenpau/go-authcrunch/v${GO_AUTHCRUNCH_VERSION}/LICENSE" \
     && printf '%s  %s\n' \
