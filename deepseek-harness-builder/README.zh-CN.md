@@ -17,6 +17,8 @@
 
 组件的准确固定版本由 [Dockerfile](image/Dockerfile)、[package.json](image/package.json)、[pnpm-lock.yaml](image/pnpm-lock.yaml)，以及 [runtime](../.github/workflows/build-deepseek-harness.yml) 和 [workstation](../.github/workflows/build-deepseek-harness-workstation.yml) 工作流定义。这些构建输入是唯一版本来源；README 只说明能力和更新策略，不重复维护具体版本号。
 
+修改 DeepSeek Harness Dockerfile 的 PR 会运行一个只读的组件固定输入契约检查。它会拒绝浮动基础镜像标签、格式错误的 checksum，以及 Dockerfile 内重复版本声明或源码 URL 不再一致的半更新。该结构性检查不会发布镜像，也不会获得 registry 凭据；发布工作流仍保留完整的构建、冒烟和漏洞门禁。
+
 Go 跟随官方稳定版本端点 <https://go.dev/VERSION?m=text>。Rust 跟随官方稳定通道清单 <https://static.rust-lang.org/dist/channel-rust-stable.toml>。它们的 Docker Official Image index 均固定 digest，用于可复现地选择 `amd64` 和 `arm64`。
 
 workstation 中的三个 Docker 客户端二进制文件使用已固定的 Go 版本从校验和固定的官方源码归档重新构建。Buildx 源码闭包只为了冻结的随机名称生成器而导入旧 `github.com/docker/docker` 模块；构建会在本地保留该 vendored 包，并在编译 Buildx 和 Compose 前移除无关 daemon 模块。这样可以把 daemon-only AuthZ 问题 [CVE-2026-34040](https://github.com/moby/moby/security/advisories/GHSA-x744-4wpc-v9h2) 排除在客户端依赖图之外，而不是放宽镜像扫描阈值。

@@ -79,6 +79,8 @@ case "${target}" in
     ;;
 esac
 
+bash "${script_dir}/check-component-pins.sh" --dockerfile "${image_dir}/Dockerfile"
+
 if [[ -z "${tag}" ]]; then
   if [[ "${target}" == "workstation" ]]; then
     tag="deepseek-harness-workstation:local"
