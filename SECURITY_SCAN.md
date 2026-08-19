@@ -91,6 +91,11 @@ vendored name-generator package into Buildx, changes the import to the local
 package, removes the legacy daemon module from the Buildx and Compose module
 graphs, and verifies all three resulting binaries with `go version -m`.
 
+Buildx `0.36.1` otherwise selects `github.com/moby/go-archive` `0.2.1`.
+The build explicitly raises it to `0.3.3` (the current release; `0.3.0` and
+later fix `CVE-2026-17106`) and verifies the linked Buildx binary metadata
+before the zero-fixable Trivy gate runs.
+
 This is dependency minimization, not a scanner allowlist: the zero-fixable
 HIGH/CRITICAL threshold remains unchanged. Advisory:
 <https://github.com/moby/moby/security/advisories/GHSA-x744-4wpc-v9h2>.
