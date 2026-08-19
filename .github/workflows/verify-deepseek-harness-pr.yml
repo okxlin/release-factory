@@ -1,0 +1,158 @@
+name: Verify DeepSeek Harness PR Build
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/build-deepseek-harness.yml"
+      - ".github/workflows/build-deepseek-harness-workstation.yml"
+      - ".github/workflows/validate-deepseek-harness-component-pins.yml"
+      - ".github/workflows/verify-deepseek-harness-pr.yml"
+      - "deepseek-harness-builder/**"
+      - "scripts/trivy-image-gate.sh"
+      - "SECURITY_SCAN.md"
+  workflow_dispatch:
+
+concurrency:
+  group: verify-deepseek-harness-pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
+  DOCKER_BUILD_SUMMARY: "false"
+  GOVULNCHECK_VERSION: "1.7.0"
+  RUNTIME_IMAGE: deepseek-harness:pr-runtime-amd64
+  TRIVY_DOCKER_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+  WORKSTATION_IMAGE: deepseek-harness:pr-workstation-amd64
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate pinned component contract
+        run: bash deepseek-harness-builder/scripts/check-component-pins.sh
+
+      - name: Run component-pin checker regression tests
+        run: bash deepseek-harness-builder/scripts/test-component-pins.sh
+
+      - name: Resolve committed DeepSeek Harness version
+        id: dsh
+        run: |
+          set -euo pipefail
+          dsh_version="$(jq -r '.dependencies["@deepseek-ai/dsh"] // empty' deepseek-harness-builder/image/package.json)"
+          if [[ ! "${dsh_version}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "ERROR: package.json does not contain a valid pinned @deepseek-ai/dsh version" >&2
+            exit 1
+          fi
+          echo "dsh_version=${dsh_version}" >> "$GITHUB_OUTPUT"
+          echo "Using committed @deepseek-ai/dsh version: ${dsh_version}"
+
+      - name: Validate workstation Compose socket switch
+        run: deepseek-harness-builder/scripts/check-workstation-compose.sh
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+        with:
+          cache-binary: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.6"
+          cache: false
+
+      - name: Install pinned govulncheck
+        run: |
+          set -euo pipefail
+          go install "golang.org/x/vuln/cmd/govulncheck@v${GOVULNCHECK_VERSION}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          "$(go env GOPATH)/bin/govulncheck" -version
+
+      - name: Build amd64 runtime test image
+        uses: docker/build-push-action@v7
+        with:
+          github-token: ""
+          context: ./deepseek-harness-builder/image
+          file: ./deepseek-harness-builder/image/Dockerfile
+          target: runtime
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ env.RUNTIME_IMAGE }}
+          build-args: |
+            DSH_VERSION=${{ steps.dsh.outputs.dsh_version }}
+
+      - name: Audit committed pnpm production dependencies
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint pnpm "${RUNTIME_IMAGE}" \
+            --dir /opt/dsh audit --prod --audit-level high
+
+      - name: Run amd64 runtime smoke tests
+        run: |
+          set -euo pipefail
+          deepseek-harness-builder/scripts/smoke-test.sh \
+            --image "${RUNTIME_IMAGE}" \
+            --profile full \
+            --variant runtime \
+            --public-url https://dsh.example.test
+          deepseek-harness-builder/scripts/passthrough-smoke-test.sh \
+            --image "${RUNTIME_IMAGE}" \
+            --public-url https://dsh.example.test
+
+      - name: Run Caddy vulnerability gate
+        run: |
+          set -euo pipefail
+          deepseek-harness-builder/scripts/check-caddy-vulnerabilities.sh \
+            --image "${RUNTIME_IMAGE}"
+
+      - name: Scan amd64 runtime image
+        run: |
+          set -euo pipefail
+          scripts/trivy-image-gate.sh \
+            --image "${RUNTIME_IMAGE}" \
+            --output "${RUNNER_TEMP}/deepseek-harness-pr-runtime-amd64.trivy.json" \
+            --max-fixable-critical 0 \
+            --max-fixable-high 0
+
+      - name: Build amd64 workstation test image
+        uses: docker/build-push-action@v7
+        with:
+          github-token: ""
+          context: ./deepseek-harness-builder/image
+          file: ./deepseek-harness-builder/image/Dockerfile
+          target: workstation
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ env.WORKSTATION_IMAGE }}
+          build-args: |
+            DSH_VERSION=${{ steps.dsh.outputs.dsh_version }}
+
+      - name: Run amd64 workstation smoke tests
+        run: |
+          set -euo pipefail
+          deepseek-harness-builder/scripts/smoke-test.sh \
+            --image "${WORKSTATION_IMAGE}" \
+            --profile minimal \
+            --variant workstation \
+            --public-url https://dsh.example.test
+          deepseek-harness-builder/scripts/workstation-smoke-test.sh \
+            --image "${WORKSTATION_IMAGE}"
+
+      - name: Scan amd64 workstation image
+        run: |
+          set -euo pipefail
+          scripts/trivy-image-gate.sh \
+            --image "${WORKSTATION_IMAGE}" \
+            --output "${RUNNER_TEMP}/deepseek-harness-pr-workstation-amd64.trivy.json" \
+            --max-fixable-critical 0 \
+            --max-fixable-high 0

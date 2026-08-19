@@ -6,6 +6,7 @@ on:
       - ".github/workflows/build-deepseek-harness.yml"
       - ".github/workflows/build-deepseek-harness-workstation.yml"
       - ".github/workflows/validate-deepseek-harness-component-pins.yml"
+      - ".github/workflows/verify-deepseek-harness-pr.yml"
       - "deepseek-harness-builder/**"
       - "SECURITY_SCAN.md"
   workflow_dispatch:
