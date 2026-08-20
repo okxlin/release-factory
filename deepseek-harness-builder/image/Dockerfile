@@ -190,6 +190,7 @@ ARG DOCKER_BUILDX_VERSION=0.36.1
 ARG DOCKER_COMPOSE_VERSION=5.5.0
 ARG DOCKER_VERSION=29.7.2
 ARG MOBY_GO_ARCHIVE_VERSION=0.3.3
+ARG X_MOD_VERSION=0.40.0
 
 COPY patches/docker-buildx-local-namesgenerator.patch /tmp/docker-buildx-local-namesgenerator.patch
 
@@ -230,8 +231,8 @@ WORKDIR /usr/src/docker-buildx
 # Buildx uses the old github.com/docker/docker module only for its frozen random
 # name generator. Keep that exact vendored package locally and remove the broad
 # daemon module from the client dependency graph before compiling. Its v0.36.1
-# module graph also selects a vulnerable go-archive release, so raise that
-# dependency to the advisory's fixed release before compiling.
+# module graph also selects vulnerable go-archive and x/mod releases, so raise
+# both dependencies to their advisory-fixed releases before compiling.
 RUN mkdir -p store/namesgenerator \
     && cp \
         vendor/github.com/docker/docker/pkg/namesgenerator/names-generator.go \
@@ -240,6 +241,7 @@ RUN mkdir -p store/namesgenerator \
     && git apply --unidiff-zero /tmp/docker-buildx-local-namesgenerator.patch \
     && go mod edit -droprequire=github.com/docker/docker \
     && go mod edit -require="github.com/moby/go-archive@v${MOBY_GO_ARCHIVE_VERSION}" \
+    && go mod edit -require="golang.org/x/mod@v${X_MOD_VERSION}" \
     && go mod tidy \
     && ! grep -Eq '^[[:space:]]*github.com/docker/docker[[:space:]]' go.mod go.sum
 
@@ -256,12 +258,15 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     && go version -m /out/docker-buildx | grep -F 'go1.26.6' \
     && go version -m /out/docker-buildx | grep -Eq \
         "github\\.com/moby/go-archive[[:space:]]+v${MOBY_GO_ARCHIVE_VERSION}([[:space:]]|$)" \
+    && go version -m /out/docker-buildx | grep -Eq \
+        "golang\\.org/x/mod[[:space:]]+v${X_MOD_VERSION}([[:space:]]|$)" \
     && ! go version -m /out/docker-buildx \
         | grep -Eq '^[[:space:]]*dep[[:space:]]+github.com/docker/docker[[:space:]]'
 
 WORKDIR /usr/src/docker-compose
 
 RUN go mod edit -require="github.com/docker/buildx@v${DOCKER_BUILDX_VERSION}" \
+    && go mod edit -require="golang.org/x/mod@v${X_MOD_VERSION}" \
     && go mod edit -replace=github.com/docker/buildx=/usr/src/docker-buildx \
     && go mod tidy \
     && ! grep -Eq '^[[:space:]]*github.com/docker/docker[[:space:]]' go.mod go.sum
@@ -275,6 +280,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     && /out/docker-compose version \
         | grep -F "Docker Compose version v${DOCKER_COMPOSE_VERSION}" \
     && go version -m /out/docker-compose | grep -F 'go1.26.6' \
+    && go version -m /out/docker-compose | grep -Eq \
+        "golang\\.org/x/mod[[:space:]]+v${X_MOD_VERSION}([[:space:]]|$)" \
     && ! go version -m /out/docker-compose \
         | grep -Eq '^[[:space:]]*dep[[:space:]]+github.com/docker/docker[[:space:]]'
 
