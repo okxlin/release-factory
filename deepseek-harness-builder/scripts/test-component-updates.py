@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-import json
 import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
@@ -163,6 +163,18 @@ class ComponentUpdateCheckerTests(unittest.TestCase):
         )
         self.assertIsNotNone(redirected)
         self.assertEqual(redirected.host, "api.github.com")
+
+    def test_summary_writer_preserves_existing_job_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            summary_path = Path(temporary) / "summary.md"
+            summary_path.write_text("## Existing summary\n\n", encoding="utf-8")
+
+            CHECKER_MODULE.write_summary(summary_path, "## Component updates\n")
+
+            self.assertEqual(
+                summary_path.read_text(encoding="utf-8"),
+                "## Existing summary\n\n## Component updates\n",
+            )
 
     def test_node_base_image_pin_and_workstation_npm_are_independent(self) -> None:
         policy = {

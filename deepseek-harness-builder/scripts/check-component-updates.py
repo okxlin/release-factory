@@ -464,7 +464,8 @@ def load_policy(policy_path: Path) -> list[dict[str, Any]]:
 def write_summary(path: Path, summary: str) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(summary, encoding="utf-8")
+        with path.open("a", encoding="utf-8") as summary_file:
+            summary_file.write(summary)
     except OSError as exc:
         raise UpdateCheckError(f"cannot write summary {path}: {exc}") from exc
 
