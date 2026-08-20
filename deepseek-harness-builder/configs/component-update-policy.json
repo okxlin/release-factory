@@ -1,0 +1,186 @@
+{
+  "version": 1,
+  "components": [
+    {
+      "name": "Caddy",
+      "pin": "CADDY_VERSION",
+      "source": {
+        "type": "github_release",
+        "repo": "caddyserver/caddy"
+      }
+    },
+    {
+      "name": "caddy-security",
+      "pin": "CADDY_SECURITY_VERSION",
+      "source": {
+        "type": "github_release",
+        "repo": "greenpau/caddy-security"
+      }
+    },
+    {
+      "name": "go-authcrunch",
+      "pin": "GO_AUTHCRUNCH_VERSION",
+      "source": {
+        "type": "github_release",
+        "repo": "greenpau/go-authcrunch"
+      }
+    },
+    {
+      "name": "cel-go security override",
+      "pin": "CEL_GO_VERSION",
+      "source": {
+        "type": "go_module",
+        "module": "github.com/google/cel-go"
+      }
+    },
+    {
+      "name": "gRPC security override",
+      "pin": "GRPC_VERSION",
+      "source": {
+        "type": "go_module",
+        "module": "google.golang.org/grpc"
+      }
+    },
+    {
+      "name": "klauspost/compress security override",
+      "pin": "KLAUSPOST_COMPRESS_VERSION",
+      "source": {
+        "type": "go_module",
+        "module": "github.com/klauspost/compress"
+      }
+    },
+    {
+      "name": "x/text security override",
+      "pin": "X_TEXT_VERSION",
+      "source": {
+        "type": "go_module",
+        "module": "golang.org/x/text"
+      }
+    },
+    {
+      "name": "moby/go-archive security override",
+      "pin": "MOBY_GO_ARCHIVE_VERSION",
+      "source": {
+        "type": "go_module",
+        "module": "github.com/moby/go-archive"
+      }
+    },
+    {
+      "name": "x/mod security override",
+      "pin": "X_MOD_VERSION",
+      "source": {
+        "type": "go_module",
+        "module": "golang.org/x/mod"
+      }
+    },
+    {
+      "name": "Python 3.12",
+      "pin": "PYTHON_VERSION",
+      "source": {
+        "type": "python_release_line",
+        "release_line": "3.12",
+        "url": "https://www.python.org/api/v2/downloads/release/?is_published=true"
+      }
+    },
+    {
+      "name": "pytest",
+      "pin": "PYTEST_VERSION",
+      "source": {
+        "type": "pypi",
+        "package": "pytest"
+      }
+    },
+    {
+      "name": "pnpm",
+      "pin": "PNPM_VERSION",
+      "source": {
+        "type": "npm",
+        "package": "pnpm"
+      }
+    },
+    {
+      "name": "Node.js 24 LTS",
+      "pin_from": {
+        "type": "dockerfile_from",
+        "image": "node",
+        "suffix": "-trixie-slim"
+      },
+      "source": {
+        "type": "node_release_line",
+        "major": 24
+      }
+    },
+    {
+      "name": "npm 11 for workstation",
+      "pin": "NPM_VERSION",
+      "source": {
+        "type": "npm",
+        "package": "npm",
+        "selector": "next-11"
+      }
+    },
+    {
+      "name": "Docker CLI",
+      "pin": "DOCKER_VERSION",
+      "source": {
+        "type": "github_tag",
+        "repo": "docker/cli"
+      }
+    },
+    {
+      "name": "Docker Compose",
+      "pin": "DOCKER_COMPOSE_VERSION",
+      "source": {
+        "type": "github_release",
+        "repo": "docker/compose"
+      }
+    },
+    {
+      "name": "Docker Buildx",
+      "pin": "DOCKER_BUILDX_VERSION",
+      "source": {
+        "type": "github_release",
+        "repo": "docker/buildx"
+      }
+    },
+    {
+      "name": "Go",
+      "pin": "GO_VERSION",
+      "source": {
+        "type": "go_stable"
+      }
+    },
+    {
+      "name": "actionlint",
+      "pin": "ACTIONLINT_VERSION",
+      "source": {
+        "type": "github_release",
+        "repo": "rhysd/actionlint"
+      }
+    },
+    {
+      "name": "yq v4",
+      "pin": "YQ_VERSION",
+      "source": {
+        "type": "github_release",
+        "repo": "mikefarah/yq"
+      }
+    },
+    {
+      "name": "uv",
+      "pin": "UV_VERSION",
+      "source": {
+        "type": "github_release",
+        "repo": "astral-sh/uv"
+      }
+    },
+    {
+      "name": "Ruff",
+      "pin": "RUFF_VERSION",
+      "source": {
+        "type": "github_release",
+        "repo": "astral-sh/ruff"
+      }
+    }
+  ]
+}

@@ -150,7 +150,11 @@ for name_and_count in \
     'DOCKER_COMPOSE_VERSION:2' \
     'DOCKER_VERSION:2' \
     'GO_VERSION:1' \
-    'RUST_VERSION:1' \
+    'NPM_VERSION:2' \
+    'ACTIONLINT_VERSION:1' \
+    'RUFF_VERSION:1' \
+    'UV_VERSION:1' \
+    'YQ_VERSION:1' \
     'MOBY_GO_ARCHIVE_VERSION:1' \
     'X_MOD_VERSION:1'; do
     require_arg "${name_and_count%%:*}" "${name_and_count##*:}"
@@ -160,6 +164,19 @@ checksum_arg='CADDY_SOURCE_ARCHIVE_SHA256'
 checksum_value="${arg_values[${checksum_arg}]:-}"
 [[ "${checksum_value}" =~ ^[a-f0-9]{64}$ ]] \
     || fail "ARG ${checksum_arg} must be a lowercase SHA-256 digest"
+
+for checksum_arg in \
+    ACTIONLINT_SOURCE_SHA256 \
+    RUFF_SHA256_AMD64 \
+    RUFF_SHA256_ARM64 \
+    UV_SHA256_AMD64 \
+    UV_SHA256_ARM64 \
+    YQ_SHA256_AMD64 \
+    YQ_SHA256_ARM64; do
+    checksum_value="${arg_values[${checksum_arg}]:-}"
+    [[ "${checksum_value}" =~ ^[a-f0-9]{64}$ ]] \
+        || fail "ARG ${checksum_arg} must be a lowercase SHA-256 digest"
+done
 
 [[ "${arg_values[CADDY_RATELIMIT_REF]:-}" =~ ^[a-f0-9]{40}$ ]] \
     || fail 'ARG CADDY_RATELIMIT_REF must be an immutable 40-character Git commit'
@@ -253,8 +270,7 @@ for line_number in "${!docker_lines[@]}"; do
                         || fail "Go base-image tag ${image_tag} does not match ARG GO_VERSION"
                     ;;
                 rust)
-                    [[ "${image_tag}" == "${arg_values[RUST_VERSION]:-}-slim-trixie" ]] \
-                        || fail "Rust base-image tag ${image_tag} does not match ARG RUST_VERSION"
+                    fail 'Dockerfile must not use a Rust base image'
                     ;;
                 node)
                     if [[ -z "${node_tag}" ]]; then
@@ -272,9 +288,20 @@ for line_number in "${!docker_lines[@]}"; do
     fi
 done
 
-for required_image in caddy python node golang rust; do
+for required_image in caddy python node golang; do
     (( ${image_counts[${required_image}]:-0} > 0 )) \
         || fail "Dockerfile must retain a pinned ${required_image} base image"
+done
+
+for removed_rust_literal in \
+    'ARG RUST_VERSION=' \
+    'CARGO_HOME=' \
+    'RUSTUP_HOME=' \
+    '/usr/local/cargo' \
+    '/usr/local/rustup'; do
+    if grep -Fq -- "${removed_rust_literal}" "${dockerfile}"; then
+        fail "Dockerfile must not retain removed Rust workstation input: ${removed_rust_literal}"
+    fi
 done
 
 [[ "${node_tag}" =~ ^[0-9]+\.[0-9]+\.[0-9]+-trixie-slim$ ]] \
@@ -282,6 +309,7 @@ done
 
 declare -A expected_remote_adds=()
 expected_remote_adds["https://registry.npmjs.org/pnpm/-/pnpm-${arg_values[PNPM_VERSION]:-}.tgz"]=1
+expected_remote_adds["https://registry.npmjs.org/npm/-/npm-${arg_values[NPM_VERSION]:-}.tgz"]=1
 expected_remote_adds["https://codeload.github.com/docker/cli/tar.gz/refs/tags/v${arg_values[DOCKER_VERSION]:-}"]=1
 expected_remote_adds["https://codeload.github.com/docker/compose/tar.gz/refs/tags/v${arg_values[DOCKER_COMPOSE_VERSION]:-}"]=1
 expected_remote_adds["https://codeload.github.com/docker/buildx/tar.gz/refs/tags/v${arg_values[DOCKER_BUILDX_VERSION]:-}"]=1
@@ -344,6 +372,51 @@ require_literal \
 require_literal \
     "golang.org/x/mod@v\${X_MOD_VERSION}" \
     'the Buildx and Compose x/mod version pin'
+require_literal \
+    'https://codeload.github.com/rhysd/actionlint/tar.gz/refs/tags/v${ACTIONLINT_VERSION}' \
+    'the actionlint source URL tied to ACTIONLINT_VERSION'
+require_literal \
+    'CGO_ENABLED=0 go build' \
+    'the actionlint source build'
+require_literal \
+    '"${ACTIONLINT_SOURCE_SHA256}" /tmp/actionlint-source.tar.gz | sha256sum -c -' \
+    'the actionlint source checksum verification'
+require_literal \
+    'https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${yq_arch}' \
+    'the yq release URL tied to YQ_VERSION'
+require_literal \
+    'ruff_sha256="${RUFF_SHA256_AMD64}"' \
+    'the amd64 Ruff checksum selection'
+require_literal \
+    'ruff_sha256="${RUFF_SHA256_ARM64}"' \
+    'the arm64 Ruff checksum selection'
+require_literal \
+    'uv_sha256="${UV_SHA256_AMD64}"' \
+    'the amd64 uv checksum selection'
+require_literal \
+    'uv_sha256="${UV_SHA256_ARM64}"' \
+    'the arm64 uv checksum selection'
+require_literal \
+    'yq_sha256="${YQ_SHA256_AMD64}"' \
+    'the amd64 yq checksum selection'
+require_literal \
+    'yq_sha256="${YQ_SHA256_ARM64}"' \
+    'the arm64 yq checksum selection'
+require_literal \
+    '"${yq_sha256}" /tmp/yq | sha256sum -c -' \
+    'the yq release checksum verification'
+require_literal \
+    'https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${astral_arch}-unknown-linux-gnu.tar.gz' \
+    'the uv release URL tied to UV_VERSION'
+require_literal \
+    '"${uv_sha256}" /tmp/uv.tar.gz | sha256sum -c -' \
+    'the uv release checksum verification'
+require_literal \
+    'https://github.com/astral-sh/ruff/releases/download/${RUFF_VERSION}/ruff-${astral_arch}-unknown-linux-gnu.tar.gz' \
+    'the Ruff release URL tied to RUFF_VERSION'
+require_literal \
+    '"${ruff_sha256}" /tmp/ruff.tar.gz | sha256sum -c -' \
+    'the Ruff release checksum verification'
 
 if grep -nE -- '(:latest|refs/heads/(main|master)|@(main|master))' "${dockerfile}" >/dev/null; then
     fail 'Dockerfile contains a forbidden floating source reference'

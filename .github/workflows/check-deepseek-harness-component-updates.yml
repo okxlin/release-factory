@@ -1,0 +1,54 @@
+name: Check DeepSeek Harness Component Updates
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      fail_on_updates:
+        description: "Fail the manual run when update candidates are found"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-deepseek-harness-component-updates
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24.19.0"
+
+      - name: Run component-update checker regression tests
+        run: python3 deepseek-harness-builder/scripts/test-component-updates.py
+
+      - name: Run DeepSeek Harness version resolver regression tests
+        run: |
+          node --test deepseek-harness-builder/scripts/test-resolve-latest-npm-version.mjs
+          bash deepseek-harness-builder/scripts/test-prepare-dsh-version.sh
+
+      - name: Check authoritative upstream versions
+        env:
+          FAIL_ON_UPDATES: ${{ inputs.fail_on_updates || 'false' }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          args=(--summary "${GITHUB_STEP_SUMMARY}")
+          if [[ "${FAIL_ON_UPDATES}" == "true" ]]; then
+            args+=(--fail-on-updates)
+          fi
+          python3 deepseek-harness-builder/scripts/check-component-updates.py "${args[@]}"

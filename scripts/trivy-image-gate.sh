@@ -6,7 +6,8 @@ usage() {
 Usage: trivy-image-gate.sh --image IMAGE [--output PATH] [--max-fixable-critical N] [--max-fixable-high N]
 
 Scans a container image with Trivy and fails when fixable HIGH/CRITICAL
-vulnerabilities exceed the configured thresholds.
+vulnerabilities exceed the configured thresholds. Findings within the
+thresholds remain visible in the log and emit a GitHub Actions warning.
 
 Set TRIVY_TIMEOUT to override the default image analysis timeout.
 EOF
@@ -125,4 +126,49 @@ set -e
 
 echo "Trivy gate for ${image}: ${summary}"
 echo "Trivy report: ${output}"
+
+python3 - "${output}" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+findings = []
+
+for result in data.get("Results", []):
+    target = str(result.get("Target") or "unknown")
+    for vuln in result.get("Vulnerabilities") or []:
+        severity = vuln.get("Severity")
+        fixed = str(vuln.get("FixedVersion") or "")
+        if severity not in {"CRITICAL", "HIGH"} or not fixed:
+            continue
+        findings.append(
+            (
+                0 if severity == "CRITICAL" else 1,
+                severity,
+                str(vuln.get("VulnerabilityID") or "unknown"),
+                str(vuln.get("PkgName") or "unknown"),
+                str(vuln.get("InstalledVersion") or "unknown"),
+                fixed,
+                target,
+            )
+        )
+
+if findings:
+    print("Fixable Trivy findings:")
+    for _, severity, vulnerability, package, installed, fixed, target in sorted(findings):
+        fields = [severity, vulnerability, package, installed, fixed, target]
+        fields = [" ".join(field.split()) for field in fields]
+        print(
+            f"- {fields[0]} {fields[1]}: {fields[2]} {fields[3]} -> "
+            f"{fields[4]} ({fields[5]})"
+        )
+PY
+
+fixable_critical="$(sed -n 's/.*fixable_critical=\([0-9][0-9]*\).*/\1/p' <<< "${summary}")"
+fixable_high="$(sed -n 's/.*fixable_high=\([0-9][0-9]*\).*/\1/p' <<< "${summary}")"
+if [[ "${gate_status}" -eq 0 && "${GITHUB_ACTIONS:-}" == "true" ]] \
+    && (( fixable_critical > 0 || fixable_high > 0 )); then
+  echo "::warning title=Fixable image vulnerabilities within configured threshold::critical=${fixable_critical}, high=${fixable_high}; see the Trivy gate log"
+fi
+
 exit "${gate_status}"

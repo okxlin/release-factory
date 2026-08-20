@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/build-deepseek-harness.yml"
       - ".github/workflows/build-deepseek-harness-workstation.yml"
+      - ".github/workflows/check-deepseek-harness-component-updates.yml"
       - ".github/workflows/validate-deepseek-harness-component-pins.yml"
       - ".github/workflows/verify-deepseek-harness-pr.yml"
       - "deepseek-harness-builder/**"
@@ -23,8 +24,21 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24.19.0"
+
       - name: Validate pinned component contract
         run: bash deepseek-harness-builder/scripts/check-component-pins.sh
 
       - name: Run component-pin checker regression tests
         run: bash deepseek-harness-builder/scripts/test-component-pins.sh
+
+      - name: Run component-update checker regression tests
+        run: python3 deepseek-harness-builder/scripts/test-component-updates.py
+
+      - name: Run DeepSeek Harness version resolver regression tests
+        run: |
+          node --test deepseek-harness-builder/scripts/test-resolve-latest-npm-version.mjs
+          bash deepseek-harness-builder/scripts/test-prepare-dsh-version.sh

@@ -8,7 +8,7 @@ on:
         required: false
         default: ""
       dsh_version:
-        description: "DeepSeek Harness npm version or dist-tag; leave empty to resolve latest"
+        description: "DeepSeek Harness npm version or dist-tag; leave empty to resolve the highest published version"
         required: false
         default: ""
       platforms:

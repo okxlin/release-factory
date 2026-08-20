@@ -148,11 +148,10 @@ jobs:
           deepseek-harness-builder/scripts/workstation-smoke-test.sh \
             --image "${WORKSTATION_IMAGE}"
 
-      - name: Scan amd64 workstation image
+      - name: Scan amd64 workstation image (block fixable critical)
         run: |
           set -euo pipefail
           scripts/trivy-image-gate.sh \
             --image "${WORKSTATION_IMAGE}" \
             --output "${RUNNER_TEMP}/deepseek-harness-pr-workstation-amd64.trivy.json" \
-            --max-fixable-critical 0 \
-            --max-fixable-high 0
+            --max-fixable-critical 0

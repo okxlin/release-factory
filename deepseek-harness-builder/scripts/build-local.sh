@@ -16,7 +16,8 @@ Usage: build-local.sh [options] [-- DOCKER_BUILD_ARGS...]
 Options:
   --target TARGET       Docker target: runtime or workstation (default: runtime)
   --tag TAG             Local image tag; defaults by target
-  --version VERSION     DeepSeek Harness npm version or dist-tag; defaults to latest
+  --version VERSION     DeepSeek Harness npm version or dist-tag; defaults to the
+                        highest published semantic version
   --platform PLATFORM   Optional Docker build platform
   -h, --help            Show this help
 EOF
