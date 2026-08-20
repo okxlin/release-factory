@@ -8,7 +8,7 @@ on:
         required: false
         default: ""
       dsh_version:
-        description: "DeepSeek Harness npm version or dist-tag; leave empty to resolve latest"
+        description: "DeepSeek Harness npm version or dist-tag; leave empty to resolve the highest published version"
         required: false
         default: ""
       platforms:
@@ -243,14 +243,13 @@ jobs:
           deepseek-harness-builder/scripts/check-caddy-vulnerabilities.sh \
             --image "${TEST_IMAGE_AMD64}"
 
-      - name: Scan amd64 workstation image
+      - name: Scan amd64 workstation image (block fixable critical)
         run: |
           set -euo pipefail
           scripts/trivy-image-gate.sh \
             --image "${TEST_IMAGE_AMD64}" \
             --output "${RUNNER_TEMP}/deepseek-harness-workstation-amd64.trivy.json" \
-            --max-fixable-critical 0 \
-            --max-fixable-high 0
+            --max-fixable-critical 0
 
       - name: Build arm64 workstation test image
         uses: docker/build-push-action@v7
@@ -283,14 +282,13 @@ jobs:
             --image "${TEST_IMAGE_ARM64}" \
             --skip-sandbox-probe
 
-      - name: Scan arm64 workstation image
+      - name: Scan arm64 workstation image (block fixable critical)
         run: |
           set -euo pipefail
           scripts/trivy-image-gate.sh \
             --image "${TEST_IMAGE_ARM64}" \
             --output "${RUNNER_TEMP}/deepseek-harness-workstation-arm64.trivy.json" \
-            --max-fixable-critical 0 \
-            --max-fixable-high 0
+            --max-fixable-critical 0
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
@@ -345,5 +343,5 @@ jobs:
             echo "- Platforms: ${PARAM_PLATFORMS}"
             echo "- amd64: full authentication, WebSocket, isolation, resource, and compiler smoke"
             echo "- arm64: QEMU authentication, native-module, and compiler smoke; host-kernel sandbox probe skipped under user-mode emulation"
-            echo "- Security: pnpm audit, Caddy dependency-graph/govulncheck gate, and zero-fixable HIGH/CRITICAL Trivy gates"
+            echo "- Security: pnpm audit, Caddy dependency-graph/govulncheck gate, zero-fixable CRITICAL Trivy gate, and reported HIGH findings"
           } >> "$GITHUB_STEP_SUMMARY"

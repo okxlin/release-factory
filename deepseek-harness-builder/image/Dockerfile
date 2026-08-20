@@ -162,6 +162,23 @@ RUN corepack enable \
     && pnpm exec dsh --version | grep -Fx "${resolved_dsh_version}" \
     && node_pty_arch="$(node -p "process.arch")" \
     && case "${node_pty_arch}" in x64|arm64) ;; *) exit 1 ;; esac \
+    && node_pty_dir="$(find node_modules/.pnpm \
+        -path '*/node_modules/node-pty' -type d -print -quit)" \
+    && case "${node_pty_dir}" in \
+        node_modules/.pnpm/*/node_modules/node-pty) ;; \
+        *) exit 1 ;; \
+    esac \
+    && for prebuild_dir in "${node_pty_dir}"/prebuilds/*; do \
+        test -d "${prebuild_dir}" || continue; \
+        if [ "${prebuild_dir##*/}" != "linux-${node_pty_arch}" ]; then \
+            rm -rf -- "${prebuild_dir}"; \
+        fi; \
+    done \
+    && rm -rf -- "${node_pty_dir}/third_party/conpty" \
+    && test -z "$(find "${node_pty_dir}/prebuilds" \
+        -mindepth 1 -maxdepth 1 -type d \
+        ! -name "linux-${node_pty_arch}" -print -quit)" \
+    && test ! -d "${node_pty_dir}/third_party/conpty" \
     && find node_modules/.pnpm \
         \( \
             -path '*/node_modules/node-pty/build/Release/pty.node' \
@@ -183,6 +200,23 @@ RUN mkdir -p /opt/pnpm \
     && test "$(node -p "require('/opt/pnpm/package.json').version")" = "${PNPM_VERSION}" \
     && test "$(node /opt/pnpm/bin/pnpm.mjs --version)" = "${PNPM_VERSION}" \
     && rm -f /tmp/pnpm.tgz
+
+FROM node:24.19.0-trixie-slim@sha256:0711b541c1c33a8a530ac4f0d391baa9a15b3d804695b1b24a47daa5fb60e74d AS npm-bundle
+
+ARG NPM_VERSION=11.19.0
+
+# Node.js 24 currently bundles an older npm release. Keep workstation npm
+# independently checksum-pinned so security fixes do not wait for a new Node
+# base-image release, while the runtime target can continue omitting npm.
+ADD --checksum=sha256:31e9770f7dc71119a58509353b27917557aaf0ac9b5ef1a0465ee7d8ec67ae75 \
+    https://registry.npmjs.org/npm/-/npm-11.19.0.tgz /tmp/npm.tgz
+
+RUN mkdir -p /opt/npm \
+    && tar -xzf /tmp/npm.tgz -C /opt/npm --strip-components=1 \
+    && test "$(node -p "require('/opt/npm/package.json').version")" = "${NPM_VERSION}" \
+    && test "$(node /opt/npm/bin/npm-cli.js --version)" = "${NPM_VERSION}" \
+    && test "$(node /opt/npm/bin/npx-cli.js --version)" = "${NPM_VERSION}" \
+    && rm -f /tmp/npm.tgz
 
 FROM golang:1.26.6-trixie@sha256:b75d466dd608587fd66cca705a307ba65b889827d06ad61d6a75f0482b51b7c7 AS docker-tools-builder
 
@@ -392,6 +426,7 @@ ARG DOCKER_BUILDX_VERSION=0.36.1
 ARG DOCKER_COMPOSE_VERSION=5.5.0
 ARG DOCKER_VERSION=29.7.2
 ARG GO_VERSION=1.26.6
+ARG NPM_VERSION=11.19.0
 ARG PYTHON_VERSION=3.12.14
 ARG PYTEST_VERSION=9.1.1
 ARG PNPM_VERSION=11.22.0
@@ -417,6 +452,7 @@ COPY --from=docker-tools-builder /out/docker-buildx /usr/local/libexec/docker/cl
 COPY --from=docker-tools-builder /out/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
 COPY --from=docker-tools-builder /licenses /usr/share/licenses/deepseek-harness-docker
 COPY --from=python-toolchain /usr/local /usr/local
+COPY --from=npm-bundle /opt/npm /opt/npm
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -477,6 +513,8 @@ RUN apt-get update \
         /usr/local/bin/corepack \
         /usr/local/bin/npm \
         /usr/local/bin/npx \
+    && ln -s /opt/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /opt/npm/bin/npx-cli.js /usr/local/bin/npx \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd \
     && ln -s /usr/bin/batcat /usr/local/bin/bat \
     && install -d -m 0750 -o node -g node \
@@ -490,6 +528,8 @@ RUN apt-get update \
         /home/node/go \
     && chown -R node:node /home/node \
     && test "$(pnpm --version)" = "${PNPM_VERSION}" \
+    && test "$(npm --version)" = "${NPM_VERSION}" \
+    && test "$(npx --version)" = "${NPM_VERSION}" \
     && docker --version | grep -F "Docker version ${DOCKER_VERSION}," \
     && docker compose version | grep -F "Docker Compose version v${DOCKER_COMPOSE_VERSION}" \
     && docker buildx version | grep -F "github.com/docker/buildx v${DOCKER_BUILDX_VERSION} " \
@@ -499,7 +539,6 @@ RUN apt-get update \
     && python3 --version | grep -Fx "Python ${PYTHON_VERSION}" \
     && python3 -m pytest --version | grep -Fx "pytest ${PYTEST_VERSION}" \
     && gcc --version \
-    && ! command -v npm \
     && ! command -v corepack
 
 COPY profile.d/workstation.sh /etc/profile.d/deepseek-harness-workstation.sh

@@ -40,6 +40,11 @@ cp -- "${source_dockerfile}" "${missing_x_mod_pin}"
 sed -i '/^ARG X_MOD_VERSION=/d' "${missing_x_mod_pin}"
 expect_failure 'missing-x-mod-pin' "${missing_x_mod_pin}" 'required ARG X_MOD_VERSION is missing'
 
+missing_npm_pin="${tmp_dir}/missing-npm-pin.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_npm_pin}"
+sed -i '/^ARG NPM_VERSION=/d' "${missing_npm_pin}"
+expect_failure 'missing-npm-pin' "${missing_npm_pin}" 'required ARG NPM_VERSION is missing'
+
 floating_node="${tmp_dir}/floating-node.Dockerfile"
 cp -- "${source_dockerfile}" "${floating_node}"
 sed -i '0,/^FROM node:/s#node:[^@[:space:]]*#node:latest#' "${floating_node}"

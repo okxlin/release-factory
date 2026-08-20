@@ -230,6 +230,8 @@ done
     || fail "DeepSeek Harness state is not stored under /data"
 pass "home, /data application state, and workspace use direct directories without symbolic links"
 [[ "$(node --version)" == "v24.19.0" ]] || fail "Node.js version drifted"
+[[ "$(npm --version)" == "11.19.0" ]] || fail "npm version drifted"
+[[ "$(npx --version)" == "11.19.0" ]] || fail "npx version drifted"
 [[ "$(pnpm --version)" == "11.22.0" ]] || fail "pnpm version drifted"
 [[ "$(go version)" == go\ version\ go1.26.6* ]] || fail "Go version drifted"
 [[ "$(rustc --version)" == rustc\ 1.97.1* ]] || fail "Rust version drifted"
@@ -257,7 +259,7 @@ for docker_binary in \
 done
 pass "Docker CLI, Compose, and Buildx use the hardened client-only dependency graph without default daemon access"
 
-bash -lc 'command -v go >/dev/null && command -v rustc >/dev/null && command -v pnpm >/dev/null' \
+bash -lc 'command -v go >/dev/null && command -v rustc >/dev/null && command -v npm >/dev/null && command -v npx >/dev/null && command -v pnpm >/dev/null' \
     || fail "login shells lose workstation tool paths"
 pass "login shells retain workstation tool paths"
 
@@ -305,15 +307,15 @@ for command_name in \
 done
 pass "workstation development CLI set is present"
 
-for command_name in npm corepack; do
-    if command -v "${command_name}" >/dev/null 2>&1; then
-        fail "${command_name} should not coexist with the standalone pinned pnpm bundle"
-    fi
-done
+command -v npm >/dev/null 2>&1 || fail "workstation npm is missing"
+command -v npx >/dev/null 2>&1 || fail "workstation npx is missing"
+if command -v corepack >/dev/null 2>&1; then
+    fail "Corepack should not coexist with the standalone pinned pnpm bundle"
+fi
 if command -v sudo >/dev/null 2>&1; then
     fail "workstation unexpectedly grants a sudo path"
 fi
-pass "workstation omits npm, Corepack, and sudo"
+pass "workstation provides pinned npm and npx while omitting Corepack and sudo"
 
 touch "${HOME}/.workstation-write-probe"
 rm -f "${HOME}/.workstation-write-probe"

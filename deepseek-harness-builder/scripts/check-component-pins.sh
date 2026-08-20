@@ -150,6 +150,7 @@ for name_and_count in \
     'DOCKER_COMPOSE_VERSION:2' \
     'DOCKER_VERSION:2' \
     'GO_VERSION:1' \
+    'NPM_VERSION:2' \
     'RUST_VERSION:1' \
     'MOBY_GO_ARCHIVE_VERSION:1' \
     'X_MOD_VERSION:1'; do
@@ -282,6 +283,7 @@ done
 
 declare -A expected_remote_adds=()
 expected_remote_adds["https://registry.npmjs.org/pnpm/-/pnpm-${arg_values[PNPM_VERSION]:-}.tgz"]=1
+expected_remote_adds["https://registry.npmjs.org/npm/-/npm-${arg_values[NPM_VERSION]:-}.tgz"]=1
 expected_remote_adds["https://codeload.github.com/docker/cli/tar.gz/refs/tags/v${arg_values[DOCKER_VERSION]:-}"]=1
 expected_remote_adds["https://codeload.github.com/docker/compose/tar.gz/refs/tags/v${arg_values[DOCKER_COMPOSE_VERSION]:-}"]=1
 expected_remote_adds["https://codeload.github.com/docker/buildx/tar.gz/refs/tags/v${arg_values[DOCKER_BUILDX_VERSION]:-}"]=1

@@ -887,13 +887,24 @@ check_runtime_versions() {
         || fail "pnpm version is not pinned to 11.22.0"
     pass "standalone pnpm version is pinned"
 
+    if ! docker exec "${container_name}" sh -eu -c '
+        node_pty_arch="$(node -p "process.arch")"
+        case "${node_pty_arch}" in x64|arm64) ;; *) exit 1 ;; esac
+        test -z "$(find /opt/dsh/node_modules/.pnpm \
+            -type d -path "*/node_modules/node-pty/prebuilds/*" \
+            ! -name "linux-${node_pty_arch}" -print -quit)"
+        ! find /opt/dsh/node_modules/.pnpm \
+            -type d -path "*/node_modules/node-pty/third_party/conpty" \
+            -print -quit | grep -q .
+    '; then
+        fail "node-pty retains non-target prebuilds or Windows ConPTY sources"
+    fi
+    pass "node-pty retains only the target Linux native assets"
+
     if docker exec "${container_name}" sh -c 'command -v corepack >/dev/null 2>&1'; then
         fail "Corepack is present even though pnpm is installed independently"
     fi
-    if docker exec "${container_name}" sh -c 'command -v npm >/dev/null 2>&1'; then
-        fail "npm is present even though pnpm is the sole bundled Node.js package manager"
-    fi
-    pass "npm and Corepack are absent"
+    pass "Corepack is absent"
 
     for command_name in bash git curl ssh jq rg less ps file unzip; do
         docker exec "${container_name}" sh -c "command -v '${command_name}' >/dev/null 2>&1" \
@@ -905,6 +916,11 @@ check_runtime_versions() {
         || fail "image variant metadata does not match ${VARIANT}"
 
     if [[ "${VARIANT}" == "runtime" ]]; then
+        for command_name in npm npx; do
+            if docker exec "${container_name}" sh -c "command -v '${command_name}' >/dev/null 2>&1"; then
+                fail "workstation Node.js package-manager command unexpectedly present in runtime image: ${command_name}"
+            fi
+        done
         for command_name in gcc g++ make python3 go rustc cargo; do
             if docker exec "${container_name}" sh -c "command -v '${command_name}' >/dev/null 2>&1"; then
                 fail "workstation tool unexpectedly present in runtime image: ${command_name}"
@@ -912,6 +928,10 @@ check_runtime_versions() {
         done
         pass "lightweight runtime omits npm and compiler toolchains"
     else
+        [[ "$(docker exec "${container_name}" npm --version)" == "11.19.0" ]] \
+            || fail "npm is not pinned to 11.19.0"
+        [[ "$(docker exec "${container_name}" npx --version)" == "11.19.0" ]] \
+            || fail "npx is not pinned to 11.19.0"
         [[ "$(docker exec "${container_name}" go version)" == go\ version\ go1.26.6* ]] \
             || fail "Go version is not pinned to 1.26.6"
         [[ "$(docker exec "${container_name}" rustc --version)" == rustc\ 1.97.1* ]] \
