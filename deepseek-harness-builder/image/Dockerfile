@@ -162,23 +162,6 @@ RUN corepack enable \
     && pnpm exec dsh --version | grep -Fx "${resolved_dsh_version}" \
     && node_pty_arch="$(node -p "process.arch")" \
     && case "${node_pty_arch}" in x64|arm64) ;; *) exit 1 ;; esac \
-    && node_pty_dir="$(find node_modules/.pnpm \
-        -path '*/node_modules/node-pty' -type d -print -quit)" \
-    && case "${node_pty_dir}" in \
-        node_modules/.pnpm/*/node_modules/node-pty) ;; \
-        *) exit 1 ;; \
-    esac \
-    && for prebuild_dir in "${node_pty_dir}"/prebuilds/*; do \
-        test -d "${prebuild_dir}" || continue; \
-        if [ "${prebuild_dir##*/}" != "linux-${node_pty_arch}" ]; then \
-            rm -rf -- "${prebuild_dir}"; \
-        fi; \
-    done \
-    && rm -rf -- "${node_pty_dir}/third_party/conpty" \
-    && test -z "$(find "${node_pty_dir}/prebuilds" \
-        -mindepth 1 -maxdepth 1 -type d \
-        ! -name "linux-${node_pty_arch}" -print -quit)" \
-    && test ! -d "${node_pty_dir}/third_party/conpty" \
     && find node_modules/.pnpm \
         \( \
             -path '*/node_modules/node-pty/build/Release/pty.node' \

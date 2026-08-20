@@ -887,20 +887,6 @@ check_runtime_versions() {
         || fail "pnpm version is not pinned to 11.22.0"
     pass "standalone pnpm version is pinned"
 
-    if ! docker exec "${container_name}" sh -eu -c '
-        node_pty_arch="$(node -p "process.arch")"
-        case "${node_pty_arch}" in x64|arm64) ;; *) exit 1 ;; esac
-        test -z "$(find /opt/dsh/node_modules/.pnpm \
-            -type d -path "*/node_modules/node-pty/prebuilds/*" \
-            ! -name "linux-${node_pty_arch}" -print -quit)"
-        ! find /opt/dsh/node_modules/.pnpm \
-            -type d -path "*/node_modules/node-pty/third_party/conpty" \
-            -print -quit | grep -q .
-    '; then
-        fail "node-pty retains non-target prebuilds or Windows ConPTY sources"
-    fi
-    pass "node-pty retains only the target Linux native assets"
-
     if docker exec "${container_name}" sh -c 'command -v corepack >/dev/null 2>&1'; then
         fail "Corepack is present even though pnpm is installed independently"
     fi
