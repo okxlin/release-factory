@@ -8,7 +8,6 @@ import json
 import os
 import re
 import sys
-import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -342,15 +341,6 @@ def upstream_version(
         if not lines:
             raise UpdateCheckError("Go stable endpoint returned an empty response")
         return normalize_semver(lines[0].removeprefix("go")), "https://go.dev/dl/"
-
-    if source_type == "rust_stable":
-        url = "https://static.rust-lang.org/dist/channel-rust-stable.toml"
-        try:
-            data = tomllib.loads(client.get_text("rust-stable.toml", url))
-            version = data["pkg"]["rust"]["version"].split()[0]
-        except (KeyError, TypeError, tomllib.TOMLDecodeError) as exc:
-            raise UpdateCheckError(f"invalid Rust stable manifest: {exc}") from exc
-        return normalize_semver(version), "https://www.rust-lang.org/tools/install"
 
     if source_type == "node_release_line":
         url = "https://nodejs.org/dist/index.json"

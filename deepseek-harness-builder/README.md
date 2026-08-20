@@ -19,9 +19,9 @@ Exact component pins are defined in [the Dockerfile](image/Dockerfile), [package
 
 Pull requests that affect DeepSeek Harness build inputs run a read-only component-pin contract check. It rejects floating base-image tags, malformed checksums, and partial updates where repeated Dockerfile version declarations or source URLs no longer agree. A separate PR workflow builds the committed inputs as local amd64 runtime and workstation images, then runs the dependency audit, smoke contracts, Caddy gate, and Trivy gate. Neither workflow receives registry credentials, logs in, or publishes images; the release workflows remain responsible for multi-architecture publishing.
 
-A daily read-only workflow compares the fixed component versions with authoritative GitHub, Go module proxy, Go, Rust, Node.js, npm, PyPI, and Python release sources. It writes update candidates to the Actions summary and emits a warning without changing files, opening a pull request, or blocking scheduled releases. Source or policy errors fail the check; a manual run can also enable strict mode to fail when updates are available. A reported version is only a review candidate: checksum and image-digest updates plus the existing build, smoke, and vulnerability gates are still required.
+A daily read-only workflow compares the fixed component versions with authoritative GitHub, Go module proxy, Go, Node.js, npm, PyPI, and Python release sources. It writes update candidates to the Actions summary and emits a warning without changing files, opening a pull request, or blocking scheduled releases. Source or policy errors fail the check; a manual run can also enable strict mode to fail when updates are available. A reported version is only a review candidate: checksum and image-digest updates plus the existing build, smoke, and vulnerability gates are still required.
 
-Go is aligned with the official stable version endpoint at <https://go.dev/VERSION?m=text>. Rust is aligned with the official stable channel manifest at <https://static.rust-lang.org/dist/channel-rust-stable.toml>. Their Docker Official Image indexes are digest-pinned for reproducible `amd64` and `arm64` selection.
+Go is aligned with the official stable version endpoint at <https://go.dev/VERSION?m=text>. Its Docker Official Image index is digest-pinned for reproducible `amd64` and `arm64` selection. actionlint is rebuilt with that pinned Go toolchain from a checksum-pinned official source archive; the other standalone workstation tools are downloaded from their official GitHub releases with architecture-specific SHA-256 checksums.
 
 The three workstation Docker client binaries are rebuilt with the pinned Go release from checksum-pinned official source archives. The Buildx source closure imports the legacy `github.com/docker/docker` module only for its frozen random-name generator; the build retains that exact vendored package locally and removes the unrelated daemon module before compiling Buildx and Compose. This keeps the daemon-only AuthZ issue [CVE-2026-34040](https://github.com/moby/moby/security/advisories/GHSA-x744-4wpc-v9h2) out of the client dependency graph instead of weakening the image scan threshold.
 
@@ -76,12 +76,13 @@ The workstation image inherits the same DSH/authentication runtime and adds:
 
 - Node.js, npm, npx, and pnpm
 - Python 3.12.14 with pip, venv, pipx, pytest, and development headers
-- Go, Rust, and Cargo
+- Go
 - Docker CLI, Compose, and Buildx (client tools only)
-- GCC/G++, Clang, GDB, CMake, Ninja, Autoconf/Automake, libtool, pkg-config, and common native-library headers
-- Git LFS, GitHub CLI, ShellCheck, shfmt, yamllint, pre-commit, fd, bat, fzf, tmux, Vim, SQLite, and common network/debug/archive tools
+- GCC/G++, Clang, clang-format, GDB, CMake, Ninja, Autoconf/Automake, libtool, pkg-config, and common native-library headers
+- actionlint, yq, uv/uvx, Ruff, ShellCheck, shfmt, yamllint, and pre-commit
+- Git LFS, GitHub CLI, just, hyperfine, entr, fd, bat, fzf, tmux, Vim, SQLite, ncdu, and common network/debug/archive tools
 
-It does not add code-server, Codex/Claude CLIs, proxy daemons, `sudo`, or a Docker daemon. Docker client tools are present, but no daemon socket is mounted by the image, so the default workstation has no host-container control path. User installs under `/home/node` persist in the workstation HOME volume, while projects persist through the direct `/workspace` mount.
+It intentionally omits Rust and Cargo from the default workstation; projects that need them can install a project-specific toolchain under the persistent HOME volume. It also does not add code-server, Codex/Claude CLIs, proxy daemons, `sudo`, or a Docker daemon. Docker client tools are present, but no daemon socket is mounted by the image, so the default workstation has no host-container control path. User installs under `/home/node` persist in the workstation HOME volume, while projects persist through the direct `/workspace` mount.
 
 ## Run behind 1Panel/OpenResty
 
@@ -129,7 +130,7 @@ docker run -d \
   ghcr.io/okxlin/deepseek-harness:workstation
 ```
 
-The HOME volume contains user-installed pnpm, pipx, Cargo, and Go tools. Application state lives under `/data`. The image working directory and `DSH_WORKSPACE` both default to `/workspace`; the web **Add workspace** dialog also opens there, and its `Home` shortcut resolves to `/workspace`. `/home/node` is the user HOME and persistent tool volume, not the default project directory. The workspace bind is intended for project files and host-side backup or file access.
+The HOME volume contains user-installed pnpm, pipx, uv, Go, and other project-specific tools. Application state lives under `/data`. The image working directory and `DSH_WORKSPACE` both default to `/workspace`; the web **Add workspace** dialog also opens there, and its `Home` shortcut resolves to `/workspace`. `/home/node` is the user HOME and persistent tool volume, not the default project directory. The workspace bind is intended for project files and host-side backup or file access.
 
 Docker CLI, Compose, and Buildx work against a remote `DOCKER_HOST` without additional mounts. To control the host Docker daemon, explicitly add:
 
@@ -377,7 +378,7 @@ is no longer needed.
 
 ## Resource use
 
-The authenticated amd64 smoke tests currently settle around `167-180 MiB` and about `20-21` PIDs. The workstation toolchains are dormant, so they do not materially raise idle memory, but they do raise disk use: the current local amd64 Docker sizes are about `700 MB` for the lightweight image and `2.59 GB` for the workstation image before registry compression. Debian rebuilds can move those figures.
+The authenticated amd64 smoke tests currently settle around `167-180 MiB` and about `20-21` PIDs. The workstation toolchains are dormant, so they do not materially raise idle memory, but they do raise disk use: current local amd64 Docker sizes are about `670-700 MB` for the lightweight image and `2.1-2.2 GB` for the workstation image before registry compression, depending on the resolved DSH release. Debian rebuilds can move those figures.
 
 The CI ceiling remains `256 MiB` for the idle flow. This is not a workload limit: terminals, repositories, language servers, compilers, and model tools can require substantially more memory.
 
@@ -428,7 +429,7 @@ deepseek-harness-builder/scripts/workstation-smoke-test.sh \
   --image deepseek-harness-workstation:local
 ```
 
-The Compose contract check parses both socket-switch states and proves that the package-local state bind is mounted directly at `/data`, that one named volume is mounted directly at `/home/node`, that the package-local workspace is mounted directly at `/workspace`, the default socket source is `/dev/null`, the enabled source is `/var/run/docker.sock`, and the HTTP port remains loopback-bound. The workstation-specific image test compiles and runs C, C++, Go, and Rust probes, creates a Python virtual environment, checks normal and login-shell PATH behavior, verifies the CLI set, confirms all Docker client binaries use the pinned Go toolchain without the legacy daemon module, confirms Docker has no daemon access by default, characterizes optional socket-group mapping with an isolated Unix socket, verifies that the image declares only `/home/node`, and confirms that HOME, application state, and workspace are real writable directories rather than symbolic links. It also runs the installed DSH sandbox executor under `no-new-privileges`: `workspace-write` must permit a project write and deny a writable path outside the workspace, while an explicit `danger-full-access` retry must permit that outside write without adding container privileges.
+The Compose contract check parses both socket-switch states and proves that the package-local state bind is mounted directly at `/data`, that one named volume is mounted directly at `/home/node`, that the package-local workspace is mounted directly at `/workspace`, the default socket source is `/dev/null`, the enabled source is `/var/run/docker.sock`, and the HTTP port remains loopback-bound. The workstation-specific image test compiles and runs C, C++, and Go probes, creates a Python virtual environment, verifies the checksum-pinned actionlint, yq, uv/uvx, and Ruff tools, checks normal and login-shell PATH behavior, verifies the CLI set, confirms Rust and Cargo remain absent, confirms all Docker client binaries use the pinned Go toolchain without the legacy daemon module, confirms Docker has no daemon access by default, characterizes optional socket-group mapping with an isolated Unix socket, verifies that the image declares only `/home/node`, and confirms that HOME, application state, and workspace are real writable directories rather than symbolic links. It also runs the installed DSH sandbox executor under `no-new-privileges`: `workspace-write` must permit a project write and deny a writable path outside the workspace, while an explicit `danger-full-access` retry must permit that outside write without adding container privileges.
 
 Run the Caddy vulnerability gate after building the image:
 

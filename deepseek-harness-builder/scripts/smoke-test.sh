@@ -920,8 +920,22 @@ check_runtime_versions() {
             || fail "npx is not pinned to 11.19.0"
         [[ "$(docker exec "${container_name}" go version)" == go\ version\ go1.26.6* ]] \
             || fail "Go version is not pinned to 1.26.6"
-        [[ "$(docker exec "${container_name}" rustc --version)" == rustc\ 1.97.1* ]] \
-            || fail "Rust version is not pinned to 1.97.1"
+        if docker exec "${container_name}" sh -c 'command -v rustc >/dev/null 2>&1'; then
+            fail "Rust compiler is unexpectedly present in the workstation image"
+        fi
+        if docker exec "${container_name}" sh -c 'command -v cargo >/dev/null 2>&1'; then
+            fail "Cargo is unexpectedly present in the workstation image"
+        fi
+        [[ "$(docker exec "${container_name}" actionlint -version | head -n 1)" == "1.7.12" ]] \
+            || fail "actionlint is not pinned to 1.7.12"
+        docker exec "${container_name}" yq --version | grep -Fq 'version v4.53.6' \
+            || fail "yq is not pinned to 4.53.6"
+        docker exec "${container_name}" uv --version | grep -Fq 'uv 0.12.5 ' \
+            || fail "uv is not pinned to 0.12.5"
+        docker exec "${container_name}" uvx --version | grep -Fq 'uvx 0.12.5 ' \
+            || fail "uvx is not pinned to 0.12.5"
+        [[ "$(docker exec "${container_name}" ruff --version)" == "ruff 0.16.3" ]] \
+            || fail "Ruff is not pinned to 0.16.3"
         [[ "$(docker exec "${container_name}" docker --version)" == Docker\ version\ 29.7.2,* ]] \
             || fail "Docker CLI is not pinned to 29.7.2"
         docker exec "${container_name}" docker compose version | grep -Fq 'Docker Compose version v5.5.0' \
@@ -931,7 +945,10 @@ check_runtime_versions() {
         if docker exec "${container_name}" test -S /var/run/docker.sock; then
             fail "Docker daemon socket is unexpectedly mounted by default"
         fi
-        for command_name in python3 gcc g++ make cargo cmake clang docker gh shellcheck shfmt fd bat fzf tmux sqlite3; do
+        for command_name in \
+            python3 gcc g++ make cmake ninja clang clang-format docker gh \
+            actionlint yq uv uvx ruff just hyperfine entr shellcheck shfmt \
+            fd bat fzf tmux sqlite3 ncdu pigz mtr; do
             docker exec "${container_name}" sh -c "command -v '${command_name}' >/dev/null 2>&1" \
                 || fail "workstation tool is missing: ${command_name}"
         done

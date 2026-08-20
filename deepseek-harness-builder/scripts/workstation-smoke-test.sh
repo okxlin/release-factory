@@ -234,10 +234,18 @@ pass "home, /data application state, and workspace use direct directories withou
 [[ "$(npx --version)" == "11.19.0" ]] || fail "npx version drifted"
 [[ "$(pnpm --version)" == "11.22.0" ]] || fail "pnpm version drifted"
 [[ "$(go version)" == go\ version\ go1.26.6* ]] || fail "Go version drifted"
-[[ "$(rustc --version)" == rustc\ 1.97.1* ]] || fail "Rust version drifted"
 python3 --version | grep -Fxq 'Python 3.12.14' || fail "Python is not pinned to 3.12.14"
 python3 -m pytest --version | grep -Fxq 'pytest 9.1.1' || fail "pytest is not available for Python 3.12.14"
+command -v rustc >/dev/null 2>&1 && fail "Rust compiler should not be installed"
+command -v cargo >/dev/null 2>&1 && fail "Cargo should not be installed"
 pass "pinned language runtimes are executable"
+
+[[ "$(actionlint -version | head -n 1)" == "1.7.12" ]] || fail "actionlint version drifted"
+yq --version | grep -Fq 'version v4.53.6' || fail "yq version drifted"
+uv --version | grep -Fq 'uv 0.12.5 ' || fail "uv version drifted"
+uvx --version | grep -Fq 'uvx 0.12.5 ' || fail "uvx version drifted"
+[[ "$(ruff --version)" == "ruff 0.16.3" ]] || fail "Ruff version drifted"
+pass "checksum-pinned standalone development tools are executable"
 
 docker --version | grep -Fq 'Docker version 29.7.2,' || fail "Docker CLI version drifted"
 docker compose version | grep -Fq 'Docker Compose version v5.5.0' \
@@ -259,7 +267,7 @@ for docker_binary in \
 done
 pass "Docker CLI, Compose, and Buildx use the hardened client-only dependency graph without default daemon access"
 
-bash -lc 'command -v go >/dev/null && command -v rustc >/dev/null && command -v npm >/dev/null && command -v npx >/dev/null && command -v pnpm >/dev/null' \
+bash -lc 'command -v go >/dev/null && command -v npm >/dev/null && command -v npx >/dev/null && command -v pnpm >/dev/null && ! command -v rustc >/dev/null && ! command -v cargo >/dev/null' \
     || fail "login shells lose workstation tool paths"
 pass "login shells retain workstation tool paths"
 
@@ -284,13 +292,7 @@ import "fmt"
 func main() { fmt.Println("go-ok") }
 EOF
 [[ "$(go run "${tmp_dir}/hello.go")" == "go-ok" ]] || fail "Go compilation output is invalid"
-
-cat > "${tmp_dir}/hello.rs" <<'EOF'
-fn main() { println!("rust-ok"); }
-EOF
-rustc "${tmp_dir}/hello.rs" -o "${tmp_dir}/hello-rust"
-[[ "$("${tmp_dir}/hello-rust")" == "rust-ok" ]] || fail "Rust compilation output is invalid"
-pass "Go and Rust compilation works"
+pass "Go compilation works"
 
 python3 -m venv "${tmp_dir}/venv"
 [[ "$("${tmp_dir}/venv/bin/python" -c 'print("python-ok")')" == "python-ok" ]] \
@@ -298,10 +300,27 @@ python3 -m venv "${tmp_dir}/venv"
 "${tmp_dir}/venv/bin/pip" --version >/dev/null
 pass "Python venv and pip work"
 
+mkdir -p "${tmp_dir}/.github/workflows"
+cat > "${tmp_dir}/.github/workflows/ci.yml" <<'EOF'
+name: CI
+on: [push]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+EOF
+actionlint "${tmp_dir}/.github/workflows/ci.yml"
+[[ "$(printf 'tool: yq\n' | yq '.tool')" == "yq" ]] || fail "yq cannot parse YAML"
+printf 'value = 1\n' > "${tmp_dir}/ruff-probe.py"
+ruff check --isolated "${tmp_dir}/ruff-probe.py" >/dev/null
+pass "GitHub Actions, YAML, and Python quality tools handle minimal inputs"
+
 for command_name in \
-    bat clang cmake direnv fd fzf gdb gh git-lfs htop lsof ninja \
-    patch pipx pkg-config pre-commit rsync shellcheck shfmt sqlite3 \
-    strace tmux tree vim wget yamllint zip zstd; do
+    actionlint bat clang clang-format cmake direnv entr fd fzf gdb gh \
+    git-lfs htop hyperfine just lsof mtr ncdu ninja patch pigz pipx \
+    pkg-config pre-commit rsync ruff shellcheck shfmt sqlite3 strace \
+    tmux tree uv uvx vim wget yamllint yq zip zstd; do
     command -v "${command_name}" >/dev/null 2>&1 \
         || fail "development CLI is missing: ${command_name}"
 done

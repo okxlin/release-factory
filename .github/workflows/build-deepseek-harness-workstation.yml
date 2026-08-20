@@ -176,7 +176,7 @@ jobs:
           tags: ${{ steps.params.outputs.tags }}
           labels: |
             org.opencontainers.image.title=DeepSeek Harness Workstation
-            org.opencontainers.image.description=Authenticated DeepSeek Harness workstation with Node.js, Python, Go, Rust, compilers, Docker client tools, and development CLI.
+            org.opencontainers.image.description=Authenticated DeepSeek Harness workstation with Node.js, Python, Go, native compilers, Docker client tools, and development CLI.
             org.opencontainers.image.vendor=${{ github.repository_owner }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
 

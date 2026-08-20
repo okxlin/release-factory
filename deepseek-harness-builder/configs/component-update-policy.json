@@ -151,10 +151,35 @@
       }
     },
     {
-      "name": "Rust",
-      "pin": "RUST_VERSION",
+      "name": "actionlint",
+      "pin": "ACTIONLINT_VERSION",
       "source": {
-        "type": "rust_stable"
+        "type": "github_release",
+        "repo": "rhysd/actionlint"
+      }
+    },
+    {
+      "name": "yq v4",
+      "pin": "YQ_VERSION",
+      "source": {
+        "type": "github_release",
+        "repo": "mikefarah/yq"
+      }
+    },
+    {
+      "name": "uv",
+      "pin": "UV_VERSION",
+      "source": {
+        "type": "github_release",
+        "repo": "astral-sh/uv"
+      }
+    },
+    {
+      "name": "Ruff",
+      "pin": "RUFF_VERSION",
+      "source": {
+        "type": "github_release",
+        "repo": "astral-sh/ruff"
       }
     }
   ]

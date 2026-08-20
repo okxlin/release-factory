@@ -316,11 +316,6 @@ FROM golang:1.26.6-trixie@sha256:b75d466dd608587fd66cca705a307ba65b889827d06ad61
 
 RUN go version | grep -F 'go1.26.6'
 
-FROM rust:1.97.1-slim-trixie@sha256:8e8cf8f7fd54a2d23d5a743b3a03f56e26b6c774276c33fa0595111704ebb15c AS rust-toolchain
-
-RUN rustc --version | grep -F 'rustc 1.97.1 ' \
-    && cargo --version | grep -F 'cargo 1.97.1 '
-
 FROM node:24.19.0-trixie-slim@sha256:0711b541c1c33a8a530ac4f0d391baa9a15b3d804695b1b24a47daa5fb60e74d AS runtime-base
 
 ARG CADDY_VERSION=2.11.4
@@ -401,6 +396,110 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=45s --retries=4 CMD ["hea
 STOPSIGNAL SIGTERM
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 
+FROM go-toolchain AS workstation-tools
+
+ARG TARGETARCH
+ARG ACTIONLINT_VERSION=1.7.12
+ARG ACTIONLINT_SOURCE_SHA256=454800bd4f854592bcfe79b161f71d56e35940eb7016e48a26dd356adc9d400a
+ARG RUFF_VERSION=0.16.3
+ARG RUFF_SHA256_AMD64=7ab3b978d2c0b1c96b2323d4e5c4f35284ae1cdf35d2f7399595c74c805f5fa3
+ARG RUFF_SHA256_ARM64=b9cc833f5db856484b38718c9da195a6ec990707307bda30530913a09705419a
+ARG UV_VERSION=0.12.5
+ARG UV_SHA256_AMD64=68a509da24b06b4223a1c0175fb5eb5bc79342b76cbeff0cfe51ac3f5b17b6b2
+ARG UV_SHA256_ARM64=9bf43b4d1a07665bf64d4c4e710930b382321a785e0eb10aac07f46471f86a31
+ARG YQ_VERSION=4.53.6
+ARG YQ_SHA256_AMD64=c5f056448f973ae7d39b5401949648a78f2dc1947d6a8eb65be60d5c504b9385
+ARG YQ_SHA256_ARM64=88a1016bc1d657375a35864e4f44b6f333df8ff97b559f51bba0adcb2169df09
+
+RUN case "${TARGETARCH}" in \
+        amd64) \
+            astral_arch=x86_64; \
+            ruff_sha256="${RUFF_SHA256_AMD64}"; \
+            uv_sha256="${UV_SHA256_AMD64}"; \
+            yq_arch=amd64; \
+            yq_sha256="${YQ_SHA256_AMD64}" \
+            ;; \
+        arm64) \
+            astral_arch=aarch64; \
+            ruff_sha256="${RUFF_SHA256_ARM64}"; \
+            uv_sha256="${UV_SHA256_ARM64}"; \
+            yq_arch=arm64; \
+            yq_sha256="${YQ_SHA256_ARM64}" \
+            ;; \
+        *) \
+            printf 'unsupported workstation tool architecture: %s\n' "${TARGETARCH}" >&2; \
+            exit 1 \
+            ;; \
+    esac \
+    && install -d \
+        /out/bin \
+        /out/licenses/actionlint \
+        /out/licenses/ruff \
+        /out/licenses/uv \
+        /out/licenses/yq \
+        /tmp/actionlint-source \
+    && curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLo /tmp/actionlint-source.tar.gz \
+        "https://codeload.github.com/rhysd/actionlint/tar.gz/refs/tags/v${ACTIONLINT_VERSION}" \
+    && printf '%s  %s\n' "${ACTIONLINT_SOURCE_SHA256}" /tmp/actionlint-source.tar.gz | sha256sum -c - \
+    && tar -xzf /tmp/actionlint-source.tar.gz -C /tmp/actionlint-source --strip-components=1 \
+    && grep -Fxq 'module github.com/rhysd/actionlint' /tmp/actionlint-source/go.mod \
+    && cd /tmp/actionlint-source \
+    && go mod download \
+    && go mod verify \
+    && CGO_ENABLED=0 go build \
+        -mod=readonly \
+        -trimpath \
+        -ldflags="-s -w -X github.com/rhysd/actionlint.version=${ACTIONLINT_VERSION}" \
+        -o /out/bin/actionlint \
+        ./cmd/actionlint \
+    && cd / \
+    && install -m 0644 /tmp/actionlint-source/LICENSE.txt /out/licenses/actionlint/LICENSE.txt \
+    && curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLo /tmp/yq \
+        "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${yq_arch}" \
+    && printf '%s  %s\n' "${yq_sha256}" /tmp/yq | sha256sum -c - \
+    && install -m 0755 /tmp/yq /out/bin/yq \
+    && curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLo /tmp/yq-license \
+        "https://raw.githubusercontent.com/mikefarah/yq/v${YQ_VERSION}/LICENSE" \
+    && printf '%s  %s\n' \
+        '697db34dabb21562fe84487a2ccd031fbd45382b89c2cbdec8ef31682c486040' \
+        /tmp/yq-license | sha256sum -c - \
+    && install -m 0644 /tmp/yq-license /out/licenses/yq/LICENSE \
+    && curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLo /tmp/uv.tar.gz \
+        "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${astral_arch}-unknown-linux-gnu.tar.gz" \
+    && printf '%s  %s\n' "${uv_sha256}" /tmp/uv.tar.gz | sha256sum -c - \
+    && tar -xzf /tmp/uv.tar.gz -C /tmp \
+    && install -m 0755 "/tmp/uv-${astral_arch}-unknown-linux-gnu/uv" /out/bin/uv \
+    && install -m 0755 "/tmp/uv-${astral_arch}-unknown-linux-gnu/uvx" /out/bin/uvx \
+    && curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLo /tmp/uv-license-mit \
+        "https://raw.githubusercontent.com/astral-sh/uv/${UV_VERSION}/LICENSE-MIT" \
+    && printf '%s  %s\n' \
+        '860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c' \
+        /tmp/uv-license-mit | sha256sum -c - \
+    && install -m 0644 /tmp/uv-license-mit /out/licenses/uv/LICENSE-MIT \
+    && curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLo /tmp/uv-license-apache \
+        "https://raw.githubusercontent.com/astral-sh/uv/${UV_VERSION}/LICENSE-APACHE" \
+    && printf '%s  %s\n' \
+        'c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4' \
+        /tmp/uv-license-apache | sha256sum -c - \
+    && install -m 0644 /tmp/uv-license-apache /out/licenses/uv/LICENSE-APACHE \
+    && curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLo /tmp/ruff.tar.gz \
+        "https://github.com/astral-sh/ruff/releases/download/${RUFF_VERSION}/ruff-${astral_arch}-unknown-linux-gnu.tar.gz" \
+    && printf '%s  %s\n' "${ruff_sha256}" /tmp/ruff.tar.gz | sha256sum -c - \
+    && tar -xzf /tmp/ruff.tar.gz -C /tmp \
+    && install -m 0755 "/tmp/ruff-${astral_arch}-unknown-linux-gnu/ruff" /out/bin/ruff \
+    && curl --proto '=https' --proto-redir '=https' --tlsv1.2 -fsSLo /tmp/ruff-license \
+        "https://raw.githubusercontent.com/astral-sh/ruff/${RUFF_VERSION}/LICENSE" \
+    && printf '%s  %s\n' \
+        '2597d854122b77ddc71971564ca2350a37608575ce324adc5650a2b2051c8f18' \
+        /tmp/ruff-license | sha256sum -c - \
+    && install -m 0644 /tmp/ruff-license /out/licenses/ruff/LICENSE \
+    && /out/bin/actionlint -version | grep -Fx "${ACTIONLINT_VERSION}" \
+    && go version -m /out/bin/actionlint | grep -F 'go1.26.6' \
+    && /out/bin/yq --version | grep -F "version v${YQ_VERSION}" \
+    && /out/bin/uv --version | grep -F "uv ${UV_VERSION} " \
+    && /out/bin/uvx --version | grep -F "uvx ${UV_VERSION} " \
+    && /out/bin/ruff --version | grep -Fx "ruff ${RUFF_VERSION}"
+
 FROM runtime-base AS workstation
 
 WORKDIR /
@@ -413,10 +512,8 @@ ARG NPM_VERSION=11.19.0
 ARG PYTHON_VERSION=3.12.14
 ARG PYTEST_VERSION=9.1.1
 ARG PNPM_VERSION=11.22.0
-ARG RUST_VERSION=1.97.1
 
-ENV CARGO_HOME=/home/node/.cargo \
-    AUTH_STATE_DIR=/data/auth \
+ENV AUTH_STATE_DIR=/data/auth \
     CADDY_CONFIG_HOME=/data/caddy/config \
     CADDY_DATA_HOME=/data/caddy/data \
     DSH_IMAGE_VARIANT=workstation \
@@ -424,16 +521,15 @@ ENV CARGO_HOME=/home/node/.cargo \
     GOPATH=/home/node/go \
     PIPX_BIN_DIR=/home/node/.local/bin \
     PIPX_HOME=/home/node/.local/pipx \
-    RUSTUP_HOME=/usr/local/rustup \
-    PATH=/home/node/.local/bin:/home/node/go/bin:/home/node/.cargo/bin:/usr/local/go/bin:/usr/local/cargo/bin:/home/node/.local/share/pnpm:/opt/dsh/node_modules/.bin:${PATH}
+    PATH=/home/node/.local/bin:/home/node/go/bin:/usr/local/go/bin:/home/node/.local/share/pnpm:/opt/dsh/node_modules/.bin:${PATH}
 
 COPY --from=go-toolchain /usr/local/go /usr/local/go
-COPY --from=rust-toolchain /usr/local/cargo /usr/local/cargo
-COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
 COPY --from=docker-tools-builder /out/docker /usr/local/bin/docker
 COPY --from=docker-tools-builder /out/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
 COPY --from=docker-tools-builder /out/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
 COPY --from=docker-tools-builder /licenses /usr/share/licenses/deepseek-harness-docker
+COPY --from=workstation-tools /out/bin/ /usr/local/bin/
+COPY --from=workstation-tools /out/licenses/ /usr/share/licenses/deepseek-harness-workstation-tools/
 COPY --from=python-toolchain /usr/local /usr/local
 COPY --from=npm-bundle /opt/npm /opt/npm
 
@@ -445,17 +541,21 @@ RUN apt-get update \
         bind9-dnsutils \
         build-essential \
         clang \
+        clang-format \
         cmake \
         diffutils \
         direnv \
+        entr \
         fd-find \
         fzf \
         gdb \
         gh \
         git-lfs \
         htop \
+        hyperfine \
         iproute2 \
         iputils-ping \
+        just \
         libbz2-dev \
         libffi-dev \
         liblzma-dev \
@@ -464,10 +564,13 @@ RUN apt-get update \
         libssl-dev \
         libtool \
         lsof \
+        mtr-tiny \
+        ncdu \
         netcat-openbsd \
         ninja-build \
         openssl \
         patch \
+        pigz \
         pipx \
         pkg-config \
         pre-commit \
@@ -502,8 +605,6 @@ RUN apt-get update \
     && ln -s /usr/bin/batcat /usr/local/bin/bat \
     && install -d -m 0750 -o node -g node \
         /home/node/.cache \
-        /home/node/.cargo \
-        /home/node/.cargo/bin \
         /home/node/.local \
         /home/node/.local/bin \
         /home/node/.local/pipx \
@@ -517,11 +618,11 @@ RUN apt-get update \
     && docker compose version | grep -F "Docker Compose version v${DOCKER_COMPOSE_VERSION}" \
     && docker buildx version | grep -F "github.com/docker/buildx v${DOCKER_BUILDX_VERSION} " \
     && go version | grep -F "go${GO_VERSION}" \
-    && rustc --version | grep -F "rustc ${RUST_VERSION} " \
-    && cargo --version | grep -F "cargo ${RUST_VERSION} " \
     && python3 --version | grep -Fx "Python ${PYTHON_VERSION}" \
     && python3 -m pytest --version | grep -Fx "pytest ${PYTEST_VERSION}" \
     && gcc --version \
+    && ! command -v rustc \
+    && ! command -v cargo \
     && ! command -v corepack
 
 COPY profile.d/workstation.sh /etc/profile.d/deepseek-harness-workstation.sh

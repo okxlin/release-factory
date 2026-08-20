@@ -45,6 +45,31 @@ cp -- "${source_dockerfile}" "${missing_npm_pin}"
 sed -i '/^ARG NPM_VERSION=/d' "${missing_npm_pin}"
 expect_failure 'missing-npm-pin' "${missing_npm_pin}" 'required ARG NPM_VERSION is missing'
 
+missing_actionlint_pin="${tmp_dir}/missing-actionlint-pin.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_actionlint_pin}"
+sed -i '/^ARG ACTIONLINT_VERSION=/d' "${missing_actionlint_pin}"
+expect_failure 'missing-actionlint-pin' "${missing_actionlint_pin}" 'required ARG ACTIONLINT_VERSION is missing'
+
+bad_uv_arch_checksum="${tmp_dir}/bad-uv-arch-checksum.Dockerfile"
+cp -- "${source_dockerfile}" "${bad_uv_arch_checksum}"
+sed -i 's/^ARG UV_SHA256_ARM64=.*/ARG UV_SHA256_ARM64=deadbeef/' "${bad_uv_arch_checksum}"
+expect_failure 'bad-uv-arch-checksum' "${bad_uv_arch_checksum}" 'ARG UV_SHA256_ARM64 must be a lowercase SHA-256 digest'
+
+bad_actionlint_source_checksum="${tmp_dir}/bad-actionlint-source-checksum.Dockerfile"
+cp -- "${source_dockerfile}" "${bad_actionlint_source_checksum}"
+sed -i 's/^ARG ACTIONLINT_SOURCE_SHA256=.*/ARG ACTIONLINT_SOURCE_SHA256=deadbeef/' "${bad_actionlint_source_checksum}"
+expect_failure 'bad-actionlint-source-checksum' "${bad_actionlint_source_checksum}" 'ARG ACTIONLINT_SOURCE_SHA256 must be a lowercase SHA-256 digest'
+
+missing_actionlint_source_verification="${tmp_dir}/missing-actionlint-source-verification.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_actionlint_source_verification}"
+sed -i '/ACTIONLINT_SOURCE_SHA256.*sha256sum -c/d' "${missing_actionlint_source_verification}"
+expect_failure 'missing-actionlint-source-verification' "${missing_actionlint_source_verification}" 'the actionlint source checksum verification'
+
+restored_rust_stage="${tmp_dir}/restored-rust-stage.Dockerfile"
+cp -- "${source_dockerfile}" "${restored_rust_stage}"
+printf '\nFROM rust:1.97.1-slim-trixie@sha256:%s AS compiler\n' "${node_digest:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}" >> "${restored_rust_stage}"
+expect_failure 'restored-rust-stage' "${restored_rust_stage}" 'Dockerfile must not use a Rust base image'
+
 floating_node="${tmp_dir}/floating-node.Dockerfile"
 cp -- "${source_dockerfile}" "${floating_node}"
 sed -i '0,/^FROM node:/s#node:[^@[:space:]]*#node:latest#' "${floating_node}"
