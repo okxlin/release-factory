@@ -35,6 +35,11 @@ cp -- "${source_dockerfile}" "${baseline}"
 bash "${checker}" --dockerfile "${baseline}"
 printf '[component-pins-test] PASS: baseline Dockerfile\n'
 
+missing_x_mod_pin="${tmp_dir}/missing-x-mod-pin.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_x_mod_pin}"
+sed -i '/^ARG X_MOD_VERSION=/d' "${missing_x_mod_pin}"
+expect_failure 'missing-x-mod-pin' "${missing_x_mod_pin}" 'required ARG X_MOD_VERSION is missing'
+
 floating_node="${tmp_dir}/floating-node.Dockerfile"
 cp -- "${source_dockerfile}" "${floating_node}"
 sed -i '0,/^FROM node:/s#node:[^@[:space:]]*#node:latest#' "${floating_node}"

@@ -151,7 +151,8 @@ for name_and_count in \
     'DOCKER_VERSION:2' \
     'GO_VERSION:1' \
     'RUST_VERSION:1' \
-    'MOBY_GO_ARCHIVE_VERSION:1'; do
+    'MOBY_GO_ARCHIVE_VERSION:1' \
+    'X_MOD_VERSION:1'; do
     require_arg "${name_and_count%%:*}" "${name_and_count##*:}"
 done
 
@@ -340,6 +341,9 @@ require_literal \
 require_literal \
     "github.com/moby/go-archive@v\${MOBY_GO_ARCHIVE_VERSION}" \
     'the Buildx go-archive version pin'
+require_literal \
+    "golang.org/x/mod@v\${X_MOD_VERSION}" \
+    'the Buildx and Compose x/mod version pin'
 
 if grep -nE -- '(:latest|refs/heads/(main|master)|@(main|master))' "${dockerfile}" >/dev/null; then
     fail 'Dockerfile contains a forbidden floating source reference'

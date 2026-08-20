@@ -99,6 +99,13 @@ The build explicitly raises it to `0.3.3` (the current release; `0.3.0` and
 later fix `CVE-2026-17106`) and verifies the linked Buildx binary metadata
 before the zero-fixable Trivy gate runs.
 
+Buildx `0.36.1` and Compose `5.5.0` also select `golang.org/x/mod` `0.38.0`,
+which is affected by Go advisories `GO-2026-6179` and `GO-2026-6180`
+([CVE-2026-56865](https://pkg.go.dev/vuln/GO-2026-6179),
+[CVE-2026-56864](https://pkg.go.dev/vuln/GO-2026-6180)). The build raises the
+module to the fixed `0.40.0` release in both client module graphs and verifies
+the selected version in the resulting Buildx and Compose binaries.
+
 This is dependency minimization, not a scanner allowlist: the zero-fixable
 HIGH/CRITICAL threshold remains unchanged. Advisory:
 <https://github.com/moby/moby/security/advisories/GHSA-x744-4wpc-v9h2>.
