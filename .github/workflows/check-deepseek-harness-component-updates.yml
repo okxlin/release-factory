@@ -2,7 +2,7 @@ name: Check DeepSeek Harness Component Updates
 
 on:
   schedule:
-    - cron: "17 2 * * *"
+    - cron: "0 15 * * *"
   workflow_dispatch:
     inputs:
       fail_on_updates:

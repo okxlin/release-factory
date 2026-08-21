@@ -21,7 +21,7 @@ on:
         default: true
         type: boolean
   schedule:
-    - cron: "13 4 * * 0"
+    - cron: "30 11 * * 5"
 
 concurrency:
   group: build-deepseek-harness-workstation-${{ github.ref || github.run_id }}
