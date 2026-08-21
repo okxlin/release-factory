@@ -45,7 +45,7 @@ Both DeepSeek Harness workflows additionally run
 
 - patches go-authcrunch `1.1.41` to remove the unused GPG public-key parser;
 - applies Caddy upstream commit `b2693fb`'s two-line CEL compatibility fix to
-  checksum-verified Caddy `2.11.4` source, then pins `cel-go` `0.30.0` for
+  checksum-verified Caddy `2.11.4` source, then pins `cel-go` `0.31.0` for
   `GO-2026-6094`;
 - retains `golang.org/x/crypto/ssh`;
 - records the actual linked package graph in `CADDY_GO_PACKAGES.txt`;
