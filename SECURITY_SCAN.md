@@ -45,7 +45,7 @@ Both DeepSeek Harness workflows additionally run
 
 - patches go-authcrunch `1.1.41` to remove the unused GPG public-key parser;
 - applies Caddy upstream commit `b2693fb`'s two-line CEL compatibility fix to
-  checksum-verified Caddy `2.11.4` source, then pins `cel-go` `0.30.0` for
+  checksum-verified Caddy `2.11.4` source, then pins `cel-go` `0.31.0` for
   `GO-2026-6094`;
 - retains `golang.org/x/crypto/ssh`;
 - records the actual linked package graph in `CADDY_GO_PACKAGES.txt`;
@@ -82,7 +82,7 @@ update.
 ## DeepSeek Harness workstation Docker client gate
 
 The workstation image rebuilds Docker CLI `29.7.2`, Compose `5.5.0`, and
-Buildx `0.36.1` from checksum-pinned official source archives with Go `1.26.6`.
+Buildx `0.36.1` from checksum-pinned official source archives with Go `1.27.0`.
 The upstream prebuilt binaries were compiled with Go `1.26.5`, which is inside
 the affected ranges for `CVE-2026-39821` and `CVE-2026-46600`.
 

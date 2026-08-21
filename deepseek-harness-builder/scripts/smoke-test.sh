@@ -918,8 +918,8 @@ check_runtime_versions() {
             || fail "npm is not pinned to 11.19.0"
         [[ "$(docker exec "${container_name}" npx --version)" == "11.19.0" ]] \
             || fail "npx is not pinned to 11.19.0"
-        [[ "$(docker exec "${container_name}" go version)" == go\ version\ go1.26.6* ]] \
-            || fail "Go version is not pinned to 1.26.6"
+        [[ "$(docker exec "${container_name}" go version)" == go\ version\ go1.27.0* ]] \
+            || fail "Go version is not pinned to 1.27.0"
         if docker exec "${container_name}" sh -c 'command -v rustc >/dev/null 2>&1'; then
             fail "Rust compiler is unexpectedly present in the workstation image"
         fi
@@ -934,8 +934,8 @@ check_runtime_versions() {
             || fail "uv is not pinned to 0.12.5"
         docker exec "${container_name}" uvx --version | grep -Fq 'uvx 0.12.5 ' \
             || fail "uvx is not pinned to 0.12.5"
-        [[ "$(docker exec "${container_name}" ruff --version)" == "ruff 0.16.3" ]] \
-            || fail "Ruff is not pinned to 0.16.3"
+        [[ "$(docker exec "${container_name}" ruff --version)" == "ruff 0.16.4" ]] \
+            || fail "Ruff is not pinned to 0.16.4"
         [[ "$(docker exec "${container_name}" docker --version)" == Docker\ version\ 29.7.2,* ]] \
             || fail "Docker CLI is not pinned to 29.7.2"
         docker exec "${container_name}" docker compose version | grep -Fq 'Docker Compose version v5.5.0' \

@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1.26.0@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
 
-FROM caddy:2.11.4-builder-alpine@sha256:c2433c74c0648b47d8a844ff1792661f93996c553687101bbdf89c63a09dccef AS caddy-builder
+FROM caddy:2.11.4-builder-alpine@sha256:7bac9be4072f7c4db2ccc7350750e0705004bf02da2ac7d96b1469ca4f28bb7c AS caddy-builder
 
 ARG CADDY_VERSION=2.11.4
 ARG CADDY_SOURCE_ARCHIVE_SHA256=2c3d02078286a6282cdb4d1d8744077788d556659dac0b64d8ed5886a7e5aeb9
 ARG CADDY_SECURITY_VERSION=1.1.64
-ARG CEL_GO_VERSION=0.30.0
+ARG CEL_GO_VERSION=0.31.0
 ARG GO_AUTHCRUNCH_VERSION=1.1.41
-ARG GRPC_VERSION=1.83.0
+ARG GRPC_VERSION=1.83.1
 ARG KLAUSPOST_COMPRESS_VERSION=1.19.2
 ARG X_TEXT_VERSION=0.41.0
 ARG CADDY_RATELIMIT_REF=5625512f24f6f59d6f64fb3aafe5eecff0b286db
@@ -60,9 +60,9 @@ RUN xcaddy build "v${CADDY_VERSION}" \
     && ./caddy list-modules | grep -Fx 'http.authentication.providers.authorizer' \
     && ./caddy list-modules | grep -Fx 'http.handlers.rate_limit'
 
-RUN PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'google\.golang\.org/grpc[[:space:]]+v1\.83\.0' \
+RUN PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'google\.golang\.org/grpc[[:space:]]+v1\.83\.1' \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'github\.com/klauspost/compress[[:space:]]+v1\.19\.2' \
-    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'github\.com/google/cel-go[[:space:]]+v0\.30\.0' \
+    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'github\.com/google/cel-go[[:space:]]+v0\.31\.0' \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'golang\.org/x/text[[:space:]]+v0\.41\.0' \
     && set -- /tmp/buildenv_* \
     && test "$#" -eq 1 \
@@ -201,7 +201,7 @@ RUN mkdir -p /opt/npm \
     && test "$(node /opt/npm/bin/npx-cli.js --version)" = "${NPM_VERSION}" \
     && rm -f /tmp/npm.tgz
 
-FROM golang:1.26.6-trixie@sha256:b75d466dd608587fd66cca705a307ba65b889827d06ad61d6a75f0482b51b7c7 AS docker-tools-builder
+FROM golang:1.27.0-trixie@sha256:6212da3924947f4b6a939df02ea627c13f338f1a41d6c3fcb0dd9d076eef46c4 AS docker-tools-builder
 
 ARG DOCKER_BUILDX_VERSION=0.36.1
 ARG DOCKER_COMPOSE_VERSION=5.5.0
@@ -241,7 +241,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
             -X github.com/docker/cli/cli/version.BuildTime=unknown" \
         -o /out/docker ./cmd/docker \
     && /out/docker --version | grep -F "Docker version ${DOCKER_VERSION}," \
-    && go version -m /out/docker | grep -F 'go1.26.6'
+    && go version -m /out/docker | grep -F 'go1.27.0'
 
 WORKDIR /usr/src/docker-buildx
 
@@ -272,7 +272,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         -o /out/docker-buildx ./cmd/buildx \
     && /out/docker-buildx version \
         | grep -F "github.com/docker/buildx v${DOCKER_BUILDX_VERSION} " \
-    && go version -m /out/docker-buildx | grep -F 'go1.26.6' \
+    && go version -m /out/docker-buildx | grep -F 'go1.27.0' \
     && go version -m /out/docker-buildx | grep -Eq \
         "github\\.com/moby/go-archive[[:space:]]+v${MOBY_GO_ARCHIVE_VERSION}([[:space:]]|$)" \
     && go version -m /out/docker-buildx | grep -Eq \
@@ -296,7 +296,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         -o /out/docker-compose ./cmd \
     && /out/docker-compose version \
         | grep -F "Docker Compose version v${DOCKER_COMPOSE_VERSION}" \
-    && go version -m /out/docker-compose | grep -F 'go1.26.6' \
+    && go version -m /out/docker-compose | grep -F 'go1.27.0' \
     && go version -m /out/docker-compose | grep -Eq \
         "golang\\.org/x/mod[[:space:]]+v${X_MOD_VERSION}([[:space:]]|$)" \
     && ! go version -m /out/docker-compose \
@@ -312,9 +312,9 @@ RUN printf '%s  %s\n' \
         'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30' \
         /licenses/DOCKER_BUILDX_LICENSE | sha256sum -c -
 
-FROM golang:1.26.6-trixie@sha256:b75d466dd608587fd66cca705a307ba65b889827d06ad61d6a75f0482b51b7c7 AS go-toolchain
+FROM golang:1.27.0-trixie@sha256:6212da3924947f4b6a939df02ea627c13f338f1a41d6c3fcb0dd9d076eef46c4 AS go-toolchain
 
-RUN go version | grep -F 'go1.26.6'
+RUN go version | grep -F 'go1.27.0'
 
 FROM node:24.19.0-trixie-slim@sha256:0711b541c1c33a8a530ac4f0d391baa9a15b3d804695b1b24a47daa5fb60e74d AS runtime-base
 
@@ -401,9 +401,9 @@ FROM go-toolchain AS workstation-tools
 ARG TARGETARCH
 ARG ACTIONLINT_VERSION=1.7.12
 ARG ACTIONLINT_SOURCE_SHA256=454800bd4f854592bcfe79b161f71d56e35940eb7016e48a26dd356adc9d400a
-ARG RUFF_VERSION=0.16.3
-ARG RUFF_SHA256_AMD64=7ab3b978d2c0b1c96b2323d4e5c4f35284ae1cdf35d2f7399595c74c805f5fa3
-ARG RUFF_SHA256_ARM64=b9cc833f5db856484b38718c9da195a6ec990707307bda30530913a09705419a
+ARG RUFF_VERSION=0.16.4
+ARG RUFF_SHA256_AMD64=9cb1234804ddb0f7f57cef3f81623ce5acb990e40af7cce08dc7778c9d7ee96c
+ARG RUFF_SHA256_ARM64=08eb65c07016f1b6d2a874777492a230c7d5822bdf34030af217825b57911b0a
 ARG UV_VERSION=0.12.5
 ARG UV_SHA256_AMD64=68a509da24b06b4223a1c0175fb5eb5bc79342b76cbeff0cfe51ac3f5b17b6b2
 ARG UV_SHA256_ARM64=9bf43b4d1a07665bf64d4c4e710930b382321a785e0eb10aac07f46471f86a31
@@ -494,7 +494,7 @@ RUN case "${TARGETARCH}" in \
         /tmp/ruff-license | sha256sum -c - \
     && install -m 0644 /tmp/ruff-license /out/licenses/ruff/LICENSE \
     && /out/bin/actionlint -version | grep -Fx "${ACTIONLINT_VERSION}" \
-    && go version -m /out/bin/actionlint | grep -F 'go1.26.6' \
+    && go version -m /out/bin/actionlint | grep -F 'go1.27.0' \
     && /out/bin/yq --version | grep -F "version v${YQ_VERSION}" \
     && /out/bin/uv --version | grep -F "uv ${UV_VERSION} " \
     && /out/bin/uvx --version | grep -F "uvx ${UV_VERSION} " \
@@ -507,7 +507,7 @@ WORKDIR /
 ARG DOCKER_BUILDX_VERSION=0.36.1
 ARG DOCKER_COMPOSE_VERSION=5.5.0
 ARG DOCKER_VERSION=29.7.2
-ARG GO_VERSION=1.26.6
+ARG GO_VERSION=1.27.0
 ARG NPM_VERSION=11.19.0
 ARG PYTHON_VERSION=3.12.14
 ARG PYTEST_VERSION=9.1.1

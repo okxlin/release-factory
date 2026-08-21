@@ -233,7 +233,7 @@ pass "home, /data application state, and workspace use direct directories withou
 [[ "$(npm --version)" == "11.19.0" ]] || fail "npm version drifted"
 [[ "$(npx --version)" == "11.19.0" ]] || fail "npx version drifted"
 [[ "$(pnpm --version)" == "11.22.0" ]] || fail "pnpm version drifted"
-[[ "$(go version)" == go\ version\ go1.26.6* ]] || fail "Go version drifted"
+[[ "$(go version)" == go\ version\ go1.27.0* ]] || fail "Go version drifted"
 python3 --version | grep -Fxq 'Python 3.12.14' || fail "Python is not pinned to 3.12.14"
 python3 -m pytest --version | grep -Fxq 'pytest 9.1.1' || fail "pytest is not available for Python 3.12.14"
 command -v rustc >/dev/null 2>&1 && fail "Rust compiler should not be installed"
@@ -244,7 +244,7 @@ pass "pinned language runtimes are executable"
 yq --version | grep -Fq 'version v4.53.6' || fail "yq version drifted"
 uv --version | grep -Fq 'uv 0.12.5 ' || fail "uv version drifted"
 uvx --version | grep -Fq 'uvx 0.12.5 ' || fail "uvx version drifted"
-[[ "$(ruff --version)" == "ruff 0.16.3" ]] || fail "Ruff version drifted"
+[[ "$(ruff --version)" == "ruff 0.16.4" ]] || fail "Ruff version drifted"
 pass "checksum-pinned standalone development tools are executable"
 
 docker --version | grep -Fq 'Docker version 29.7.2,' || fail "Docker CLI version drifted"
@@ -258,7 +258,7 @@ for docker_binary in \
     /usr/local/libexec/docker/cli-plugins/docker-buildx \
     /usr/local/libexec/docker/cli-plugins/docker-compose; do
     binary_metadata="$(go version -m "${docker_binary}")"
-    grep -Fq 'go1.26.6' <<< "${binary_metadata}" \
+    grep -Fq 'go1.27.0' <<< "${binary_metadata}" \
         || fail "Docker tool was not built with the pinned fixed Go release: ${docker_binary}"
     if grep -Eq '^[[:space:]]*dep[[:space:]]+github.com/docker/docker[[:space:]]' \
         <<< "${binary_metadata}"; then
