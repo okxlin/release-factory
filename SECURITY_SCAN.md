@@ -82,7 +82,7 @@ update.
 ## DeepSeek Harness workstation Docker client gate
 
 The workstation image rebuilds Docker CLI `29.7.2`, Compose `5.5.0`, and
-Buildx `0.36.1` from checksum-pinned official source archives with Go `1.26.6`.
+Buildx `0.36.1` from checksum-pinned official source archives with Go `1.27.0`.
 The upstream prebuilt binaries were compiled with Go `1.26.5`, which is inside
 the affected ranges for `CVE-2026-39821` and `CVE-2026-46600`.
 

@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-runtime",
-  "version": "0.1.0-rc.6",
+  "version": "0.1.0-rc.8",
   "private": true,
   "description": "Pinned runtime dependency closure for the DeepSeek Harness container image.",
   "license": "MIT",
@@ -9,6 +9,6 @@
     "node": "24.19.0"
   },
   "dependencies": {
-    "@deepseek-ai/dsh": "0.1.0-rc.6"
+    "@deepseek-ai/dsh": "0.1.0-rc.8"
   }
 }
