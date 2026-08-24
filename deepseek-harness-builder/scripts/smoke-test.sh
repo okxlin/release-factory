@@ -269,6 +269,52 @@ process.stdout.write('[smoke] PASS: directory picker defaults to /workspace\n');
 NODE
 }
 
+assert_authenticated_settings_patch() {
+    docker exec \
+        --user node \
+        -i "${container_name}" node --input-type=module - <<'NODE'
+import assert from 'node:assert/strict';
+import { readFile, readdir } from 'node:fs/promises';
+import { join } from 'node:path';
+
+const pnpmRoot = '/opt/dsh/node_modules/.pnpm';
+const entries = await readdir(pnpmRoot, { withFileTypes: true });
+
+function packageRoot(prefix, packageName) {
+  const packages = entries.filter(
+    (entry) => entry.isDirectory() && entry.name.startsWith(prefix),
+  );
+  assert.equal(packages.length, 1, `${packageName} package count`);
+  return join(pnpmRoot, packages[0].name, 'node_modules', '@deepseek-ai', packageName);
+}
+
+const settingsRoot = packageRoot(
+  '@deepseek-ai+dsh-client-ui-settings@',
+  'dsh-client-ui-settings',
+);
+const settingsSource = await readFile(join(settingsRoot, 'lib', 'client.js'), 'utf8');
+const remoteGate = 'globalThis.__DSH_AUTHENTICATED_SETTINGS__ === true';
+assert.equal(settingsSource.split(remoteGate).length - 1, 2,
+  'settings mirror and namespace scopes carry the authenticated-proxy gate');
+assert(!settingsSource.includes('connection.isLoopback ? "host" : "memory"'),
+  'settings persistence no longer depends exclusively on browser loopback');
+
+const frontendRoot = packageRoot(
+  '@deepseek-ai+dsh-web-frontend@',
+  'dsh-web-frontend',
+);
+const html = await readFile(join(frontendRoot, 'dist', 'index.html'), 'utf8');
+const bootstrap = '<script src="/dsh-deployment.js"></script>';
+const bootstrapIndex = html.indexOf(bootstrap);
+const moduleIndex = html.indexOf('<script type="module"');
+assert(bootstrapIndex >= 0, 'web frontend loads the deployment capability bootstrap');
+assert(moduleIndex >= 0 && bootstrapIndex < moduleIndex,
+  'deployment capability loads before the DSH module graph');
+
+process.stdout.write('[smoke] PASS: authenticated settings compatibility patch is installed\n');
+NODE
+}
+
 run_http_contract() {
     docker exec \
         -e SMOKE_PROFILE="${PROFILE}" \
@@ -474,19 +520,19 @@ async function login() {
   return jar;
 }
 
-async function settingsDescribe(jar) {
+async function rpc(method, payload, jar, origin = publicOrigin.origin) {
   const body = JSON.stringify({
     type: 'client-request',
-    rpcId: 'smoke-settings-describe',
-    method: 'settings.describe',
-    payload: {},
+    rpcId: `smoke-${method}`,
+    method,
+    payload,
   });
-  return request('/api/settings.describe', {
+  return request(`/api/${method}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Content-Length': Buffer.byteLength(body),
-      Origin: publicOrigin.origin,
+      Origin: origin,
     },
     body,
   }, jar);
@@ -531,6 +577,18 @@ function websocket(path, jar) {
   assert(health.status === 200 && health.body === 'ok', 'public health endpoint responds');
 
   if (profile === 'full') {
+    const unauthenticatedSettings = await rpc(
+      'settings.describe',
+      {},
+      new CookieJar(),
+    );
+    assert(unauthenticatedSettings.status === 302,
+      'unauthenticated settings API redirects to authentication');
+
+    const unauthenticatedBootstrap = await request('/dsh-deployment.js');
+    assert(unauthenticatedBootstrap.status === 302,
+      'deployment capability bootstrap requires authentication');
+
     const spoof = await request('/', {
       headers: {
         Authorization: 'Bearer forged-token',
@@ -552,11 +610,58 @@ function websocket(path, jar) {
   const jar = await login();
 
   if (profile === 'full') {
-    const settings = await settingsDescribe(jar);
+    const deployment = await request('/dsh-deployment.js', {}, jar);
+    assert(deployment.status === 200,
+      'authenticated deployment capability bootstrap loads');
+    assert((deployment.headers['content-type'] || '').includes('javascript'),
+      'deployment capability bootstrap uses a JavaScript media type');
+    assert(deployment.body.includes('__DSH_AUTHENTICATED_SETTINGS__ = true'),
+      'deployment capability enables authenticated settings');
+
+    const settings = await rpc('settings.describe', {}, jar);
     assert(settings.status === 200,
       'authenticated settings API reaches DeepSeek Harness through Caddy');
     assert(JSON.parse(settings.body).result?.ok === true,
-      'authenticated settings API returns the provider catalog payload');
+      'authenticated settings API returns the settings catalog payload');
+
+    const providers = await rpc('llm.providers', {}, jar);
+    const providersEnvelope = JSON.parse(providers.body);
+    assert(providers.status === 200
+      && providersEnvelope.result?.ok === true
+      && Array.isArray(providersEnvelope.result.value?.providers),
+    'model settings provider directory retains the public trusted-host path');
+
+    const credentials = await rpc(
+      'credentials.describe',
+      {refs: ['DEEPSEEK_API_KEY']},
+      jar,
+    );
+    const credentialsEnvelope = JSON.parse(credentials.body);
+    assert(credentials.status === 200
+      && credentialsEnvelope.result?.ok === true
+      && credentialsEnvelope.result.value?.credentials?.DEEPSEEK_API_KEY !== undefined,
+    'authenticated model settings can read a requested credential status');
+
+    const hostDescription = await rpc('host.describe', {}, jar);
+    assert(hostDescription.status === 200
+      && JSON.parse(hostDescription.body).result?.ok === true,
+    'ordinary authenticated API calls retain the public trusted-host path');
+
+    const nativeOpen = await rpc('host.openPath', {}, jar);
+    assert(nativeOpen.status === 403,
+      'authenticated public browsers cannot invoke native host path opening');
+    const settingsDocument = await rpc('settings.openDocument', {}, jar);
+    assert(settingsDocument.status === 403,
+      'authenticated public browsers cannot open the Host settings document');
+
+    const crossOriginSettings = await rpc(
+      'settings.describe',
+      {},
+      jar,
+      'https://evil.example',
+    );
+    assert(crossOriginSettings.status === 403,
+      'authenticated settings proxy rejects a mismatched browser Origin');
 
     assert(await websocket('/api/events.mux', jar) === 101,
       'multiplex WebSocket upgrades through the proxy contract');
@@ -1062,6 +1167,7 @@ wait_for_health
 pass "container became healthy"
 check_runtime_versions
 assert_directory_picker_workspace_default
+assert_authenticated_settings_patch
 run_process_contract
 run_http_contract
 check_auth_file_permissions

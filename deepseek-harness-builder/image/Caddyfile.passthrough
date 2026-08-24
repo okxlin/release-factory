@@ -21,26 +21,52 @@
 		respond "ok" 200
 	}
 
+	route /dsh-deployment.js {
+		header {
+			Content-Type "application/javascript; charset=utf-8"
+			Cache-Control "no-store"
+		}
+		respond "globalThis.__DSH_AUTHENTICATED_SETTINGS__ = true;" 200
+	}
+
 	# Preserve the browser-origin boundary before normalizing the request for
 	# DSH's loopback-only privileged API trust check.
 	@unexpected_origin `{http.request.header.Origin} != "" && {http.request.header.Origin} != "{$PUBLIC_URL}"`
-	respond @unexpected_origin "Forbidden" 403
+	@settings_api path /api/settings.describe /api/settings.update /api/settings.replace /api/settings.mutate /api/credentials.describe /api/credentials.set /api/credentials.unset /api/llm.discoverModels
 
 	# AUTH_MODE=none delegates authentication to a reviewed outer proxy. Present
 	# requests that already passed that boundary to DSH as the loopback proxy
 	# instead of treating a browser-facing Host or Origin as a direct request.
-	reverse_proxy 127.0.0.1:{$DSH_INTERNAL_PORT} {
-		header_up Host 127.0.0.1:{$DSH_INTERNAL_PORT}
-		header_up -Origin
-		header_up -Authorization
-		header_up -Remote-User
-		header_up -X-Auth-User
-		header_up -X-Authenticated-User
-		header_up -X-Email
-		header_up -X-Forwarded-User
-		header_up -X-Roles
-		header_up -X-Remote-User
-		header_up -X-User
-		header_up -X-Webauth-User
+	route @settings_api {
+		respond @unexpected_origin "Forbidden" 403
+		reverse_proxy 127.0.0.1:{$DSH_INTERNAL_PORT} {
+			header_up Host 127.0.0.1:{$DSH_INTERNAL_PORT}
+			header_up -Origin
+			header_up -Authorization
+			header_up -Remote-User
+			header_up -X-Auth-User
+			header_up -X-Authenticated-User
+			header_up -X-Email
+			header_up -X-Forwarded-User
+			header_up -X-Roles
+			header_up -X-Remote-User
+			header_up -X-User
+			header_up -X-Webauth-User
+		}
+	}
+
+	route {
+		reverse_proxy 127.0.0.1:{$DSH_INTERNAL_PORT} {
+			header_up -Authorization
+			header_up -Remote-User
+			header_up -X-Auth-User
+			header_up -X-Authenticated-User
+			header_up -X-Email
+			header_up -X-Forwarded-User
+			header_up -X-Roles
+			header_up -X-Remote-User
+			header_up -X-User
+			header_up -X-Webauth-User
+		}
 	}
 }

@@ -151,6 +151,7 @@ RUN python3 --version | grep -Fx "Python ${PYTHON_VERSION}" \
 WORKDIR /opt/dsh
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY scripts/patch-dsh-directory-picker.mjs /tmp/patch-dsh-directory-picker.mjs
+COPY scripts/patch-dsh-authenticated-settings.mjs /tmp/patch-dsh-authenticated-settings.mjs
 
 RUN corepack enable \
     && corepack prepare "pnpm@${PNPM_VERSION}" --activate \
@@ -158,7 +159,9 @@ RUN corepack enable \
     && test "$(node -p "require('./package.json').dependencies['@deepseek-ai/dsh']")" = "${resolved_dsh_version}" \
     && pnpm install --prod --frozen-lockfile --trust-lockfile \
     && node /tmp/patch-dsh-directory-picker.mjs \
+    && node /tmp/patch-dsh-authenticated-settings.mjs \
     && rm -f /tmp/patch-dsh-directory-picker.mjs \
+        /tmp/patch-dsh-authenticated-settings.mjs \
     && pnpm exec dsh --version | grep -Fx "${resolved_dsh_version}" \
     && node_pty_arch="$(node -p "process.arch")" \
     && case "${node_pty_arch}" in x64|arm64) ;; *) exit 1 ;; esac \

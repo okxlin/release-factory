@@ -290,6 +290,8 @@ Avoid placing a bcrypt hash directly in a Compose `.env` file unless its dollar 
 
 The login form marks the fields with `autocomplete="username"` and `autocomplete="current-password"`, so browser password managers can fill them. Access cookies use `Secure`, `HttpOnly`, and `SameSite=Strict` for normal HTTPS deployments.
 
+After login, Caddy enables the browser settings UI and presents only the settings, credential, and model-discovery RPCs to DSH through its loopback trust boundary. It rejects mismatched browser origins before that normalization. Other APIs retain the public Host and Origin, so native path opening, the Host settings-document opener, and similar loopback-only operations remain unavailable to a remote browser. This compatibility layer is built into the image; upgrading does not require a Compose change.
+
 `AUTH_TOKEN_LIFETIME` accepts `300` through `2592000` seconds (five minutes through 30 days). It controls both the signed access-token lifetime and the browser Cookie lifetime. In the pinned caddy-security implementation, the refresh Cookie does not automatically issue a replacement access token, so expiry requires the user to sign in again. Keep the default one-hour lifetime for short-lived sessions, or select a longer bounded lifetime for a personal workstation.
 
 `AUTH_COOKIE_INSECURE=true` is only for explicitly trusted, isolated HTTP testing. With the current caddy-security behavior it removes both `Secure` and `HttpOnly`, not only `Secure`.
@@ -300,7 +302,7 @@ Current Caddy and caddy-security dependencies are evaluated by the repository [s
 
 Other modes:
 
-- `AUTH_MODE=none` disables the login layer and should be used only behind another reviewed authentication boundary. Caddy presents requests in this mode to DSH as its loopback proxy so the Web UI can manage settings and credentials; anyone able to reach Caddy can therefore reach those privileged APIs. Keep `PORT` private and enforce authentication before traffic reaches the container.
+- `AUTH_MODE=none` disables the login layer and should be used only behind another reviewed authentication boundary. Caddy normalizes the same limited settings, credential, and model-discovery RPC set so the Web UI can manage them; anyone able to reach Caddy can therefore reach those APIs. Other loopback-only operations remain blocked. Keep `PORT` private and enforce authentication before traffic reaches the container.
 - `AUTH_MODE=dsh` is reserved for a future DSH native-password release and currently fails closed. This prevents two authentication systems from silently stacking when native auth is added later.
 
 The generated JWT signing key is stored at `/data/auth/jwt-secret` in both images. Persist the corresponding bind path or volume; otherwise existing sessions are invalidated whenever the container is replaced.
@@ -395,7 +397,7 @@ deepseek-harness-builder/scripts/smoke-test.sh \
   --variant runtime
 ```
 
-The test uses a temporary host bind for `/data` and named test volumes for HOME and workspace. Both variants mount the test workspace directly at `/workspace`; the workstation also mounts HOME directly at `/home/node`. It simulates the 1Panel/OpenResty headers and checks login redirects, browser autofill attributes, wrong-password rejection, protected cookies, forged identity headers, both DSH WebSockets, logout, loopback binding, secret isolation, persistent JWT state, container-recreation persistence, the `/workspace` directory-picker default, resource use, fail-closed configuration errors, the Node.js package-manager contract, and the selected image variant.
+The test uses a temporary host bind for `/data` and named test volumes for HOME and workspace. Both variants mount the test workspace directly at `/workspace`; the workstation also mounts HOME directly at `/home/node`. It simulates the 1Panel/OpenResty headers and checks login redirects, browser autofill attributes, wrong-password rejection, protected cookies, forged identity headers, authenticated settings access, cross-origin rejection, continued denial of unrelated loopback-only APIs, both DSH WebSockets, logout, loopback binding, secret isolation, persistent JWT state, container-recreation persistence, the `/workspace` directory-picker default, resource use, fail-closed configuration errors, the Node.js package-manager contract, and the selected image variant.
 
 For deployments that place authentication in an outer reverse proxy, also run the passthrough contract:
 
