@@ -63,8 +63,22 @@
 	@forwarded_https header X-Forwarded-Proto https
 	header @forwarded_https Strict-Transport-Security "max-age=31536000"
 
+	# Preserve the browser-origin boundary before normalizing authenticated
+	# settings requests for DSH's loopback-only privileged API trust check.
+	@unexpected_origin `{http.request.header.Origin} != "" && {http.request.header.Origin} != "{$PUBLIC_URL}"`
+	@settings_api path /api/settings.describe /api/settings.update /api/settings.replace /api/settings.mutate /api/credentials.describe /api/credentials.set /api/credentials.unset /api/llm.discoverModels
+
 	route /healthz {
 		respond "ok" 200
+	}
+
+	route /dsh-deployment.js {
+		authorize with dsh_policy
+		header {
+			Content-Type "application/javascript; charset=utf-8"
+			Cache-Control "no-store"
+		}
+		respond "globalThis.__DSH_AUTHENTICATED_SETTINGS__ = true;" 200
 	}
 
 	route /auth* {
@@ -94,11 +108,28 @@
 		authenticate with dsh_portal
 	}
 
-	route {
+	route @settings_api {
+		respond @unexpected_origin "Forbidden" 403
 		authorize with dsh_policy
 		reverse_proxy 127.0.0.1:{$DSH_INTERNAL_PORT} {
 			header_up Host 127.0.0.1:{$DSH_INTERNAL_PORT}
 			header_up -Origin
+			header_up -Authorization
+			header_up -Remote-User
+			header_up -X-Auth-User
+			header_up -X-Authenticated-User
+			header_up -X-Email
+			header_up -X-Forwarded-User
+			header_up -X-Roles
+			header_up -X-Remote-User
+			header_up -X-User
+			header_up -X-Webauth-User
+		}
+	}
+
+	route {
+		authorize with dsh_policy
+		reverse_proxy 127.0.0.1:{$DSH_INTERNAL_PORT} {
 			header_up -Authorization
 			header_up -Remote-User
 			header_up -X-Auth-User

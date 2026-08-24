@@ -142,6 +142,31 @@ function assert(condition, message) {
   process.stdout.write(`[passthrough-smoke] PASS: ${message}\n`);
 }
 
+function rawRequest(path, options = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      host: '127.0.0.1',
+      port: 8080,
+      path,
+      method: options.method || 'GET',
+      headers: {...proxyHeaders, ...(options.headers || {})},
+      timeout: 10000,
+    }, res => {
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => resolve({
+        status: res.statusCode,
+        headers: res.headers,
+        body: Buffer.concat(chunks).toString('utf8'),
+      }));
+    });
+
+    req.on('timeout', () => req.destroy(new Error('HTTP request timed out')));
+    req.on('error', reject);
+    req.end(options.body);
+  });
+}
+
 function request(method, payload, origin = publicOrigin.origin) {
   const body = JSON.stringify({
     type: 'client-request',
@@ -149,31 +174,14 @@ function request(method, payload, origin = publicOrigin.origin) {
     method,
     payload,
   });
-  return new Promise((resolve, reject) => {
-    const req = http.request({
-      host: '127.0.0.1',
-      port: 8080,
-      path: `/api/${method}`,
+  return rawRequest(`/api/${method}`, {
       method: 'POST',
       headers: {
-        ...proxyHeaders,
         Origin: origin,
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(body),
       },
-      timeout: 10000,
-    }, res => {
-      const chunks = [];
-      res.on('data', chunk => chunks.push(chunk));
-      res.on('end', () => resolve({
-        status: res.statusCode,
-        body: Buffer.concat(chunks).toString('utf8'),
-      }));
-    });
-
-    req.on('timeout', () => req.destroy(new Error('HTTP request timed out')));
-    req.on('error', reject);
-    req.end(body);
+      body,
   });
 }
 
@@ -203,13 +211,34 @@ async function assertRpcSuccess(method, payload, assertValue) {
 }
 
 (async () => {
+  const deployment = await rawRequest('/dsh-deployment.js');
+  assert(deployment.status === 200,
+    'AUTH_MODE=none serves the reviewed outer-auth deployment capability');
+  assert((deployment.headers['content-type'] || '').includes('javascript'),
+    'deployment capability bootstrap uses a JavaScript media type');
+  assert(deployment.body.includes('__DSH_AUTHENTICATED_SETTINGS__ = true'),
+    'outer-auth deployment capability enables settings');
+
   await assertRpcSuccess('settings.describe', {}, value => {
     assert(Array.isArray(value?.namespaces), 'settings.describe returns the settings namespace catalog');
+  });
+  await assertRpcSuccess('llm.providers', {}, value => {
+    assert(Array.isArray(value?.providers), 'llm.providers returns the model settings provider directory');
   });
   await assertRpcSuccess('credentials.describe', {refs: ['DEEPSEEK_API_KEY']}, value => {
     assert(value?.credentials?.DEEPSEEK_API_KEY !== undefined,
       'credentials.describe returns the requested valid credential reference');
   });
+  await assertRpcSuccess('host.describe', {}, value => {
+    assert(typeof value === 'object' && value !== null,
+      'host.describe returns the public Host description');
+  });
+  const nativeOpen = await request('host.openPath', {});
+  assert(nativeOpen.status === 403,
+    'AUTH_MODE=none public browsers cannot invoke native host path opening');
+  const settingsDocument = await request('settings.openDocument', {});
+  assert(settingsDocument.status === 403,
+    'AUTH_MODE=none public browsers cannot open the Host settings document');
   const crossOrigin = await request('settings.describe', {}, 'https://evil.example');
   assert(crossOrigin.status === 403,
     'Caddy rejects a mismatched Origin before loopback normalization without Sec-Fetch-Site');
