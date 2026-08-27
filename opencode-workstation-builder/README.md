@@ -25,6 +25,7 @@
 - workflow 会先构建并加载 `linux/amd64` 本地测试镜像，跑过容器 smoke test 后才登录 GHCR 并推送目标平台镜像
 - workflow 输入会先校验 tag、平台列表和镜像仓库名；BuildKit cache 使用 GitHub Actions cache 的 `mode=min`，减少缓存空间压力
 - Tooling: git, gh, ripgrep, fd, jq, yq, shellcheck, shfmt, actionlint, comment-checker, Docker CLI, Go 1.27.0, Rust, Bun 1.4.0, pnpm, yarn
+- 默认保留 oh-my-opencode 与可选的 Dynamic Context Pruning（DCP）支持，不再预装 `opencode-gpt-unlocked`
 
 ## 运行时权限模型
 
@@ -87,6 +88,12 @@
 - `plugin` 数组：追加去重
 - `provider` / `models` / `mcp` 等对象：深度合并
 - 未知键：保留，不主动删除
+
+升级到包含本迁移的镜像后，入口脚本会在首次启动时从生成的全局配置中移除旧版自动写入的
+`opencode-gpt-unlocked` 插件和 `experimental.refusal_patcher` 配置。迁移是幂等的，只改动这两类
+已废弃条目，不会删除用户覆盖文件或其它 provider、model、MCP 和插件配置。入口还会把 OMO 的
+`~/.omo` 数据桥接到已持久化的 `~/.config/.omo`，避免新版本 OMO 在跨挂载点备份配置时触发
+`EXDEV`；已有的 `.omo` 目录会先复制并保留备份。
 
 ## Skills / Agents / Claude 兼容目录
 
@@ -184,5 +191,5 @@ OpenCode 本身还会读取项目内或兼容目录中的：
 
 - `build-opencode-workstation.yml`：是否只保留手动触发、tag / 平台输入规则是否干净
 - `image/Dockerfile`：是否仍然以独立镜像上下文承载运行时依赖
-- `image/scripts/entrypoint.sh`、`image/scripts/bootstrap-opencode-userland.sh`、`image/scripts/install-oh-my-opencode.sh`：是否继续保证官方 HOME 路径上的持久化语义
-- `image/scripts/update_opencode_config.py`：是否继续保留用户覆盖层与插件去重合并语义
+- `image/scripts/entrypoint.sh`、`image/scripts/bootstrap-opencode-userland.sh`、`image/scripts/install-oh-my-opencode.sh`：是否继续保证官方 HOME 路径上的持久化语义及废弃配置迁移
+- `image/scripts/update_opencode_config.py`：是否继续保留用户覆盖层、插件去重合并和废弃条目清理语义

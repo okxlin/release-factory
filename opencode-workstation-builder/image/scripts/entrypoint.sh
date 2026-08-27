@@ -140,6 +140,40 @@ configure_docker_socket_access
 repair_recursive_ownership
 drop_to_runtime_user "$@"
 
+log "migrating deprecated OpenCode configuration"
+python3 "${SCRIPT_DIR}/update_opencode_config.py" migrate-deprecated
+
+ensure_omo_storage() {
+  local persistent_omo_dir="${HOME}/.config/.omo"
+  local legacy_omo_dir="${HOME}/.omo"
+  local backup_dir
+
+  mkdir -p "${persistent_omo_dir}"
+
+  if [[ -L "${legacy_omo_dir}" ]]; then
+    if [[ "$(readlink -f "${legacy_omo_dir}" 2>/dev/null || true)" == "$(readlink -f "${persistent_omo_dir}")" ]]; then
+      return 0
+    fi
+    log "leaving custom ${legacy_omo_dir} symlink unchanged"
+    return 0
+  fi
+
+  if [[ -d "${legacy_omo_dir}" ]]; then
+    log "migrating legacy OMO data into persistent config storage"
+    cp -a -n "${legacy_omo_dir}/." "${persistent_omo_dir}/"
+    backup_dir="${HOME}/.omo.migrated.$(date +%s%N)"
+    mv "${legacy_omo_dir}" "${backup_dir}"
+    log "legacy OMO data preserved at ${backup_dir}"
+  elif [[ -e "${legacy_omo_dir}" ]]; then
+    log "cannot replace non-directory ${legacy_omo_dir}; leaving it unchanged"
+    return 0
+  fi
+
+  ln -s "${persistent_omo_dir}" "${legacy_omo_dir}"
+}
+
+ensure_omo_storage
+
 sample_user_config="$HOME/.config/opencode/opencode.user.sample.json"
 if [[ ! -f "${sample_user_config}" ]]; then
   cat > "${sample_user_config}" <<'EOF'

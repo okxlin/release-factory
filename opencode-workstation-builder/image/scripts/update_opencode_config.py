@@ -12,6 +12,8 @@ CONFIG_DIRS = [
 
 CONFIG_FILES = ['opencode.json', 'opencode.jsonc']
 USER_CONFIG_FILES = ['opencode.user.json', 'opencode.user.jsonc']
+DEPRECATED_PLUGIN_BASES = {'opencode-gpt-unlocked'}
+DEPRECATED_EXPERIMENTAL_KEYS = {'refusal_patcher'}
 
 
 def resolve_config_dir() -> Path | None:
@@ -135,11 +137,55 @@ def ensure_plugin(data, plugin_name):
     plugins = data.get('plugin')
     if not isinstance(plugins, list):
         plugins = []
-    normalized = {str(item).split('@')[0] for item in plugins if isinstance(item, str)}
-    plugin_base = plugin_name.split('@')[0]
+    normalized = {plugin_base_name(item) for item in plugins}
+    plugin_base = plugin_base_name(plugin_name)
     if plugin_base not in normalized and plugin_name not in plugins:
         plugins.append(plugin_name)
     data['plugin'] = plugins
+
+
+def package_base_name(value):
+    if value.startswith('@'):
+        separator = value.find('@', 1)
+        return value[:separator] if separator > 0 else value
+    return value.split('@', 1)[0]
+
+
+def plugin_base_name(item):
+    if isinstance(item, str):
+        return package_base_name(item)
+    if isinstance(item, (list, tuple)) and item and isinstance(item[0], str):
+        return package_base_name(item[0])
+    if isinstance(item, dict):
+        for key in ('package', 'name'):
+            value = item.get(key)
+            if isinstance(value, str):
+                return package_base_name(value)
+    return None
+
+
+def remove_deprecated_entries(data):
+    removed = []
+    plugins = data.get('plugin')
+    if isinstance(plugins, list):
+        kept_plugins = []
+        for item in plugins:
+            if plugin_base_name(item) in DEPRECATED_PLUGIN_BASES:
+                removed.append('plugin:opencode-gpt-unlocked')
+            else:
+                kept_plugins.append(item)
+        if len(kept_plugins) != len(plugins):
+            data['plugin'] = kept_plugins
+
+    experimental = data.get('experimental')
+    if isinstance(experimental, dict):
+        for key in DEPRECATED_EXPERIMENTAL_KEYS:
+            if key in experimental:
+                del experimental[key]
+                removed.append(f'experimental:{key}')
+        if not experimental:
+            data.pop('experimental', None)
+    return removed
 
 
 def ensure_oh_my_opencode_registration(data):
@@ -153,30 +199,6 @@ def ensure_oh_my_opencode_registration(data):
             'enabled': True,
         }
     data['mcp'] = mcp
-
-
-def ensure_refusal_settings(data):
-    experimental = data.get('experimental')
-    if not isinstance(experimental, dict):
-        experimental = {}
-    refusal = experimental.get('refusal_patcher')
-    if not isinstance(refusal, dict):
-        refusal = {}
-    refusal.setdefault('enabled', True)
-    base_url = os.environ.get('GPT_UNLOCKED_BASE_URL', '').strip()
-    api_key = os.environ.get('GPT_UNLOCKED_API_KEY', '').strip()
-    model = os.environ.get('GPT_UNLOCKED_MODEL', '').strip()
-    placeholder = os.environ.get('GPT_UNLOCKED_PLACEHOLDER', '').strip()
-    if base_url:
-        refusal['base_url'] = base_url
-    if api_key:
-        refusal['api_key'] = api_key
-    if model:
-        refusal['model'] = model
-    if placeholder:
-        refusal['placeholder'] = placeholder
-    experimental['refusal_patcher'] = refusal
-    data['experimental'] = experimental
 
 
 def detect_provider_id() -> str:
@@ -248,17 +270,24 @@ def ensure_extra_plugins(data):
 
 def main():
     if len(sys.argv) < 2:
-        raise SystemExit('usage: update_opencode_config.py plugin <plugin-name> | oh-my-opencode register | sync-model')
+        raise SystemExit('usage: update_opencode_config.py migrate-deprecated | plugin <plugin-name> | oh-my-opencode register | sync-model')
     action = sys.argv[1]
     value = sys.argv[2] if len(sys.argv) >= 3 else None
     path = locate_config()
+    if action == 'migrate-deprecated':
+        if path.exists():
+            data = load_config(path)
+            removed = remove_deprecated_entries(data)
+            if removed:
+                save_config(path, data)
+                print(f"removed deprecated OpenCode entries: {', '.join(sorted(set(removed)))}", file=sys.stderr)
+        print(path)
+        return
     data = load_config(path)
     if action == 'plugin':
         if not value:
             raise SystemExit('usage: update_opencode_config.py plugin <plugin-name>')
         ensure_plugin(data, value)
-        if value.startswith('opencode-gpt-unlocked'):
-            ensure_refusal_settings(data)
         ensure_model_settings(data)
         ensure_extra_plugins(data)
     elif action == 'oh-my-opencode' and value == 'register':
@@ -271,6 +300,9 @@ def main():
         suffix = f' {value}' if value is not None else ''
         raise SystemExit(f'unknown action: {action}{suffix}')
     data = apply_user_overrides(data, path)
+    removed = remove_deprecated_entries(data)
+    if removed:
+        print(f"removed deprecated OpenCode entries: {', '.join(sorted(set(removed)))}", file=sys.stderr)
     save_config(path, data)
     print(path)
 
