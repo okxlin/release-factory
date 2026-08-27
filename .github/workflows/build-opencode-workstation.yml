@@ -137,7 +137,6 @@ jobs:
             -e OPENCODE_BOOTSTRAP=1 \
             -e OMO_AUTO_INSTALL=0 \
             -e DCP_INSTALL=0 \
-            -e GPT_UNLOCKED_INSTALL=0 \
             -e OPENCODE_RUNTIME_MODE=acp \
             -e FIX_WORKSPACE_OWNERSHIP_RECURSIVE=true \
             -v "${workspace_dir}:/workspace" \

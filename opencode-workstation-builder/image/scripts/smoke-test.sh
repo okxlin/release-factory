@@ -92,6 +92,44 @@ else
   fail "opencode not installed yet; run bootstrap script"
 fi
 
+printf '[smoke] checking deprecated OpenCode config migration\n'
+migration_dir="$(mktemp -d)"
+printf '%s\n' '{' '  "plugin": ["opencode-gpt-unlocked@latest", "custom-plugin"],' '  "experimental": {"refusal_patcher": {"enabled": true}, "continue_loop_on_deny": true}' '}' > "${migration_dir}/opencode.json"
+printf '%s\n' '{' '  "plugin": ["opencode-gpt-unlocked@1.0.1", "user-plugin"],' '  "experimental": {"refusal_patcher": {"enabled": true}}' '}' > "${migration_dir}/opencode.user.json"
+if OPENCODE_CONFIG_DIR="${migration_dir}" python3 /app/scripts/update_opencode_config.py migrate-deprecated >/dev/null \
+  && OPENCODE_CONFIG_DIR="${migration_dir}" OPENCODE_EXTRA_PLUGINS='opencode-gpt-unlocked@latest,env-plugin' \
+    python3 /app/scripts/update_opencode_config.py plugin '@tarquinen/opencode-dcp@latest' >/dev/null \
+  && python3 - "${migration_dir}" <<'PYEOF'
+import json
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+generated = json.loads((root / "opencode.json").read_text(encoding="utf-8"))
+user = json.loads((root / "opencode.user.json").read_text(encoding="utf-8"))
+plugins = generated.get("plugin", [])
+assert all(not isinstance(item, str) or not item.startswith("opencode-gpt-unlocked@") for item in plugins)
+assert {"custom-plugin", "user-plugin", "env-plugin"}.issubset(plugins)
+assert "refusal_patcher" not in generated.get("experimental", {})
+assert generated["experimental"]["continue_loop_on_deny"] is True
+assert any(item.startswith("opencode-gpt-unlocked@") for item in user["plugin"])
+PYEOF
+then
+  pass "deprecated plugin and refusal-patcher entries are migrated without rewriting user overrides"
+else
+  fail "deprecated OpenCode config migration failed"
+fi
+rm -rf "${migration_dir}"
+
+printf '[smoke] checking persistent OMO storage bridge\n'
+if [[ -L "${HOME}/.omo" ]] \
+  && [[ -d "${HOME}/.config/.omo" ]] \
+  && [[ "$(readlink -f "${HOME}/.omo" 2>/dev/null || true)" == "$(readlink -f "${HOME}/.config/.omo" 2>/dev/null || true)" ]]; then
+  pass "OMO storage is bridged into the persistent config mount"
+else
+  fail "OMO storage bridge is missing or points outside the persistent config mount"
+fi
+
 printf '[smoke] checking runtime mode\n'
 case "${OPENCODE_RUNTIME_MODE:-acp}" in
   acp)

@@ -3,9 +3,6 @@ set -euo pipefail
 
 : "${DCP_INSTALL:=1}"
 : "${DCP_GLOBAL:=1}"
-: "${GPT_UNLOCKED_INSTALL:=1}"
-: "${GPT_UNLOCKED_MODE:=plugin}"
-: "${GPT_UNLOCKED_PLUGIN_SOURCE:=npm}"
 : "${OPENCODE_CONFIG_DIR:=$HOME/.config/opencode}"
 
 log() {
@@ -39,21 +36,5 @@ install_dcp() {
   fi
 }
 
-install_gpt_unlocked() {
-  [[ "${GPT_UNLOCKED_INSTALL}" == "1" ]] || return 0
-  ensure_config_dir
-  if [[ "${GPT_UNLOCKED_MODE}" == "plugin" ]]; then
-    if [[ "${GPT_UNLOCKED_PLUGIN_SOURCE}" == "npm" ]]; then
-      log 'registering opencode-gpt-unlocked npm plugin in opencode config'
-      python3 /app/scripts/update_opencode_config.py plugin opencode-gpt-unlocked@latest
-    else
-      log 'GPT unlocked plugin source is not npm; skipping config mutation'
-    fi
-  else
-    log 'GPT unlocked patcher mode selected; no plugin registration performed'
-  fi
-}
-
 ensure_opencode
 install_dcp
-install_gpt_unlocked

@@ -65,6 +65,3 @@ PYEOF
 
 python3 /app/scripts/update_opencode_config.py oh-my-opencode register
 python3 /app/scripts/update_oh_my_openagent_config.py
-python3 /app/scripts/update_opencode_config.py plugin opencode-gpt-unlocked@latest
-python3 /app/scripts/update_opencode_config.py oh-my-opencode register
-python3 /app/scripts/update_oh_my_openagent_config.py
