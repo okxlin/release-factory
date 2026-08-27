@@ -38,11 +38,15 @@ The Docker context is `image/`. The Dockerfile expects all COPY paths relative t
 
 Build-time versions can be overridden with `--build-arg`:
 
+`GO_VERSION` must be supplied together with matching `GO_SHA256_AMD64` and `GO_SHA256_ARM64` values; the build fails closed when an archive checksum does not match.
+
 ```bash
 docker build \
   --build-arg NODE_MAJOR=24 \
-  --build-arg NPM_VERSION=12.0.1 \
-  --build-arg GO_VERSION=latest \
+  --build-arg NPM_VERSION=12.0.2 \
+  --build-arg GO_VERSION=1.27.0 \
+  --build-arg GO_SHA256_AMD64=675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685 \
+  --build-arg GO_SHA256_ARM64=51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda \
   --build-arg RUST_VERSION=stable \
   --build-arg BUN_VERSION=latest \
   --build-arg DENO_VERSION=latest \
@@ -51,6 +55,7 @@ docker build \
   --build-arg RUFF_VERSION=latest \
   --build-arg BLACK_VERSION=latest \
   --build-arg MYPY_VERSION=latest \
+  --build-arg CODE_SERVER_TAR_VERSION=7.5.22 \
   --build-arg CODE_SERVER_EXTENSIONS="anthropic.claude-code openai.chatgpt ms-python.python charliermarsh.ruff redhat.vscode-yaml tamasfe.even-better-toml editorconfig.editorconfig esbenp.prettier-vscode dbaeumer.vscode-eslint ms-azuretools.vscode-docker ms-ceintl.vscode-language-pack-zh-hans" \
   -t codex-claude-workstation image/
 ```
@@ -59,12 +64,12 @@ docker build \
 
 - AI coding: Codex CLI, Claude Code, oh-my-codex, Paseo 0.3.1 mobile/web control
 - Web IDE: code-server with Codex/Claude, Python/Ruff, YAML/TOML, Docker, EditorConfig, Prettier, ESLint, and Chinese language extensions
-- JavaScript/TypeScript: Node.js 24, npm 12.0.1, pnpm latest and Yarn stable via Corepack, TypeScript 5, Bun latest, Deno latest
+- JavaScript/TypeScript: Node.js 24, npm 12.0.2, pnpm latest and Yarn stable via Corepack, TypeScript 5, Bun latest, Deno latest
 - Python: Python 3, venv, pip, pipx, pytest, uv/uvx, ruff, black, mypy, Python build headers
-- Systems: Go latest stable, Rust stable, Java 21 LTS, Maven, Docker CLI, Buildx, Compose plugin
+- Systems: Go 1.27.0, Rust stable, Java 21 LTS, Maven, Docker CLI, Buildx, Compose plugin
 - Tooling: git, gh, ripgrep, fd, jq, yq, shellcheck, shfmt, actionlint, pre-commit, yamllint, direnv
 - Debugging: curl, httpie, dig, nc, lsof, strace, htop, iotop, nethogs, ncdu
-- Proxy cores: mihomo/clash-meta, sing-box, Xray managed by supervisord
+- Proxy cores: mihomo 1.19.30/clash-meta, sing-box 1.13.19, Xray managed by supervisord
 
 ## Runtime Environment
 
