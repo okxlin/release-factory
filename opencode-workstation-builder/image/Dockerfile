@@ -3,8 +3,11 @@ FROM node:24-bookworm-slim
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-ARG BUN_VERSION=1.3.14
+ARG BUN_VERSION=1.4.0
 ARG ACTIONLINT_VERSION=1.7.12
+ARG GO_VERSION=1.27.0
+ARG GO_SHA256_AMD64=675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685
+ARG GO_SHA256_ARM64=51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda
 ARG USERNAME=opencode
 ARG USER_UID=1000
 ARG USER_GID=1000
@@ -155,11 +158,10 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
     && actionlint --version \
     && rm -f "/tmp/${actionlint_asset}" /tmp/actionlint_checksums.txt /tmp/actionlint.sha256 /tmp/actionlint
 
-ARG GO_VERSION=latest
 RUN dpkg_arch="$(dpkg --print-architecture)" \
     && case "${dpkg_arch}" in \
-         amd64) go_arch='amd64' ;; \
-         arm64) go_arch='arm64' ;; \
+         amd64) go_arch='amd64'; go_sha256="${GO_SHA256_AMD64}" ;; \
+         arm64) go_arch='arm64'; go_sha256="${GO_SHA256_ARM64}" ;; \
          *) echo "unsupported architecture for Go install: ${dpkg_arch}" >&2; exit 1 ;; \
        esac \
     && if [ "${GO_VERSION}" = "latest" ]; then \
@@ -167,10 +169,14 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
        else \
          go_version="go${GO_VERSION#go}"; \
        fi \
-    && curl -fsSL "https://go.dev/dl/${go_version}.linux-${go_arch}.tar.gz" -o /tmp/go.tar.gz \
+    && [[ "${go_version}" =~ ^go[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] \
+    && [[ "${go_sha256}" =~ ^[0-9a-fA-F]{64}$ ]] \
+    && go_asset="${go_version}.linux-${go_arch}.tar.gz" \
+    && curl -fsSL "https://go.dev/dl/${go_asset}" -o "/tmp/${go_asset}" \
+    && printf '%s  %s\n' "${go_sha256}" "/tmp/${go_asset}" | sha256sum -c - \
     && rm -rf /usr/local/go \
-    && tar -C /usr/local -xzf /tmp/go.tar.gz \
-    && rm /tmp/go.tar.gz \
+    && tar -C /usr/local -xzf "/tmp/${go_asset}" \
+    && rm "/tmp/${go_asset}" \
     && echo 'export PATH=/usr/local/go/bin:$PATH' >> /etc/profile.d/go.sh
 
 ARG RUST_VERSION=stable

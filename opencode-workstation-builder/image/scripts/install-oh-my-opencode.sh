@@ -19,7 +19,7 @@ if [[ "${_needs_baseline}" == "1" ]]; then
   _bun_bin="${BUN_INSTALL:-/opt/bun}/bin/bun"
   if ! "${_bun_bin}" --version >/dev/null 2>&1; then
     echo "[install-oh-my-opencode] reinstalling Bun baseline for non-AVX2 CPU"
-    curl -fsSL https://bun.sh/install | bash -s -- "bun-v${BUN_VERSION:-1.3.14}"
+    curl -fsSL https://bun.sh/install | bash -s -- "bun-v${BUN_VERSION:-1.4.0}"
     if ! "${_bun_bin}" --version >/dev/null 2>&1; then
       echo "[install-oh-my-opencode] Bun baseline reinstall failed" >&2
       exit 1

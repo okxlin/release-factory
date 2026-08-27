@@ -7,13 +7,15 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG TARGETARCH=amd64
 ARG DEBIAN_FRONTEND=noninteractive
 ARG NODE_MAJOR=24
-ARG NPM_VERSION=12.0.1
-ARG GO_VERSION=latest
+ARG NPM_VERSION=12.0.2
+ARG GO_VERSION=1.27.0
+ARG GO_SHA256_AMD64=675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685
+ARG GO_SHA256_ARM64=51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda
 ARG RUST_VERSION=stable
 ARG BUN_VERSION=latest
 ARG DENO_VERSION=latest
 ARG ACTIONLINT_VERSION=1.7.12
-ARG CODE_SERVER_TAR_VERSION=7.5.21
+ARG CODE_SERVER_TAR_VERSION=7.5.22
 ARG PNPM_VERSION=latest
 ARG YARN_VERSION=stable
 ARG RUFF_VERSION=latest
@@ -130,8 +132,8 @@ RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
 # ── Go ──
 RUN dpkg_arch="$(dpkg --print-architecture)" \
     && case "${dpkg_arch}" in \
-        amd64) go_arch="amd64" ;; \
-        arm64) go_arch="arm64" ;; \
+        amd64) go_arch="amd64"; go_sha256="${GO_SHA256_AMD64}" ;; \
+        arm64) go_arch="arm64"; go_sha256="${GO_SHA256_ARM64}" ;; \
         *) echo "unsupported architecture for Go install: ${dpkg_arch}" >&2; exit 1 ;; \
     esac \
     && if [ "${GO_VERSION}" = "latest" ]; then \
@@ -139,7 +141,13 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
     else \
         go_version="go${GO_VERSION#go}"; \
     fi \
-    && curl -fsSL "https://go.dev/dl/${go_version}.linux-${go_arch}.tar.gz" | tar -C /usr/local -xzf - \
+    && [[ "${go_version}" =~ ^go[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] \
+    && [[ "${go_sha256}" =~ ^[0-9a-fA-F]{64}$ ]] \
+    && go_asset="${go_version}.linux-${go_arch}.tar.gz" \
+    && curl -fsSL "https://go.dev/dl/${go_asset}" -o "/tmp/${go_asset}" \
+    && printf '%s  %s\n' "${go_sha256}" "/tmp/${go_asset}" | sha256sum -c - \
+    && tar -C /usr/local -xzf "/tmp/${go_asset}" \
+    && rm "/tmp/${go_asset}" \
     && echo 'export PATH=/usr/local/go/bin:$PATH' > /etc/profile.d/go.sh
 
 # ── Rust ──
@@ -214,24 +222,24 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
     && case "${dpkg_arch}" in \
         amd64) \
             mihomo_arch="amd64-compatible"; \
-            mihomo_sha256="5612e698e96c8b8ad15abc4c0a4f098eba9234354b4f248cb97f2528e215b094"; \
+            mihomo_sha256="db214c7a2517e63c150d123178d16d102e03a241ccdae4e5e07ffbe9cf56c6f9"; \
             sing_box_arch="amd64-glibc"; \
-            sing_box_sha256="aae9172317c61760aae3dafcde889b2e51b7ea590c40d2b3c7ccdeae14b361b6"; \
+            sing_box_sha256="77e26226c111b8a269f559aec7999f6f5ae1961f25374b58b126d06405d4f516"; \
             xray_arch="64"; \
             xray_sha256="23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae"; \
             ;; \
         arm64) \
             mihomo_arch="arm64"; \
-            mihomo_sha256="9a868b5e4e0ad91d9d71e1b41b0cfce78aaba44360c30df74a723f8e3926a86c"; \
+            mihomo_sha256="58896873736d28628f66de3677c8654fa0f180662523148e136cff4f6e890069"; \
             sing_box_arch="arm64-glibc"; \
-            sing_box_sha256="08d37b2bf12145ec44307333490cecca4c917df054cd8e27a210f8d9cdbe0fd9"; \
+            sing_box_sha256="c79c76bf2f804579768ad4683dc58ff7f3873f0e8159131219290f1ae79b2a38"; \
             xray_arch="arm64-v8a"; \
             xray_sha256="4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c"; \
             ;; \
         *) echo "unsupported architecture for proxy core install: ${dpkg_arch}" >&2; exit 1 ;; \
     esac \
-    && mihomo_version="1.19.29" \
-    && sing_box_version="1.13.14" \
+    && mihomo_version="1.19.30" \
+    && sing_box_version="1.13.19" \
     && xray_version="26.3.27" \
     && mihomo_asset="mihomo-linux-${mihomo_arch}-v${mihomo_version}.gz" \
     && sing_box_dir="sing-box-${sing_box_version}-linux-${sing_box_arch}" \
