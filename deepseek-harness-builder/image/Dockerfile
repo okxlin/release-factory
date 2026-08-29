@@ -30,8 +30,8 @@ RUN wget -qO /tmp/caddy.tar.gz \
     && cd "/usr/src/caddy-${CADDY_VERSION}" \
     && git apply --check /tmp/caddy-cel-go-v0.30.patch \
     && git apply /tmp/caddy-cel-go-v0.30.patch \
-    && git apply --check /tmp/caddy-cel-go-module-relocation.patch \
-    && git apply /tmp/caddy-cel-go-module-relocation.patch \
+    && git apply --check --unidiff-zero /tmp/caddy-cel-go-module-relocation.patch \
+    && git apply --unidiff-zero /tmp/caddy-cel-go-module-relocation.patch \
     && PATH="/usr/local/go/bin:${PATH}" go mod edit \
         -droprequire=github.com/google/cel-go \
         -require="cel.dev/cel-go@v${CEL_GO_VERSION}" \
