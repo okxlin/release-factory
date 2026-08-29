@@ -29,18 +29,26 @@
 		respond "globalThis.__DSH_AUTHENTICATED_SETTINGS__ = true;" 200
 	}
 
-	# Preserve the browser-origin boundary before normalizing the request for
-	# DSH's loopback-only privileged API trust check.
+	# Preserve the browser-origin boundary before forwarding the request to DSH.
 	@unexpected_origin `{http.request.header.Origin} != "" && {http.request.header.Origin} != "{$PUBLIC_URL}"`
-	@settings_api path /api/settings.describe /api/settings.update /api/settings.replace /api/settings.mutate /api/credentials.describe /api/credentials.set /api/credentials.unset /api/llm.discoverModels
+	@dsh_bootstrap {
+		path /
+		not header Cookie *dsh-auth-*
+	}
+	@native_settings_api path /api/settings.openDocument /api/settings/openSettingsDocument
+	@settings_api path /api/settings.describe /api/settings.update /api/settings.replace /api/settings.mutate /api/credentials.describe /api/credentials.set /api/credentials.unset /api/llm.discoverModels /api/settings/describe /api/settings/update /api/settings/replace /api/settings/mutate /api/credentials/describe /api/credentials/set /api/credentials/unset /api/llm/discoverModels
 
 	# AUTH_MODE=none delegates authentication to a reviewed outer proxy. Present
 	# requests that already passed that boundary to DSH as the loopback proxy
 	# instead of treating a browser-facing Host or Origin as a direct request.
+	route @native_settings_api {
+		respond "Forbidden" 403
+	}
+
 	route @settings_api {
 		respond @unexpected_origin "Forbidden" 403
+		rewrite @dsh_bootstrap /?token={$DSH_LAUNCH_TOKEN}
 		reverse_proxy 127.0.0.1:{$DSH_INTERNAL_PORT} {
-			header_up Host 127.0.0.1:{$DSH_INTERNAL_PORT}
 			header_up -Origin
 			header_up -Authorization
 			header_up -Remote-User
@@ -56,7 +64,9 @@
 	}
 
 	route {
+		rewrite @dsh_bootstrap /?token={$DSH_LAUNCH_TOKEN}
 		reverse_proxy 127.0.0.1:{$DSH_INTERNAL_PORT} {
+			header_up Host {$DSH_UPSTREAM_HOST}
 			header_up -Authorization
 			header_up -Remote-User
 			header_up -X-Auth-User

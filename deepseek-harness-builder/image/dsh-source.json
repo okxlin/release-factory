@@ -1,0 +1,8 @@
+{
+  "version": "0.1.2-alpha.1",
+  "repository": "deepseek-ai/deepseek-harness",
+  "ref": "dsh-v0.1.2-alpha.1",
+  "commit": "cd5ef8148158c3a752a658978873241fdf8e2bbc",
+  "archiveSha256": "08aaf69a036d893fbc63a8feb59acd293c6970f7ccc4d77779243e8140fa359e",
+  "archiveUrl": "https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/refs/tags/dsh-v0.1.2-alpha.1"
+}

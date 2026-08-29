@@ -1,0 +1,70 @@
+diff --git a/modules/caddyhttp/celmatcher.go b/modules/caddyhttp/celmatcher.go
+--- a/modules/caddyhttp/celmatcher.go
++++ b/modules/caddyhttp/celmatcher.go
+@@ -28,11 +28,11 @@
+-	"github.com/google/cel-go/cel"
+-	"github.com/google/cel-go/common"
+-	"github.com/google/cel-go/common/ast"
+-	"github.com/google/cel-go/common/operators"
+-	"github.com/google/cel-go/common/types"
+-	"github.com/google/cel-go/common/types/ref"
+-	"github.com/google/cel-go/common/types/traits"
+-	"github.com/google/cel-go/ext"
+-	"github.com/google/cel-go/interpreter"
+-	"github.com/google/cel-go/interpreter/functions"
+-	"github.com/google/cel-go/parser"
++	"cel.dev/cel-go/cel"
++	"cel.dev/cel-go/common"
++	"cel.dev/cel-go/common/ast"
++	"cel.dev/cel-go/common/operators"
++	"cel.dev/cel-go/common/types"
++	"cel.dev/cel-go/common/types/ref"
++	"cel.dev/cel-go/common/types/traits"
++	"cel.dev/cel-go/ext"
++	"cel.dev/cel-go/interpreter"
++	"cel.dev/cel-go/interpreter/functions"
++	"cel.dev/cel-go/parser"
+diff --git a/modules/caddyhttp/fileserver/matcher.go b/modules/caddyhttp/fileserver/matcher.go
+--- a/modules/caddyhttp/fileserver/matcher.go
++++ b/modules/caddyhttp/fileserver/matcher.go
+@@ -28,7 +28,7 @@
+-	"github.com/google/cel-go/cel"
+-	"github.com/google/cel-go/common"
+-	"github.com/google/cel-go/common/ast"
+-	"github.com/google/cel-go/common/operators"
+-	"github.com/google/cel-go/common/types"
+-	"github.com/google/cel-go/common/types/ref"
+-	"github.com/google/cel-go/parser"
++	"cel.dev/cel-go/cel"
++	"cel.dev/cel-go/common"
++	"cel.dev/cel-go/common/ast"
++	"cel.dev/cel-go/common/operators"
++	"cel.dev/cel-go/common/types"
++	"cel.dev/cel-go/common/types/ref"
++	"cel.dev/cel-go/parser"
+diff --git a/modules/caddyhttp/ip_matchers.go b/modules/caddyhttp/ip_matchers.go
+--- a/modules/caddyhttp/ip_matchers.go
++++ b/modules/caddyhttp/ip_matchers.go
+@@ -25,2 +25,2 @@
+-	"github.com/google/cel-go/cel"
+-	"github.com/google/cel-go/common/types/ref"
++	"cel.dev/cel-go/cel"
++	"cel.dev/cel-go/common/types/ref"
+diff --git a/modules/caddyhttp/matchers.go b/modules/caddyhttp/matchers.go
+--- a/modules/caddyhttp/matchers.go
++++ b/modules/caddyhttp/matchers.go
+@@ -33,3 +33,3 @@
+-	"github.com/google/cel-go/cel"
+-	"github.com/google/cel-go/common/types"
+-	"github.com/google/cel-go/common/types/ref"
++	"cel.dev/cel-go/cel"
++	"cel.dev/cel-go/common/types"
++	"cel.dev/cel-go/common/types/ref"
+diff --git a/modules/caddyhttp/vars.go b/modules/caddyhttp/vars.go
+--- a/modules/caddyhttp/vars.go
++++ b/modules/caddyhttp/vars.go
+@@ -24,2 +24,2 @@
+-	"github.com/google/cel-go/cel"
+-	"github.com/google/cel-go/common/types/ref"
++	"cel.dev/cel-go/cel"
++	"cel.dev/cel-go/common/types/ref"

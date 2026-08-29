@@ -63,10 +63,15 @@
 	@forwarded_https header X-Forwarded-Proto https
 	header @forwarded_https Strict-Transport-Security "max-age=31536000"
 
-	# Preserve the browser-origin boundary before normalizing authenticated
-	# settings requests for DSH's loopback-only privileged API trust check.
+	# Preserve the browser-origin boundary before forwarding authenticated
+	# settings requests to the DSH service.
 	@unexpected_origin `{http.request.header.Origin} != "" && {http.request.header.Origin} != "{$PUBLIC_URL}"`
-	@settings_api path /api/settings.describe /api/settings.update /api/settings.replace /api/settings.mutate /api/credentials.describe /api/credentials.set /api/credentials.unset /api/llm.discoverModels
+	@dsh_bootstrap {
+		path /
+		not header Cookie *dsh-auth-*
+	}
+	@native_settings_api path /api/settings.openDocument /api/settings/openSettingsDocument
+	@settings_api path /api/settings.describe /api/settings.update /api/settings.replace /api/settings.mutate /api/credentials.describe /api/credentials.set /api/credentials.unset /api/llm.discoverModels /api/settings/describe /api/settings/update /api/settings/replace /api/settings/mutate /api/credentials/describe /api/credentials/set /api/credentials/unset /api/llm/discoverModels
 
 	route /healthz {
 		respond "ok" 200
@@ -108,11 +113,16 @@
 		authenticate with dsh_portal
 	}
 
+	route @native_settings_api {
+		authorize with dsh_policy
+		respond "Forbidden" 403
+	}
+
 	route @settings_api {
 		respond @unexpected_origin "Forbidden" 403
 		authorize with dsh_policy
 		reverse_proxy 127.0.0.1:{$DSH_INTERNAL_PORT} {
-			header_up Host 127.0.0.1:{$DSH_INTERNAL_PORT}
+			header_up Host {$DSH_UPSTREAM_HOST}
 			header_up -Origin
 			header_up -Authorization
 			header_up -Remote-User
@@ -129,6 +139,7 @@
 
 	route {
 		authorize with dsh_policy
+		rewrite @dsh_bootstrap /?token={$DSH_LAUNCH_TOKEN}
 		reverse_proxy 127.0.0.1:{$DSH_INTERNAL_PORT} {
 			header_up -Authorization
 			header_up -Remote-User

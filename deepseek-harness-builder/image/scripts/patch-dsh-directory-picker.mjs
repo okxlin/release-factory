@@ -9,24 +9,39 @@ const packageName = '@deepseek-ai/dsh-host-directory-picker-browse'
 const original = 'const home = homedir();'
 const replacement = 'const home = process.env.DSH_WORKSPACE || homedir();'
 
-const entries = await readdir(pnpmRoot, { withFileTypes: true })
-const candidates = entries.filter(
-  (entry) => entry.isDirectory() && entry.name.startsWith(packagePrefix),
-)
+async function findPackageRoot(root) {
+  const directRoot = join(root, ...packageName.split('/'))
+  try {
+    const manifest = JSON.parse(await readFile(join(directRoot, 'package.json'), 'utf8'))
+    if (manifest.name !== packageName) {
+      throw new Error(`unexpected package at ${directRoot}: ${manifest.name}`)
+    }
+    return directRoot
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+  }
 
-if (candidates.length !== 1) {
-  throw new Error(
-    `expected exactly one ${packageName} package, found ${candidates.length}`,
+  const entries = await readdir(root, { withFileTypes: true })
+  const candidates = entries.filter(
+    (entry) => entry.isDirectory() && entry.name.startsWith(packagePrefix),
+  )
+
+  if (candidates.length !== 1) {
+    throw new Error(
+      `expected exactly one ${packageName} package, found ${candidates.length}`,
+    )
+  }
+
+  return join(
+    root,
+    candidates[0].name,
+    'node_modules',
+    '@deepseek-ai',
+    'dsh-host-directory-picker-browse',
   )
 }
 
-const packageRoot = join(
-  pnpmRoot,
-  candidates[0].name,
-  'node_modules',
-  '@deepseek-ai',
-  'dsh-host-directory-picker-browse',
-)
+const packageRoot = await findPackageRoot(pnpmRoot)
 const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'))
 if (manifest.name !== packageName) {
   throw new Error(`unexpected package at ${packageRoot}: ${manifest.name}`)

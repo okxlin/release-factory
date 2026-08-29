@@ -27,7 +27,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: "24.19.0"
+          node-version: "24.20.0"
 
       - name: Validate pinned component contract
         run: bash deepseek-harness-builder/scripts/check-component-pins.sh

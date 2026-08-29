@@ -143,6 +143,10 @@ for name_and_count in \
     'CADDY_VERSION:2' \
     'CADDY_SECURITY_VERSION:2' \
     'DSH_VERSION:2' \
+    'DSH_SOURCE_VERSION:2' \
+    'DSH_SOURCE_REF:1' \
+    'DSH_SOURCE_COMMIT:1' \
+    'DSH_SOURCE_ARCHIVE_SHA256:1' \
     'PYTHON_VERSION:4' \
     'PYTEST_VERSION:3' \
     'PNPM_VERSION:5' \
@@ -156,7 +160,8 @@ for name_and_count in \
     'UV_VERSION:1' \
     'YQ_VERSION:1' \
     'MOBY_GO_ARCHIVE_VERSION:1' \
-    'X_MOD_VERSION:1'; do
+    'X_MOD_VERSION:1' \
+    'X_CRYPTO_VERSION:1'; do
     require_arg "${name_and_count%%:*}" "${name_and_count##*:}"
 done
 
@@ -166,6 +171,7 @@ checksum_value="${arg_values[${checksum_arg}]:-}"
     || fail "ARG ${checksum_arg} must be a lowercase SHA-256 digest"
 
 for checksum_arg in \
+    DSH_SOURCE_ARCHIVE_SHA256 \
     ACTIONLINT_SOURCE_SHA256 \
     RUFF_SHA256_AMD64 \
     RUFF_SHA256_ARM64 \
@@ -180,6 +186,15 @@ done
 
 [[ "${arg_values[CADDY_RATELIMIT_REF]:-}" =~ ^[a-f0-9]{40}$ ]] \
     || fail 'ARG CADDY_RATELIMIT_REF must be an immutable 40-character Git commit'
+
+[[ "${arg_values[DSH_SOURCE_VERSION]:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+$ ]] \
+    || fail 'ARG DSH_SOURCE_VERSION must be a prerelease semantic version'
+[[ "${arg_values[DSH_SOURCE_REF]:-}" == "dsh-v${arg_values[DSH_SOURCE_VERSION]:-}" ]] \
+    || fail 'ARG DSH_SOURCE_REF must match dsh-vDSH_SOURCE_VERSION'
+[[ "${arg_values[DSH_SOURCE_COMMIT]:-}" =~ ^[a-f0-9]{40}$ ]] \
+    || fail 'ARG DSH_SOURCE_COMMIT must be an immutable 40-character Git commit'
+[[ "${arg_values[DSH_VERSION]:-}" == "${arg_values[DSH_SOURCE_VERSION]:-}" ]] \
+    || fail 'ARG DSH_VERSION must default to DSH_SOURCE_VERSION'
 
 declare -A stage_names=()
 declare -A image_counts=()
@@ -313,6 +328,7 @@ expected_remote_adds["https://registry.npmjs.org/npm/-/npm-${arg_values[NPM_VERS
 expected_remote_adds["https://codeload.github.com/docker/cli/tar.gz/refs/tags/v${arg_values[DOCKER_VERSION]:-}"]=1
 expected_remote_adds["https://codeload.github.com/docker/compose/tar.gz/refs/tags/v${arg_values[DOCKER_COMPOSE_VERSION]:-}"]=1
 expected_remote_adds["https://codeload.github.com/docker/buildx/tar.gz/refs/tags/v${arg_values[DOCKER_BUILDX_VERSION]:-}"]=1
+expected_remote_adds["https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/refs/tags/${arg_values[DSH_SOURCE_REF]:-}"]=1
 declare -A seen_remote_adds=()
 
 for line_number in "${!docker_lines[@]}"; do
@@ -372,6 +388,18 @@ require_literal \
 require_literal \
     "golang.org/x/mod@v\${X_MOD_VERSION}" \
     'the Buildx and Compose x/mod version pin'
+require_literal \
+    '-require="cel.dev/cel-go@v${CEL_GO_VERSION}"' \
+    'the Caddy CEL module relocation pin'
+require_literal \
+    "golang.org/x/crypto=golang.org/x/crypto@v\${X_CRYPTO_VERSION}" \
+    'the Caddy x/crypto security override'
+require_literal \
+    'https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/refs/tags/dsh-v0.1.2-alpha.1' \
+    'the DeepSeek Harness source archive URL'
+require_literal \
+    '"${DSH_SOURCE_ARCHIVE_SHA256}" /tmp/dsh-source.tar.gz | sha256sum -c -' \
+    'the DeepSeek Harness source archive checksum verification'
 require_literal \
     'https://codeload.github.com/rhysd/actionlint/tar.gz/refs/tags/v${ACTIONLINT_VERSION}' \
     'the actionlint source URL tied to ACTIONLINT_VERSION'
