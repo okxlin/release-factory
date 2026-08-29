@@ -247,8 +247,13 @@ append_trusted_hosts() {
     local normalized
     local trusted_port
     local -A seen=()
+    local web_help
 
     DSH_ARGS=(web --host 127.0.0.1 --port "${DSH_INTERNAL_PORT}")
+    web_help="$(gosu "${APP_USER}" dsh web --help 2>&1)"
+    if [[ "${web_help}" == *'--no-open'* ]]; then
+        DSH_ARGS+=(--no-open)
+    fi
     raw_hosts="${AUTH_PUBLIC_AUTHORITY},${raw_hosts}"
     IFS=',' read -r -a host_items <<< "${raw_hosts}"
 
@@ -322,18 +327,58 @@ NODE
 
 wait_for_dsh() {
     local _
+    local status
     for _ in {1..60}; do
         if ! kill -0 "${DSH_PID}" 2>/dev/null; then
             wait "${DSH_PID}" || true
             fatal "DeepSeek Harness exited before becoming ready"
         fi
-        if curl --fail --silent --show-error --max-time 2 \
-            "http://127.0.0.1:${DSH_INTERNAL_PORT}/" >/dev/null; then
+        if status="$(curl --silent --show-error --max-time 2 \
+            --output /dev/null --write-out '%{http_code}' \
+            "http://127.0.0.1:${DSH_INTERNAL_PORT}/" 2>/dev/null)" \
+            && [[ "${status}" =~ ^[1-4][0-9]{2}$ ]]; then
             return 0
         fi
         sleep 1
     done
     fatal "DeepSeek Harness did not become ready within 60 seconds"
+}
+
+resolve_dsh_launch_token() {
+    local _
+    local line
+    local token=""
+
+    for _ in {1..60}; do
+        while IFS= read -r line; do
+            if [[ "${line}" =~ ^dsh\ web:\ http://127\.0\.0\.1:${DSH_INTERNAL_PORT}/\?token=([A-Za-z0-9_-]{20,256})$ ]]; then
+                token="${BASH_REMATCH[1]}"
+                DSH_UPSTREAM_HOST="${AUTH_PUBLIC_AUTHORITY}"
+                export DSH_UPSTREAM_HOST
+            elif [[ "${line}" == "dsh web: http://127.0.0.1:${DSH_INTERNAL_PORT}" ]]; then
+                # Published releases before the browser launch-token flow
+                # print the plain local URL. Their outer Caddy authentication
+                # is sufficient, so keep the legacy path working without
+                # inventing a token.
+                DSH_LAUNCH_TOKEN=""
+                DSH_UPSTREAM_HOST="127.0.0.1:${DSH_INTERNAL_PORT}"
+                export DSH_LAUNCH_TOKEN
+                export DSH_UPSTREAM_HOST
+                return 0
+            fi
+        done < "${DSH_LAUNCH_LOG}"
+        if [[ -n "${token}" ]]; then
+            DSH_LAUNCH_TOKEN="${token}"
+            export DSH_LAUNCH_TOKEN
+            return 0
+        fi
+        if ! kill -0 "${DSH_PID}" 2>/dev/null; then
+            wait "${DSH_PID}" || true
+            fatal "DeepSeek Harness exited without publishing its browser launch token"
+        fi
+        sleep 1
+    done
+    fatal "DeepSeek Harness did not publish its browser launch token within 60 seconds"
 }
 
 shutdown_children() {
@@ -343,6 +388,7 @@ shutdown_children() {
             kill -TERM "${pid}" 2>/dev/null || true
         fi
     done
+    rm -f "${DSH_LAUNCH_LOG:-}" 2>/dev/null || true
 }
 
 PORT="${PORT:-8080}"
@@ -351,6 +397,7 @@ AUTH_MODE="${AUTH_MODE:-caddy-security}"
 AUTH_USERNAME="${AUTH_USERNAME:-admin}"
 AUTH_TOKEN_LIFETIME="${AUTH_TOKEN_LIFETIME:-3600}"
 AUTH_COOKIE_INSECURE="${AUTH_COOKIE_INSECURE:-false}"
+DSH_UPSTREAM_HOST="127.0.0.1:${DSH_INTERNAL_PORT}"
 
 validate_port PORT "${PORT}"
 validate_port DSH_INTERNAL_PORT "${DSH_INTERNAL_PORT}"
@@ -398,24 +445,30 @@ case "${AUTH_MODE}" in
 esac
 
 export PORT DSH_INTERNAL_PORT AUTH_MODE AUTH_USERNAME AUTH_TOKEN_LIFETIME AUTH_COOKIE_INSECURE
-export AUTH_DB_PATH
-
-gosu "${APP_USER}" env \
-    XDG_CONFIG_HOME="${CADDY_CONFIG_HOME}" \
-    XDG_DATA_HOME="${CADDY_DATA_HOME}" \
-    caddy validate --config "${CADDY_CONFIG}" --adapter caddyfile
+export AUTH_DB_PATH DSH_UPSTREAM_HOST
 
 trap shutdown_children TERM INT
+
+umask 077
+DSH_LAUNCH_LOG="${TMPDIR:-/tmp}/deepseek-harness-dsh-${BASHPID}.log"
+: > "${DSH_LAUNCH_LOG}"
 
 log "starting DeepSeek Harness ${DSH_VERSION:-unknown} on 127.0.0.1:${DSH_INTERNAL_PORT}"
 (
     cd "${DSH_WORKSPACE}"
     exec env -u AUTH_JWT_SECRET -u AUTH_PASSWORD_HASH \
-        gosu "${APP_USER}" dsh "${DSH_ARGS[@]}"
+        gosu "${APP_USER}" dsh "${DSH_ARGS[@]}" \
+        > >(tee "${DSH_LAUNCH_LOG}") 2>&1
 ) &
 DSH_PID=$!
 
 wait_for_dsh
+resolve_dsh_launch_token
+
+gosu "${APP_USER}" env \
+    XDG_CONFIG_HOME="${CADDY_CONFIG_HOME}" \
+    XDG_DATA_HOME="${CADDY_DATA_HOME}" \
+    caddy validate --config "${CADDY_CONFIG}" --adapter caddyfile
 
 log "starting Caddy on 0.0.0.0:${PORT} with AUTH_MODE=${AUTH_MODE}"
 gosu "${APP_USER}" env \

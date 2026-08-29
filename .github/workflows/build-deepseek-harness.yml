@@ -8,7 +8,7 @@ on:
         required: false
         default: ""
       dsh_version:
-        description: "DeepSeek Harness npm version or dist-tag; leave empty to resolve the highest published version"
+        description: "DeepSeek Harness npm version/dist-tag or source release; leave empty to use the checked-in source release"
         required: false
         default: ""
       platforms:
@@ -68,7 +68,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: "24.19.0"
+          node-version: "24.20.0"
 
       - name: Prepare DeepSeek Harness version
         id: dsh
@@ -76,10 +76,8 @@ jobs:
           INPUT_DSH_VERSION: ${{ inputs.dsh_version }}
         run: |
           set -euo pipefail
-          args=()
-          if [[ -n "${INPUT_DSH_VERSION}" ]]; then
-            args+=(--version "${INPUT_DSH_VERSION}")
-          fi
+          default_dsh_version="$(jq -er '.version' deepseek-harness-builder/image/dsh-source.json)"
+          args=(--version "${INPUT_DSH_VERSION:-${default_dsh_version}}")
           deepseek-harness-builder/scripts/prepare-dsh-version.sh \
             "${args[@]}" \
             --github-output "$GITHUB_OUTPUT"

@@ -47,9 +47,9 @@ jobs:
         id: dsh
         run: |
           set -euo pipefail
-          dsh_version="$(jq -r '.dependencies["@deepseek-ai/dsh"] // empty' deepseek-harness-builder/image/package.json)"
+          dsh_version="$(jq -r '.version // empty' deepseek-harness-builder/image/dsh-source.json)"
           if [[ ! "${dsh_version}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-            echo "ERROR: package.json does not contain a valid pinned @deepseek-ai/dsh version" >&2
+            echo "ERROR: dsh-source.json does not contain a valid pinned source version" >&2
             exit 1
           fi
           echo "dsh_version=${dsh_version}" >> "$GITHUB_OUTPUT"

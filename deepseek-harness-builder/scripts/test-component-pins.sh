@@ -40,6 +40,11 @@ cp -- "${source_dockerfile}" "${missing_x_mod_pin}"
 sed -i '/^ARG X_MOD_VERSION=/d' "${missing_x_mod_pin}"
 expect_failure 'missing-x-mod-pin' "${missing_x_mod_pin}" 'required ARG X_MOD_VERSION is missing'
 
+missing_x_crypto_pin="${tmp_dir}/missing-x-crypto-pin.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_x_crypto_pin}"
+sed -i '/^ARG X_CRYPTO_VERSION=/d' "${missing_x_crypto_pin}"
+expect_failure 'missing-x-crypto-pin' "${missing_x_crypto_pin}" 'required ARG X_CRYPTO_VERSION is missing'
+
 missing_npm_pin="${tmp_dir}/missing-npm-pin.Dockerfile"
 cp -- "${source_dockerfile}" "${missing_npm_pin}"
 sed -i '/^ARG NPM_VERSION=/d' "${missing_npm_pin}"
@@ -102,7 +107,7 @@ expect_failure 'local-bad-checksum' "${local_bad_checksum}" 'ADD checksum must b
 
 dsh_default="${tmp_dir}/dsh-default.Dockerfile"
 cp -- "${source_dockerfile}" "${dsh_default}"
-sed -i '0,/^[[:space:]]*ARG DSH_VERSION=$/s/^\([[:space:]]*ARG DSH_VERSION=\)$/\1unexpected-value/' "${dsh_default}"
+sed -i '0,/^[[:space:]]*ARG DSH_VERSION=[^[:space:]]*$/s/^\([[:space:]]*ARG DSH_VERSION=\)[^[:space:]]*/\1unexpected-value/' "${dsh_default}"
 expect_failure 'dsh-default' "${dsh_default}" 'ARG DSH_VERSION has inconsistent defaults'
 
 platform_floating="${tmp_dir}/platform-floating.Dockerfile"

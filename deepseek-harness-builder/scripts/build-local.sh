@@ -16,8 +16,8 @@ Usage: build-local.sh [options] [-- DOCKER_BUILD_ARGS...]
 Options:
   --target TARGET       Docker target: runtime or workstation (default: runtime)
   --tag TAG             Local image tag; defaults by target
-  --version VERSION     DeepSeek Harness npm version or dist-tag; defaults to the
-                        highest published semantic version
+  --version VERSION     DeepSeek Harness npm version/dist-tag or source release;
+                        defaults to the checked-in source release
   --platform PLATFORM   Optional Docker build platform
   -h, --help            Show this help
 EOF
@@ -90,6 +90,18 @@ if [[ -z "${tag}" ]]; then
   fi
 fi
 
+if [[ -z "${dsh_version}" ]]; then
+  dsh_version="$(node - "${image_dir}/dsh-source.json" <<'NODE'
+const fs = require('fs')
+const source = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
+if (typeof source.version !== 'string' || source.version === '') {
+  throw new Error('dsh-source.json does not contain a source version')
+}
+process.stdout.write(source.version)
+NODE
+)"
+fi
+
 tmp_dir="$(mktemp -d /tmp/deepseek-harness-local-build.XXXXXX)"
 cleanup() {
   rm -rf -- "${tmp_dir}"
@@ -101,9 +113,7 @@ mkdir -p -- "${tmp_image_dir}"
 cp -a "${image_dir}/." "${tmp_image_dir}/"
 
 prepare_args=(--image-dir "${tmp_image_dir}")
-if [[ -n "${dsh_version}" ]]; then
-  prepare_args+=(--version "${dsh_version}")
-fi
+prepare_args+=(--version "${dsh_version}")
 version_output="${tmp_dir}/version-output"
 "${script_dir}/prepare-dsh-version.sh" "${prepare_args[@]}" --github-output "${version_output}"
 resolved_dsh_version="$(sed -n 's/^dsh_version=//p' "${version_output}" | tail -n 1)"

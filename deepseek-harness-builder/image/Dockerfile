@@ -5,14 +5,16 @@ FROM caddy:2.11.4-builder-alpine@sha256:7bac9be4072f7c4db2ccc7350750e0705004bf02
 ARG CADDY_VERSION=2.11.4
 ARG CADDY_SOURCE_ARCHIVE_SHA256=2c3d02078286a6282cdb4d1d8744077788d556659dac0b64d8ed5886a7e5aeb9
 ARG CADDY_SECURITY_VERSION=1.1.64
-ARG CEL_GO_VERSION=0.31.0
+ARG CEL_GO_VERSION=0.32.0
 ARG GO_AUTHCRUNCH_VERSION=1.1.41
-ARG GRPC_VERSION=1.83.1
+ARG GRPC_VERSION=1.83.2
 ARG KLAUSPOST_COMPRESS_VERSION=1.19.2
+ARG X_CRYPTO_VERSION=0.55.0
 ARG X_TEXT_VERSION=0.41.0
 ARG CADDY_RATELIMIT_REF=5625512f24f6f59d6f64fb3aafe5eecff0b286db
 
 COPY patches/caddy-cel-go-v0.30.patch /tmp/caddy-cel-go-v0.30.patch
+COPY patches/caddy-cel-go-module-relocation.patch /tmp/caddy-cel-go-module-relocation.patch
 COPY patches/go-authcrunch-disable-openpgp.patch /tmp/go-authcrunch-disable-openpgp.patch
 
 # Caddy v2.11.4 predates CEL's InterpretableV2 API. Apply the exact source
@@ -27,7 +29,14 @@ RUN wget -qO /tmp/caddy.tar.gz \
     && tar -xzf /tmp/caddy.tar.gz -C /usr/src \
     && cd "/usr/src/caddy-${CADDY_VERSION}" \
     && git apply --check /tmp/caddy-cel-go-v0.30.patch \
-    && git apply /tmp/caddy-cel-go-v0.30.patch
+    && git apply /tmp/caddy-cel-go-v0.30.patch \
+    && git apply --check --unidiff-zero /tmp/caddy-cel-go-module-relocation.patch \
+    && git apply --unidiff-zero /tmp/caddy-cel-go-module-relocation.patch \
+    && PATH="/usr/local/go/bin:${PATH}" go mod edit \
+        -droprequire=github.com/google/cel-go \
+        -require="cel.dev/cel-go@v${CEL_GO_VERSION}" \
+    && grep -Eq "^[[:space:]]+cel\.dev/cel-go v${CEL_GO_VERSION}[[:space:]]*$" go.mod \
+    && ! grep -R -F 'github.com/google/cel-go' modules/caddyhttp
 
 # caddy-security's local password flow does not use go-authcrunch's GPG public
 # key parser. Remove that parser because x/crypto/openpgp is unmaintained and
@@ -50,9 +59,9 @@ RUN xcaddy build "v${CADDY_VERSION}" \
         --with "github.com/mholt/caddy-ratelimit@${CADDY_RATELIMIT_REF}" \
         --replace "github.com/caddyserver/caddy/v2=/usr/src/caddy-${CADDY_VERSION}" \
         --replace "github.com/greenpau/go-authcrunch@v${GO_AUTHCRUNCH_VERSION}=/usr/src/go-authcrunch-${GO_AUTHCRUNCH_VERSION}" \
-        --replace "github.com/google/cel-go=github.com/google/cel-go@v${CEL_GO_VERSION}" \
         --replace "google.golang.org/grpc=google.golang.org/grpc@v${GRPC_VERSION}" \
         --replace "github.com/klauspost/compress=github.com/klauspost/compress@v${KLAUSPOST_COMPRESS_VERSION}" \
+        --replace "golang.org/x/crypto=golang.org/x/crypto@v${X_CRYPTO_VERSION}" \
         --replace "golang.org/x/text=golang.org/x/text@v${X_TEXT_VERSION}" \
     && ./caddy version \
     && ./caddy list-modules | grep -Fx 'security' \
@@ -60,9 +69,10 @@ RUN xcaddy build "v${CADDY_VERSION}" \
     && ./caddy list-modules | grep -Fx 'http.authentication.providers.authorizer' \
     && ./caddy list-modules | grep -Fx 'http.handlers.rate_limit'
 
-RUN PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'google\.golang\.org/grpc[[:space:]]+v1\.83\.1' \
+RUN PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "google\.golang\.org/grpc[[:space:]]+v${GRPC_VERSION}" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'github\.com/klauspost/compress[[:space:]]+v1\.19\.2' \
-    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'github\.com/google/cel-go[[:space:]]+v0\.31\.0' \
+    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "cel\.dev/cel-go[[:space:]]+v${CEL_GO_VERSION}" \
+    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "golang\.org/x/crypto[[:space:]]+v${X_CRYPTO_VERSION}" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'golang\.org/x/text[[:space:]]+v0\.41\.0' \
     && set -- /tmp/buildenv_* \
     && test "$#" -eq 1 \
@@ -85,7 +95,7 @@ RUN mkdir -p /licenses \
         'c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4' \
         /licenses/CADDY_SECURITY_LICENSE | sha256sum -c - \
     && wget -qO /licenses/CEL_GO_LICENSE \
-        "https://raw.githubusercontent.com/google/cel-go/v${CEL_GO_VERSION}/LICENSE" \
+        "https://raw.githubusercontent.com/cel-expr/cel-go/v${CEL_GO_VERSION}/LICENSE" \
     && printf '%s  %s\n' \
         '4cdb9af102dfbb0ca03d87d6f650a505df098646a4080f4665b389ad9c6caa02' \
         /licenses/CEL_GO_LICENSE | sha256sum -c - \
@@ -126,12 +136,19 @@ RUN python3 --version | grep -Fx "Python ${PYTHON_VERSION}" \
     && python3 -m pytest --version | grep -Fx "pytest ${PYTEST_VERSION}" \
     && rm -f /tmp/python-requirements.txt
 
-FROM node:24.19.0-trixie-slim@sha256:0711b541c1c33a8a530ac4f0d391baa9a15b3d804695b1b24a47daa5fb60e74d AS dsh-deps
+FROM node:24.20.0-trixie-slim@sha256:50c3b2f6988dfc307b86e5301d69611af31f4789bdf232863b07d3b02fe55ae0 AS dsh-deps
 
-ARG DSH_VERSION=
+ARG DSH_VERSION=0.1.2-alpha.1
+ARG DSH_SOURCE_VERSION=0.1.2-alpha.1
+ARG DSH_SOURCE_REF=dsh-v0.1.2-alpha.1
+ARG DSH_SOURCE_COMMIT=cd5ef8148158c3a752a658978873241fdf8e2bbc
+ARG DSH_SOURCE_ARCHIVE_SHA256=08aaf69a036d893fbc63a8feb59acd293c6970f7ccc4d77779243e8140fa359e
 ARG PYTHON_VERSION=3.12.14
 ARG PYTEST_VERSION=9.1.1
-ARG PNPM_VERSION=11.22.0
+ARG PNPM_VERSION=11.24.0
+
+ADD --checksum=sha256:08aaf69a036d893fbc63a8feb59acd293c6970f7ccc4d77779243e8140fa359e \
+    https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/refs/tags/dsh-v0.1.2-alpha.1 /tmp/dsh-source.tar.gz
 
 ENV PYTHON=/usr/local/bin/python3
 
@@ -139,6 +156,7 @@ COPY --from=python-toolchain /usr/local /usr/local
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        cmake \
         g++ \
         make \
     && rm -rf /var/lib/apt/lists/*
@@ -152,34 +170,68 @@ WORKDIR /opt/dsh
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY scripts/patch-dsh-directory-picker.mjs /tmp/patch-dsh-directory-picker.mjs
 COPY scripts/patch-dsh-authenticated-settings.mjs /tmp/patch-dsh-authenticated-settings.mjs
+COPY scripts/patch-dsh-cli-runtime-dependency.mjs /tmp/patch-dsh-cli-runtime-dependency.mjs
+COPY scripts/patch-dsh-runtime-package.mjs /tmp/patch-dsh-runtime-package.mjs
 
 RUN corepack enable \
     && corepack prepare "pnpm@${PNPM_VERSION}" --activate \
-    && resolved_dsh_version="${DSH_VERSION:-$(node -p "require('./package.json').dependencies['@deepseek-ai/dsh']")}" \
-    && test "$(node -p "require('./package.json').dependencies['@deepseek-ai/dsh']")" = "${resolved_dsh_version}" \
-    && pnpm install --prod --frozen-lockfile --trust-lockfile \
-    && node /tmp/patch-dsh-directory-picker.mjs \
-    && node /tmp/patch-dsh-authenticated-settings.mjs \
+    && resolved_dsh_version="${DSH_VERSION:-${DSH_SOURCE_VERSION}}" \
+    && test "${DSH_SOURCE_REF}" = "dsh-v${DSH_SOURCE_VERSION}" \
+    && test "${DSH_SOURCE_COMMIT}" = 'cd5ef8148158c3a752a658978873241fdf8e2bbc' \
+    && printf '%s  %s\n' "${DSH_SOURCE_ARCHIVE_SHA256}" /tmp/dsh-source.tar.gz | sha256sum -c - \
+    && if [ "${resolved_dsh_version}" = "${DSH_SOURCE_VERSION}" ]; then \
+        mkdir -p /tmp/dsh-source \
+        && tar -xzf /tmp/dsh-source.tar.gz -C /tmp/dsh-source --strip-components=1 \
+        && test "$(node -p "require('/tmp/dsh-source/package.json').version")" = "${DSH_SOURCE_VERSION}" \
+        && test "$(node -p "require('/tmp/dsh-source/apps/cli/package.json').version")" = "${DSH_SOURCE_VERSION}" \
+        && cd /tmp/dsh-source \
+        && CI=true pnpm install --frozen-lockfile \
+        && node /tmp/patch-dsh-cli-runtime-dependency.mjs apps/cli/package.json \
+        && CI=true pnpm install --lockfile-only --ignore-scripts \
+        && DSH_CLIENT_COMMIT_HASH="${DSH_SOURCE_COMMIT}" CI=true pnpm run build:official \
+        && mkdir -p /tmp/dsh-pack/dsh /tmp/dsh-pack/vendor \
+        && DSH_CLIENT_COMMIT_HASH="${DSH_SOURCE_COMMIT}" CI=true pnpm exec tsx scripts/release/pack.ts --family dsh --out /tmp/dsh-pack/dsh \
+        && DSH_CLIENT_COMMIT_HASH="${DSH_SOURCE_COMMIT}" CI=true pnpm exec tsx scripts/release/pack.ts --family vendor --out /tmp/dsh-pack/vendor \
+        && cd /opt/dsh \
+        && npm init --yes >/dev/null \
+        && npm install --ignore-scripts --include=optional --no-audit --no-fund --package-lock=false \
+            /tmp/dsh-pack/dsh/*.tgz /tmp/dsh-pack/vendor/*.tgz \
+        && node /opt/dsh/node_modules/@deepseek-ai/dsh-subprocess-local/scripts/ensure-spawn-helper.mjs \
+        && npm rebuild --foreground-scripts koffi node-pty \
+        && node /tmp/patch-dsh-directory-picker.mjs /opt/dsh/node_modules \
+        && node /tmp/patch-dsh-authenticated-settings.mjs /opt/dsh/node_modules; \
+      else \
+        test "$(node -p "require('./package.json').dependencies['@deepseek-ai/dsh']")" = "${resolved_dsh_version}" \
+        && pnpm install --prod --frozen-lockfile --trust-lockfile \
+        && node /tmp/patch-dsh-directory-picker.mjs \
+        && node /tmp/patch-dsh-authenticated-settings.mjs; \
+      fi \
+    && cd /opt/dsh \
+    && node /tmp/patch-dsh-runtime-package.mjs /opt/dsh "${resolved_dsh_version}" \
     && rm -f /tmp/patch-dsh-directory-picker.mjs \
         /tmp/patch-dsh-authenticated-settings.mjs \
-    && pnpm exec dsh --version | grep -Fx "${resolved_dsh_version}" \
+        /tmp/patch-dsh-cli-runtime-dependency.mjs \
+        /tmp/patch-dsh-runtime-package.mjs \
+        /tmp/dsh-source.tar.gz \
+    && rm -rf /tmp/dsh-source /tmp/dsh-pack \
+    && /opt/dsh/node_modules/.bin/dsh --version | grep -Fx "${resolved_dsh_version}" \
     && node_pty_arch="$(node -p "process.arch")" \
     && case "${node_pty_arch}" in x64|arm64) ;; *) exit 1 ;; esac \
-    && find node_modules/.pnpm \
+    && find node_modules \
         \( \
-            -path '*/node_modules/node-pty/build/Release/pty.node' \
-            -o -path "*/node_modules/node-pty/prebuilds/linux-${node_pty_arch}/pty.node" \
+            -path '*/node-pty/build/Release/pty.node' \
+            -o -path "*/node-pty/prebuilds/linux-${node_pty_arch}/pty.node" \
         \) \
         -type f -print -quit | grep -q .
 
-FROM node:24.19.0-trixie-slim@sha256:0711b541c1c33a8a530ac4f0d391baa9a15b3d804695b1b24a47daa5fb60e74d AS pnpm-bundle
+FROM node:24.20.0-trixie-slim@sha256:50c3b2f6988dfc307b86e5301d69611af31f4789bdf232863b07d3b02fe55ae0 AS pnpm-bundle
 
-ARG PNPM_VERSION=11.22.0
+ARG PNPM_VERSION=11.24.0
 
 # The registry tarball is checksum-pinned so the runtime can provide pnpm
 # without retaining npm or Corepack.
-ADD --checksum=sha256:57a97e6f23a3faffc03153a4ef8c770a0552612b8640aebe39bfdd5754d0ebdc \
-    https://registry.npmjs.org/pnpm/-/pnpm-11.22.0.tgz /tmp/pnpm.tgz
+ADD --checksum=sha256:d1eab2433172661cc36a18ec85fce93f771db1962717329cc01ec9c2824ca24f \
+    https://registry.npmjs.org/pnpm/-/pnpm-11.24.0.tgz /tmp/pnpm.tgz
 
 RUN mkdir -p /opt/pnpm \
     && tar -xzf /tmp/pnpm.tgz -C /opt/pnpm --strip-components=1 \
@@ -187,15 +239,15 @@ RUN mkdir -p /opt/pnpm \
     && test "$(node /opt/pnpm/bin/pnpm.mjs --version)" = "${PNPM_VERSION}" \
     && rm -f /tmp/pnpm.tgz
 
-FROM node:24.19.0-trixie-slim@sha256:0711b541c1c33a8a530ac4f0d391baa9a15b3d804695b1b24a47daa5fb60e74d AS npm-bundle
+FROM node:24.20.0-trixie-slim@sha256:50c3b2f6988dfc307b86e5301d69611af31f4789bdf232863b07d3b02fe55ae0 AS npm-bundle
 
-ARG NPM_VERSION=11.19.0
+ARG NPM_VERSION=11.19.1
 
 # Node.js 24 currently bundles an older npm release. Keep workstation npm
 # independently checksum-pinned so security fixes do not wait for a new Node
 # base-image release, while the runtime target can continue omitting npm.
-ADD --checksum=sha256:31e9770f7dc71119a58509353b27917557aaf0ac9b5ef1a0465ee7d8ec67ae75 \
-    https://registry.npmjs.org/npm/-/npm-11.19.0.tgz /tmp/npm.tgz
+ADD --checksum=sha256:9f58bff01604cb1b14008fef14dceb14d836a49225e45c6c2e37de3be3e707f0 \
+    https://registry.npmjs.org/npm/-/npm-11.19.1.tgz /tmp/npm.tgz
 
 RUN mkdir -p /opt/npm \
     && tar -xzf /tmp/npm.tgz -C /opt/npm --strip-components=1 \
@@ -319,13 +371,14 @@ FROM golang:1.27.0-trixie@sha256:6212da3924947f4b6a939df02ea627c13f338f1a41d6c3f
 
 RUN go version | grep -F 'go1.27.0'
 
-FROM node:24.19.0-trixie-slim@sha256:0711b541c1c33a8a530ac4f0d391baa9a15b3d804695b1b24a47daa5fb60e74d AS runtime-base
+FROM node:24.20.0-trixie-slim@sha256:50c3b2f6988dfc307b86e5301d69611af31f4789bdf232863b07d3b02fe55ae0 AS runtime-base
 
 ARG CADDY_VERSION=2.11.4
 ARG CADDY_SECURITY_VERSION=1.1.64
-ARG DSH_VERSION=
+ARG DSH_VERSION=0.1.2-alpha.1
+ARG DSH_SOURCE_VERSION=0.1.2-alpha.1
 ARG PYTHON_VERSION=3.12.14
-ARG PNPM_VERSION=11.22.0
+ARG PNPM_VERSION=11.24.0
 
 ENV AUTH_MODE=caddy-security \
     AUTH_STATE_DIR=/data/auth \
@@ -381,12 +434,12 @@ RUN install -d -m 0750 -o node -g node \
     && chown -R node:node /home/node \
     && ln -s /opt/pnpm/bin/pnpm.mjs /usr/local/bin/pnpm \
     && ln -s /opt/pnpm/bin/pnpx.mjs /usr/local/bin/pnpx \
-    && resolved_dsh_version="${DSH_VERSION:-$(node -p "require('/opt/dsh/package.json').dependencies['@deepseek-ai/dsh']")}" \
+    && resolved_dsh_version="${DSH_VERSION:-${DSH_SOURCE_VERSION}}" \
     && printf 'DSH_VERSION=%s\n' "${resolved_dsh_version}" > /etc/deepseek-harness-version \
     && caddy version | grep -F "v${CADDY_VERSION}" \
     && caddy list-modules | grep -Fx 'security' \
     && dsh --version | grep -Fx "${resolved_dsh_version}" \
-    && node --version | grep -Fx 'v24.19.0' \
+    && node --version | grep -Fx 'v24.20.0' \
     && pnpm --version | grep -Fx "${PNPM_VERSION}"
 
 ENV DSH_VERSION_FILE=/etc/deepseek-harness-version
@@ -404,12 +457,12 @@ FROM go-toolchain AS workstation-tools
 ARG TARGETARCH
 ARG ACTIONLINT_VERSION=1.7.12
 ARG ACTIONLINT_SOURCE_SHA256=454800bd4f854592bcfe79b161f71d56e35940eb7016e48a26dd356adc9d400a
-ARG RUFF_VERSION=0.16.4
-ARG RUFF_SHA256_AMD64=9cb1234804ddb0f7f57cef3f81623ce5acb990e40af7cce08dc7778c9d7ee96c
-ARG RUFF_SHA256_ARM64=08eb65c07016f1b6d2a874777492a230c7d5822bdf34030af217825b57911b0a
-ARG UV_VERSION=0.12.5
-ARG UV_SHA256_AMD64=68a509da24b06b4223a1c0175fb5eb5bc79342b76cbeff0cfe51ac3f5b17b6b2
-ARG UV_SHA256_ARM64=9bf43b4d1a07665bf64d4c4e710930b382321a785e0eb10aac07f46471f86a31
+ARG RUFF_VERSION=0.16.5
+ARG RUFF_SHA256_AMD64=65b8bae7e43f12a91b71036a52176012b3aefb725d5ae263e2771474110a0983
+ARG RUFF_SHA256_ARM64=796079ea998dba3e455394077ba51a4c500c2402d3920580c646a0580f20370c
+ARG UV_VERSION=0.12.7
+ARG UV_SHA256_AMD64=788f18abea7c5f55d6216e4f5613fd89d4d59b631efeec117b2b07fe72f1da21
+ARG UV_SHA256_ARM64=66393193038dd7eb108abd7a218d9cec04ac70ab98242b0720fa94de19223b7c
 ARG YQ_VERSION=4.53.6
 ARG YQ_SHA256_AMD64=c5f056448f973ae7d39b5401949648a78f2dc1947d6a8eb65be60d5c504b9385
 ARG YQ_SHA256_ARM64=88a1016bc1d657375a35864e4f44b6f333df8ff97b559f51bba0adcb2169df09
@@ -511,10 +564,10 @@ ARG DOCKER_BUILDX_VERSION=0.36.1
 ARG DOCKER_COMPOSE_VERSION=5.5.0
 ARG DOCKER_VERSION=29.7.2
 ARG GO_VERSION=1.27.0
-ARG NPM_VERSION=11.19.0
+ARG NPM_VERSION=11.19.1
 ARG PYTHON_VERSION=3.12.14
 ARG PYTEST_VERSION=9.1.1
-ARG PNPM_VERSION=11.22.0
+ARG PNPM_VERSION=11.24.0
 
 ENV AUTH_STATE_DIR=/data/auth \
     CADDY_CONFIG_HOME=/data/caddy/config \
@@ -642,7 +695,7 @@ VOLUME ["/home/node"]
 
 FROM runtime-base AS runtime
 
-ARG PNPM_VERSION=11.22.0
+ARG PNPM_VERSION=11.24.0
 
 ENV DSH_IMAGE_VARIANT=runtime
 

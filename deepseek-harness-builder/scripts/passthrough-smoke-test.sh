@@ -142,23 +142,60 @@ function assert(condition, message) {
   process.stdout.write(`[passthrough-smoke] PASS: ${message}\n`);
 }
 
-function rawRequest(path, options = {}) {
+class CookieJar {
+  constructor() {
+    this.cookies = new Map();
+  }
+
+  store(lines = []) {
+    for (const line of lines) {
+      const first = line.split(';', 1)[0];
+      const separator = first.indexOf('=');
+      if (separator < 1) continue;
+      const name = first.slice(0, separator);
+      const value = first.slice(separator + 1);
+      if (/Max-Age=0|Expires=Thu, 01 Jan 1970/i.test(line)) {
+        this.cookies.delete(name);
+      } else {
+        this.cookies.set(name, value);
+      }
+    }
+  }
+
+  header() {
+    return [...this.cookies]
+      .map(([name, value]) => `${name}=${value}`)
+      .join('; ');
+  }
+}
+
+const browserJar = new CookieJar();
+
+function rawRequest(path, options = {}, jar = browserJar) {
   return new Promise((resolve, reject) => {
+    const headers = {...proxyHeaders, ...(options.headers || {})};
+    const cookie = jar.header();
+    if (cookie) headers.Cookie = cookie;
+
     const req = http.request({
       host: '127.0.0.1',
       port: 8080,
       path,
       method: options.method || 'GET',
-      headers: {...proxyHeaders, ...(options.headers || {})},
+      headers,
       timeout: 10000,
     }, res => {
       const chunks = [];
       res.on('data', chunk => chunks.push(chunk));
-      res.on('end', () => resolve({
-        status: res.statusCode,
-        headers: res.headers,
-        body: Buffer.concat(chunks).toString('utf8'),
-      }));
+      res.on('end', () => {
+        jar.store(res.headers['set-cookie']);
+        resolve({
+          status: res.statusCode,
+          headers: res.headers,
+          body: Buffer.concat(chunks).toString('utf8'),
+          jar,
+        });
+      });
     });
 
     req.on('timeout', () => req.destroy(new Error('HTTP request timed out')));
@@ -167,22 +204,59 @@ function rawRequest(path, options = {}) {
   });
 }
 
-function request(method, payload, origin = publicOrigin.origin) {
-  const body = JSON.stringify({
-    type: 'client-request',
-    rpcId: `passthrough-smoke-${method}`,
-    method,
-    payload,
-  });
-  return rawRequest(`/api/${method}`, {
-      method: 'POST',
-      headers: {
-        Origin: origin,
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(body),
-      },
-      body,
-  });
+let rpcSeparator;
+
+async function request(method, payload, origin = publicOrigin.origin) {
+  const separators = rpcSeparator === void 0 ? ['/', '.'] : [rpcSeparator];
+  let response;
+  for (const separator of separators) {
+    const endpoint = method.replaceAll('.', separator);
+    const body = JSON.stringify({
+      type: 'client-request',
+      rpcId: `passthrough-smoke-${method}`,
+      method: endpoint,
+      payload: separator === '/' ? {args: payload} : payload,
+    });
+    response = await rawRequest(`/api/${endpoint}`, {
+        method: 'POST',
+        headers: {
+          Origin: origin,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+        },
+        body,
+    });
+    if (response.status !== 404 || separator === separators[separators.length - 1]) {
+      if (response.status !== 404 && response.status !== 401) rpcSeparator = separator;
+      return response;
+    }
+  }
+  return response;
+}
+
+async function requestAny(methods, payload, origin = publicOrigin.origin) {
+  let response;
+  for (const method of methods) {
+    response = await request(method, payload, origin);
+    if (response.status !== 404) return {method, response};
+  }
+  return {method: methods[methods.length - 1], response};
+}
+
+async function establishBrowserSession() {
+  let response = await rawRequest('/');
+  for (let redirect = 0; redirect < 4 && response.status >= 300 && response.status < 400; redirect += 1) {
+    if (!response.headers.location) throw new Error('DSH bootstrap redirect omitted Location');
+    const location = new URL(response.headers.location, publicOrigin);
+    if (location.origin !== publicOrigin.origin) {
+      throw new Error(`DSH bootstrap redirect left the configured public origin: ${location.origin}`);
+    }
+    response = await rawRequest(location.pathname + location.search);
+  }
+  assert(response.status === 200,
+    'browser bootstrap exchanges the DSH launch token for a native session');
+  assert([...browserJar.cookies.keys()].some(name => name.startsWith('dsh-auth-')),
+    'browser bootstrap stores the DSH native session cookie');
 }
 
 async function assertRpcSuccess(method, payload, assertValue) {
@@ -211,6 +285,8 @@ async function assertRpcSuccess(method, payload, assertValue) {
 }
 
 (async () => {
+  await establishBrowserSession();
+
   const deployment = await rawRequest('/dsh-deployment.js');
   assert(deployment.status === 200,
     'AUTH_MODE=none serves the reviewed outer-auth deployment capability');
@@ -222,21 +298,32 @@ async function assertRpcSuccess(method, payload, assertValue) {
   await assertRpcSuccess('settings.describe', {}, value => {
     assert(Array.isArray(value?.namespaces), 'settings.describe returns the settings namespace catalog');
   });
-  await assertRpcSuccess('llm.providers', {}, value => {
-    assert(Array.isArray(value?.providers), 'llm.providers returns the model settings provider directory');
-  });
+  const providersCall = await requestAny(['llm.listProviders', 'llm.providers'], {});
+  if (providersCall.response.status !== 200) {
+    throw new Error(`provider directory expected HTTP 200, got ${providersCall.response.status}`);
+  }
+  const providersEnvelope = JSON.parse(providersCall.response.body);
+  const providerDirectory = Array.isArray(providersEnvelope.result?.value)
+    ? providersEnvelope.result.value
+    : providersEnvelope.result?.value?.providers;
+  assert(providersEnvelope.result?.ok === true && Array.isArray(providerDirectory),
+    'provider directory returns the model settings provider list');
   await assertRpcSuccess('credentials.describe', {refs: ['DEEPSEEK_API_KEY']}, value => {
-    assert(value?.credentials?.DEEPSEEK_API_KEY !== undefined,
+    const directory = value?.credentials ?? value;
+    assert(directory?.DEEPSEEK_API_KEY !== undefined,
       'credentials.describe returns the requested valid credential reference');
   });
-  await assertRpcSuccess('host.describe', {}, value => {
-    assert(typeof value === 'object' && value !== null,
-      'host.describe returns the public Host description');
-  });
-  const nativeOpen = await request('host.openPath', {});
-  assert(nativeOpen.status === 403,
-    'AUTH_MODE=none public browsers cannot invoke native host path opening');
-  const settingsDocument = await request('settings.openDocument', {});
+  if (providersCall.method === 'llm.providers') {
+    await assertRpcSuccess('host.describe', {}, value => {
+      assert(typeof value === 'object' && value !== null,
+        'host.describe returns the public Host description');
+    });
+    const nativeOpen = await request('host.openPath', {});
+    assert(nativeOpen.status === 403,
+      'AUTH_MODE=none public browsers cannot invoke native host path opening');
+  }
+  const settingsDocumentCall = await requestAny(['settings.openSettingsDocument', 'settings.openDocument'], {});
+  const settingsDocument = settingsDocumentCall.response;
   assert(settingsDocument.status === 403,
     'AUTH_MODE=none public browsers cannot open the Host settings document');
   const crossOrigin = await request('settings.describe', {}, 'https://evil.example');

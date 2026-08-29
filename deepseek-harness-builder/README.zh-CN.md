@@ -13,7 +13,7 @@
 
 两个工作流都会把相同标签发布到 `ghcr.io/okxlin/deepseek-harness` 和 `docker.io/$DOCKERHUB_USERNAME/deepseek-harness`。请把 `DOCKERHUB_USERNAME` 配置为 GitHub Actions 仓库变量或 Secret，并把 `DOCKERHUB_TOKEN` 配置为仓库 Secret。Docker Hub token 只用于 Registry 登录，不会传入镜像构建上下文。
 
-定时任务会解析 npm 中已发布 `@deepseek-ai/dsh` 的最高 SemVer，更新镜像构建上下文，并发布匹配的 `<DSH_VERSION>` 和 `<DSH_VERSION>-workstation` 标签。该默认行为有意不依赖可能落后于新预发布版本的 `latest` dist-tag；手动显式传入 `latest`、`next` 或准确版本时，仍按请求的 npm selector 解析。手动工作流也可覆盖发布标签。AppStore `latest` 通道使用浮动标签，编号 AppStore 版本使用匹配的版本标签。
+定时任务使用 [`image/dsh-source.json`](image/dsh-source.json) 中固定的 GitHub 源码版本，并发布匹配的 `<DSH_VERSION>` 和 `<DSH_VERSION>-workstation` 标签；这样上游源码版本可以在发布到 npm 之前进入镜像。手动显式传入已发布的 npm 版本或 dist-tag 时，仍按请求的 npm selector 解析。手动工作流也可覆盖发布标签。AppStore `latest` 通道使用浮动标签，编号 AppStore 版本使用匹配的版本标签。
 
 组件的准确固定版本由 [Dockerfile](image/Dockerfile)、[package.json](image/package.json)、[pnpm-lock.yaml](image/pnpm-lock.yaml)，以及 [runtime](../.github/workflows/build-deepseek-harness.yml) 和 [workstation](../.github/workflows/build-deepseek-harness-workstation.yml) 工作流定义。这些构建输入是唯一版本来源；README 只说明能力和更新策略，不重复维护具体版本号。
 
@@ -42,7 +42,7 @@ browser
 ## 构建
 
 ```bash
-# 默认/轻量镜像。默认解析已发布的最高 DSH 版本。
+# 默认/轻量镜像。默认构建仓库固定的源码版本。
 deepseek-harness-builder/scripts/build-local.sh \
   --target runtime \
   --tag deepseek-harness:local
@@ -53,13 +53,13 @@ deepseek-harness-builder/scripts/build-local.sh \
   --tag deepseek-harness-workstation:local
 ```
 
-本地构建辅助脚本会解析请求的 `@deepseek-ai/dsh` npm 版本，在临时构建上下文中更新 `package.json` 和 `pnpm-lock.yaml`，并把解析后的版本作为 Docker `DSH_VERSION` 传入。未给 selector 时会按 SemVer 优先级比较全部已发布版本；使用 `--version <release>` 或 npm dist-tag 可以指定准确版本或发布通道。直接 `docker build` 仍支持已提交的基线上下文；未提供构建参数时会从 `package.json` 推导 `DSH_VERSION`。
+本地构建辅助脚本默认使用 [`image/dsh-source.json`](image/dsh-source.json) 中固定的源码版本，并把其版本作为 Docker `DSH_VERSION` 传入。使用 `--version <source-release>` 可以显式构建该源码版本；也可以传入已发布的 npm 版本或 dist-tag，走兼容旧版本的 npm 构建路径。使用 npm selector 时，脚本只会在临时构建上下文中更新 `package.json` 和 `pnpm-lock.yaml`。直接 `docker build` 仍支持已提交的源码基线上下文。
 
-生产依赖闭包由活跃构建上下文中的 `pnpm-lock.yaml` 固定。pnpm 生命周期脚本 fail-closed，并限制在 `pnpm-workspace.yaml` 中已审查的软件包内。
+对于仓库固定的源码版本，Docker 会校验不可变的 GitHub 源码归档，使用上游 lockfile，构建官方 CLI 和 Web UI，打包 DSH 与 vendor workspace，再将本地 tarball 安装到扁平的 npm runtime 依赖树中。安装脚本默认关闭，只有审查过的 `koffi`/`node-pty` 原生重编译和 subprocess helper 会被显式执行。已发布的 npm 版本仍使用仓库冻结的 `pnpm-lock.yaml` 路径。这样两个发布路径都可复现，同时允许尚未发布到 npm 的上游源码版本通过相同的补丁和 smoke 合约。
 
 镜像构建会对 DSH browse 目录选择器应用一个范围很小、并且会校验源码形状的兼容性补丁，使网页的 **Add workspace** 对话框在未指定路径时从 `DSH_WORKSPACE` 开始，而不是从进程 `HOME` 开始。如果上游实现发生变化，构建会 fail-closed，直到重新审查补丁和 smoke 合约。该补丁不会改变 workstation 的 `HOME` 值或工具持久化路径。
 
-自定义 Caddy 构建会校验 Caddy 和 go-authcrunch 源码归档 checksum，移除 go-authcrunch 未使用的 GPG 公钥解析器，并在链接前运行上游 identity 包测试。它会对固定 Caddy 源码应用上游的两行 CEL 兼容修复，再将 `cel-go` 提升到已修复版本。caddy-security 仍保留 SSH 公钥支持，同时生成的 `CADDY_GO_PACKAGES.txt` 清单不得包含 `golang.org/x/crypto/openpgp` 包。限速模块及其许可证也会在同一构建中固定和校验。构建还会把 `grpc`、`klauspost/compress` 和 `x/text` 提升到已修复版本。
+自定义 Caddy 构建会校验 Caddy 和 go-authcrunch 源码归档 checksum，移除 go-authcrunch 未使用的 GPG 公钥解析器，并在链接前运行上游 identity 包测试。它会对固定 Caddy 源码应用上游的两行 CEL 兼容修复，再将安全敏感的 Go 模块提升到已修复版本。caddy-security 仍保留 SSH 公钥支持，同时生成的 `CADDY_GO_PACKAGES.txt` 清单不得包含 `golang.org/x/crypto/openpgp` 包。限速模块及其许可证也会在同一构建中固定和校验。
 
 两个镜像都包含校验和固定的独立 pnpm bundle，并移除 Corepack，避免所选 pnpm 版本静默跟随包管理器通道。轻量 runtime 还会移除 npm 和 npx；workstation 会用单独校验和固定的 npm 11 bundle 替换 Node.js 自带的旧 npm，为开发兼容性提供 npm 和 npx，并在镜像构建及 smoke 测试中校验版本。
 
@@ -363,9 +363,9 @@ docker run --rm --entrypoint tar \
 
 ## 资源使用
 
-当前 amd64 认证烟雾测试稳定在约 `167-180 MiB` 和约 `20-21` 个 PID。workstation 工具链空闲时不会显著提高内存，但会提高磁盘占用：当前本地 amd64 Docker size 在 registry 压缩前约为轻量镜像 `670-700 MB`、workstation `2.1-2.2 GB`，具体取决于解析到的 DSH 版本。Debian 重建可能改变这些数字。
+alpha 源码版本的 amd64 认证烟雾测试在启动预热后目前稳定在约 `240-325 MiB` 和 `20-22` 个 PID。workstation 工具链空闲时不会显著提高内存，但源码构建会因为本地编译上游 CLI 和 vendor workspace 而比历史 npm-only 镜像更大；Debian 或上游重建可能改变这些数字。
 
-CI 对空闲流程的上限仍为 `256 MiB`。这不是工作负载限制：终端、仓库、语言服务器、编译器和模型工具可能需要更多内存。
+alpha 源码版本的 CI 空闲流程上限为 `384 MiB`。smoke 会在初始化完成后等待连续三个样本，再应用该上限。这不是工作负载限制：终端、仓库、语言服务器、编译器和模型工具可能需要更多内存。
 
 `GOMEMLIMIT=128MiB` 和 `GOMAXPROCS=2` 只限制 Caddy 的 Go runtime。如果 1Panel 需要容器内存限制，轻量镜像建议从 `512 MiB` 开始，workstation 至少从 `1 GiB` 开始，再按观测工作负载调整，不要把 Caddy 限制当成整个容器预算。
 
@@ -434,4 +434,4 @@ Caddy 生产二进制文件已 stripped。Go 文档说明，在没有可提取�
 `/data` 挂载。如果新的认证状态为空，entrypoint 会把旧 workstation 应用状态复制到
 `/data`。确认迁移数据后，后续容器仍必须挂载 `/data`；旧路径不能替代它。
 
-Caddy 和 caddy-security 会一起编译并固定版本。不能假设只更新 Caddy 是安全的。定时发布工作流会解析 npm 中 `@deepseek-ai/dsh` 已发布的最高 SemVer，在构建 workspace 中临时更新 `package.json` 和 `pnpm-lock.yaml`，把解析出的版本作为 Docker `DSH_VERSION` 构建参数，并把 `runtime` target 发布为 `latest` 加 `<DSH_VERSION>`，把 `workstation` target 发布为 `workstation` 加 `<DSH_VERSION>-workstation`。手动运行可以覆盖 DSH 包准确版本或 dist-tag，也可覆盖最终镜像标签，同时保留相同验证和可选浮动标签行为。每个工作流都会先审计冻结的 pnpm 生产依赖树、重建并验证插件、运行 Caddy 依赖图和 `govulncheck` 门禁，并执行 amd64 和 arm64 烟雾合约，然后才把验证过的多平台 manifest 推送到 GHCR 和 Docker Hub。runtime 发布继续应用零可修复 HIGH/CRITICAL Trivy 门禁；工具链范围更广的 workstation 会阻断可修复 CRITICAL，并报告可修复 HIGH 供确定性审查，同时由每日组件检查发现新的上游版本。任一 registry 登录或发布失败，工作流都会失败，而不是报告完整发布。
+Caddy 和 caddy-security 会一起编译并固定版本。不能假设只更新 Caddy 是安全的。定时发布工作流会构建 `image/dsh-source.json` 中记录的不可变源码版本，把其版本作为 Docker `DSH_VERSION` 构建参数，并把 `runtime` target 发布为 `latest` 加 `<DSH_VERSION>`，把 `workstation` target 发布为 `workstation` 加 `<DSH_VERSION>-workstation`。手动运行可以选择该源码版本、已发布的 DSH npm 版本或 dist-tag，也可覆盖最终镜像标签，同时保留相同验证和可选浮动标签行为。每个工作流都会先审计依赖树、重建并验证插件、运行 Caddy 依赖图和 `govulncheck` 门禁，并执行 amd64 和 arm64 烟雾合约，然后才把验证过的多平台 manifest 推送到 GHCR 和 Docker Hub。runtime 发布继续应用零可修复 HIGH/CRITICAL Trivy 门禁；工具链范围更广的 workstation 会阻断可修复 CRITICAL，并报告可修复 HIGH 供确定性审查，同时由每日组件检查发现新的上游版本。任一 registry 登录或发布失败，工作流都会失败，而不是报告完整发布。

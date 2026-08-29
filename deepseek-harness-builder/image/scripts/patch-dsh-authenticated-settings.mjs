@@ -10,9 +10,26 @@ const settingsName = '@deepseek-ai/dsh-client-ui-settings'
 const frontendPrefix = '@deepseek-ai+dsh-web-frontend@'
 const frontendName = '@deepseek-ai/dsh-web-frontend'
 
-const entries = await readdir(pnpmRoot, { withFileTypes: true })
+const entries = await readdir(pnpmRoot, { withFileTypes: true }).catch((error) => {
+  if (error?.code === 'ENOENT') return null
+  throw error
+})
 
-function packagePath(prefix, packageName) {
+async function packagePath(prefix, packageName) {
+  const directRoot = join(pnpmRoot, ...packageName.split('/'))
+  try {
+    const manifest = JSON.parse(await readFile(join(directRoot, 'package.json'), 'utf8'))
+    if (manifest.name !== packageName) {
+      throw new Error(`unexpected package at ${directRoot}: ${manifest.name}`)
+    }
+    return directRoot
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+  }
+
+  if (entries === null) {
+    throw new Error(`cannot find ${packageName} under ${pnpmRoot}`)
+  }
   const candidates = entries.filter(
     (entry) => entry.isDirectory() && entry.name.startsWith(prefix),
   )
@@ -45,7 +62,7 @@ function count(source, needle) {
 }
 
 async function patchSettingsMirror() {
-  const packageRoot = packagePath(settingsPrefix, settingsName)
+  const packageRoot = await packagePath(settingsPrefix, settingsName)
   const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'))
   if (manifest.name !== settingsName) {
     throw new Error(`unexpected package at ${packageRoot}: ${manifest.name}`)
@@ -54,39 +71,20 @@ async function patchSettingsMirror() {
   const target = join(packageRoot, 'lib', 'client.js')
   await assertTarget(target, 'settings client patch target')
   const source = await readFile(target, 'utf8')
-  const replacements = [
-    {
-      label: 'settings scope',
-      original: 'new SettingsScopeController(connection.api, spec, this.mirror, connection.isLoopback ? "host" : "memory", this.schema)',
-      replacement: `new SettingsScopeController(connection.api, spec, this.mirror, connection.isLoopback || ${AUTHENTICATED_SETTINGS_FLAG} ? "host" : "memory", this.schema)`,
-    },
-    {
-      label: 'settings mirror',
-      original: 'new SettingsDescribeMirror(connection.api, connection.isLoopback ? "host" : "memory")',
-      replacement: `new SettingsDescribeMirror(connection.api, connection.isLoopback || ${AUTHENTICATED_SETTINGS_FLAG} ? "host" : "memory")`,
-    },
-  ]
-
-  const shapes = replacements.map(({ label, original, replacement }) => ({
-    label,
-    original: count(source, original),
-    replacement: count(source, replacement),
-  }))
-  if (shapes.every((shape) => shape.original === 0 && shape.replacement === 1)) {
+  const original = 'connection.isLoopback ? "host" : "memory"'
+  const replacement = `connection.isLoopback || ${AUTHENTICATED_SETTINGS_FLAG} ? "host" : "memory"`
+  const originalCount = count(source, original)
+  const replacementCount = count(source, replacement)
+  if (originalCount === 0 && replacementCount === 2) {
     process.stdout.write(`[dsh-patch] authenticated settings client already patched: ${target}\n`)
     return
   }
-  if (!shapes.every((shape) => shape.original === 1 && shape.replacement === 0)) {
-    throw new Error(`unexpected settings client source shape: ${shapes.map((shape) => `${shape.label}[original=${shape.original}, replacement=${shape.replacement}]`).join(', ')}`)
+  if (originalCount !== 2 || replacementCount !== 0) {
+    throw new Error(`unexpected settings client source shape: loopback[original=${originalCount}, replacement=${replacementCount}]`)
   }
 
-  const patched = replacements.reduce(
-    (result, { original, replacement }) => result.replace(original, replacement),
-    source,
-  )
-  if (!replacements.every(({ original, replacement }) => (
-    count(patched, original) === 0 && count(patched, replacement) === 1
-  ))) {
+  const patched = source.replaceAll(original, replacement)
+  if (count(patched, original) !== 0 || count(patched, replacement) !== 2) {
     throw new Error(`failed to verify authenticated settings client patch: ${target}`)
   }
   await writeFile(target, patched, 'utf8')
@@ -94,7 +92,7 @@ async function patchSettingsMirror() {
 }
 
 async function patchFrontendBootstrap() {
-  const packageRoot = packagePath(frontendPrefix, frontendName)
+  const packageRoot = await packagePath(frontendPrefix, frontendName)
   const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'))
   if (manifest.name !== frontendName) {
     throw new Error(`unexpected package at ${packageRoot}: ${manifest.name}`)

@@ -30,7 +30,7 @@
       "pin": "CEL_GO_VERSION",
       "source": {
         "type": "go_module",
-        "module": "github.com/google/cel-go"
+        "module": "cel.dev/cel-go"
       }
     },
     {
@@ -55,6 +55,14 @@
       "source": {
         "type": "go_module",
         "module": "golang.org/x/text"
+      }
+    },
+    {
+      "name": "x/crypto security override",
+      "pin": "X_CRYPTO_VERSION",
+      "source": {
+        "type": "go_module",
+        "module": "golang.org/x/crypto"
       }
     },
     {
