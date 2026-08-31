@@ -111,8 +111,9 @@ import { mkdir, readFile, rm } from 'node:fs/promises'
 
 const require = createRequire('/opt/dsh/node_modules/.pnpm/anchor.js')
 const load = async name => import(pathToFileURL(require.resolve(name)).href)
-const [cordis, sandboxLocal, sandboxPolicy, subprocessLocal, bashSandbox] = await Promise.all([
+const [cordis, sessionProjection, sandboxLocal, sandboxPolicy, subprocessLocal, bashSandbox] = await Promise.all([
   load('@deepseek-ai/cordis'),
+  load('@deepseek-ai/dsh-session-projection'),
   load('@deepseek-ai/dsh-sandbox-local'),
   load('@deepseek-ai/dsh-sandbox-policy'),
   load('@deepseek-ai/dsh-subprocess-local'),
@@ -129,6 +130,7 @@ await mkdir(outside, { recursive: true })
 const ctx = new cordis.Context()
 try {
   await ctx.plugin(sandboxLocal.LocalSandboxProvider, {})
+  await ctx.plugin(sessionProjection.default)
   await ctx.plugin(sandboxPolicy.SandboxPolicyService, {
     mode: 'workspace-write',
     workspaceRoot: workspace,
