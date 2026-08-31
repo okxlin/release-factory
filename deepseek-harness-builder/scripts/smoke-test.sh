@@ -308,10 +308,24 @@ async function packageRoot(packageName) {
 const settingsRoot = await packageRoot('@deepseek-ai/dsh-client-ui-settings');
 const settingsSource = await readFile(join(settingsRoot, 'lib', 'client.js'), 'utf8');
 const remoteGate = 'globalThis.__DSH_AUTHENTICATED_SETTINGS__ === true';
-assert.equal(settingsSource.split(remoteGate).length - 1, 2,
-  'settings mirror and namespace scopes carry the authenticated-proxy gate');
-assert(!settingsSource.includes('connection.isLoopback ? "host" : "memory"'),
-  'settings persistence no longer depends exclusively on browser loopback');
+const settingsPatchShapes = [
+  {
+    original: 'connection.isLoopback ? "host" : "memory"',
+    replacement: `connection.isLoopback || ${remoteGate} ? "host" : "memory"`,
+    occurrences: 2,
+  },
+  {
+    original: 'ctx.remote.$host.isLoopback ? "host" : "memory"',
+    replacement: `ctx.remote.$host.isLoopback || ${remoteGate} ? "host" : "memory"`,
+    occurrences: 1,
+  },
+];
+const validSettingsPatch = settingsPatchShapes.filter(({original, replacement, occurrences}) =>
+  !settingsSource.includes(original)
+  && settingsSource.split(replacement).length - 1 === occurrences,
+);
+assert.equal(validSettingsPatch.length, 1,
+  'settings persistence accepts the authenticated-proxy capability for the installed upstream shape');
 
 const frontendRoot = await packageRoot('@deepseek-ai/dsh-web-frontend');
 const html = await readFile(join(frontendRoot, 'dist', 'index.html'), 'utf8');

@@ -71,20 +71,40 @@ async function patchSettingsMirror() {
   const target = join(packageRoot, 'lib', 'client.js')
   await assertTarget(target, 'settings client patch target')
   const source = await readFile(target, 'utf8')
-  const original = 'connection.isLoopback ? "host" : "memory"'
-  const replacement = `connection.isLoopback || ${AUTHENTICATED_SETTINGS_FLAG} ? "host" : "memory"`
-  const originalCount = count(source, original)
-  const replacementCount = count(source, replacement)
-  if (originalCount === 0 && replacementCount === 2) {
+  const patchShapes = [
+    {
+      name: 'connection loopback',
+      original: 'connection.isLoopback ? "host" : "memory"',
+      replacement: `connection.isLoopback || ${AUTHENTICATED_SETTINGS_FLAG} ? "host" : "memory"`,
+      occurrences: 2,
+    },
+    {
+      name: 'remote host loopback',
+      original: 'ctx.remote.$host.isLoopback ? "host" : "memory"',
+      replacement: `ctx.remote.$host.isLoopback || ${AUTHENTICATED_SETTINGS_FLAG} ? "host" : "memory"`,
+      occurrences: 1,
+    },
+  ]
+  const alreadyPatched = patchShapes.filter(({ original, replacement, occurrences }) => (
+    count(source, original) === 0 && count(source, replacement) === occurrences
+  ))
+  if (alreadyPatched.length === 1) {
     process.stdout.write(`[dsh-patch] authenticated settings client already patched: ${target}\n`)
     return
   }
-  if (originalCount !== 2 || replacementCount !== 0) {
-    throw new Error(`unexpected settings client source shape: loopback[original=${originalCount}, replacement=${replacementCount}]`)
+  const candidates = patchShapes.filter(({ original, replacement, occurrences }) => (
+    count(source, original) === occurrences && count(source, replacement) === 0
+  ))
+  if (candidates.length !== 1) {
+    const shapeSummary = patchShapes.map(({ name, original, replacement }) => (
+      `${name}[original=${count(source, original)}, replacement=${count(source, replacement)}]`
+    )).join(', ')
+    throw new Error(`unexpected settings client source shape: ${shapeSummary}`)
   }
 
+  const { original, replacement, occurrences } = candidates[0]
   const patched = source.replaceAll(original, replacement)
-  if (count(patched, original) !== 0 || count(patched, replacement) !== 2) {
+  if (count(patched, original) !== 0 || count(patched, replacement) !== occurrences) {
     throw new Error(`failed to verify authenticated settings client patch: ${target}`)
   }
   await writeFile(target, patched, 'utf8')
