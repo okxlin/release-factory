@@ -16,6 +16,13 @@ env:
   OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE: docker.io/library/node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
   OPENCLAW_NODE_BOOKWORM_SLIM_DIGEST: sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
   OPENCLAW_NPM_VERSION: "11.18.0"
+  # Docker's Debian packages can lag a Go security point release. Build the
+  # sandbox CLI and Compose plugin with a pinned patched toolchain and source.
+  OPENCLAW_DOCKER_TOOLCHAIN_IMAGE: docker.io/library/golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514
+  OPENCLAW_DOCKER_CLI_SOURCE_REF: a7dcaa6fdb6ed04aacbfdc76357fdae01605609e
+  OPENCLAW_DOCKER_CLI_VERSION: "29.7.2"
+  OPENCLAW_DOCKER_COMPOSE_SOURCE_REF: 870908cc8f07f5e90acdf5d34dd1b96a4fe51d16
+  OPENCLAW_DOCKER_COMPOSE_VERSION: "5.5.0"
 
 jobs:
   check-and-build:
@@ -133,11 +140,23 @@ jobs:
             OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE=${{ env.OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE }}
             OPENCLAW_NODE_BOOKWORM_SLIM_DIGEST=${{ env.OPENCLAW_NODE_BOOKWORM_SLIM_DIGEST }}
             OPENCLAW_NPM_VERSION=${{ env.OPENCLAW_NPM_VERSION }}
+            OPENCLAW_DOCKER_TOOLCHAIN_IMAGE=${{ env.OPENCLAW_DOCKER_TOOLCHAIN_IMAGE }}
+            OPENCLAW_DOCKER_CLI_SOURCE_REF=${{ env.OPENCLAW_DOCKER_CLI_SOURCE_REF }}
+            OPENCLAW_DOCKER_CLI_VERSION=${{ env.OPENCLAW_DOCKER_CLI_VERSION }}
+            OPENCLAW_DOCKER_COMPOSE_SOURCE_REF=${{ env.OPENCLAW_DOCKER_COMPOSE_SOURCE_REF }}
+            OPENCLAW_DOCKER_COMPOSE_VERSION=${{ env.OPENCLAW_DOCKER_COMPOSE_VERSION }}
           load: true
           tags: ${{ env.TEST_IMAGE }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verify bundled Docker tools
+        if: steps.check_exists.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint /usr/bin/docker "${TEST_IMAGE}" --version
+          docker run --rm --entrypoint /usr/libexec/docker/cli-plugins/docker-compose "${TEST_IMAGE}" version --short
 
       - name: Run Trivy vulnerability gate
         if: steps.check_exists.outputs.skip == 'false'
@@ -174,6 +193,11 @@ jobs:
             OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE=${{ env.OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE }}
             OPENCLAW_NODE_BOOKWORM_SLIM_DIGEST=${{ env.OPENCLAW_NODE_BOOKWORM_SLIM_DIGEST }}
             OPENCLAW_NPM_VERSION=${{ env.OPENCLAW_NPM_VERSION }}
+            OPENCLAW_DOCKER_TOOLCHAIN_IMAGE=${{ env.OPENCLAW_DOCKER_TOOLCHAIN_IMAGE }}
+            OPENCLAW_DOCKER_CLI_SOURCE_REF=${{ env.OPENCLAW_DOCKER_CLI_SOURCE_REF }}
+            OPENCLAW_DOCKER_CLI_VERSION=${{ env.OPENCLAW_DOCKER_CLI_VERSION }}
+            OPENCLAW_DOCKER_COMPOSE_SOURCE_REF=${{ env.OPENCLAW_DOCKER_COMPOSE_SOURCE_REF }}
+            OPENCLAW_DOCKER_COMPOSE_VERSION=${{ env.OPENCLAW_DOCKER_COMPOSE_VERSION }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
