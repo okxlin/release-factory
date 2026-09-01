@@ -76,7 +76,7 @@ gh workflow run build-deepseek-harness.yml \
 - 在推送前构建本地测试镜像，并运行项目对应的容器、鉴权、WebSocket、工具链或运行时冒烟测试。
 - 使用 [Trivy 门禁](SECURITY_SCAN.md)统计可修复的 HIGH/CRITICAL 漏洞；阈值按镜像类型独立配置，不代表所有工作流都采用零阈值。
 - DeepSeek Harness 额外执行 pnpm audit、Caddy 依赖图检查、`govulncheck`、双架构冒烟测试和 Workstation Compose 权限契约检查。
-- Codex Workstation 校验 Paseo 供应链记录与运行时契约；OpenClaw 校验上游 Release 标签、仓库内加固脚本和关键基础镜像摘要。
+- Codex Workstation 校验 Paseo 供应链记录与运行时契约；OpenClaw 校验上游 Release 标签，执行仓库内加固脚本，用固定且可验证的 Go 工具链重建沙箱所需的 Docker CLI/Compose，并固定关键基础镜像摘要。
 
 通过安全扫描不等于不存在任何漏洞。门禁主要约束有修复版本的 HIGH/CRITICAL 问题；使用者仍需结合镜像来源、运行权限、网络暴露和业务环境评估风险。
 
