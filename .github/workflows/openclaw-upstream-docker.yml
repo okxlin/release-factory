@@ -99,10 +99,8 @@ jobs:
         if: steps.check_exists.outputs.skip == 'false'
         run: |
           set -euo pipefail
-          PATCH_PATH="${GITHUB_WORKSPACE}/patches/openclaw-runtime-hardening.patch"
-          git -C openclaw-src apply --check "$PATCH_PATH"
-          git -C openclaw-src apply "$PATCH_PATH"
-          git -C openclaw-src diff --check
+          chmod +x scripts/apply-openclaw-runtime-hardening.sh
+          scripts/apply-openclaw-runtime-hardening.sh openclaw-src
 
       - name: Set up QEMU
         if: steps.check_exists.outputs.skip == 'false'

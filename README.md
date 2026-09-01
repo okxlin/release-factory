@@ -17,7 +17,7 @@ Release Factory 集中维护 1Panel 离线安装包、AI 开发工作站、浏�
 | Gemini Skill Browser（Kasm） | `ghcr.io/okxlin/gemini-skill-browser` | `linux/amd64` | [说明](gemini-skill-browser-builder/README.md) · [Workflow](.github/workflows/build-gemini-skill-browser.yml) |
 | Gemini Skill Browser（LinuxServer） | 与 Kasm 共用镜像仓库，使用 `-linuxserver` 标签 | `linux/amd64` | [说明](gemini-skill-browser-linuxserver-builder/README.md) · [Workflow](.github/workflows/build-gemini-skill-browser-linuxserver.yml) |
 | OpenCode Workstation | `ghcr.io/okxlin/opencode-workstation` | `linux/amd64`、`linux/arm64` | [说明](opencode-workstation-builder/README.md) · [Workflow](.github/workflows/build-opencode-workstation.yml) |
-| OpenClaw Sandbox | `ghcr.io/okxlin/openclaw-sandbox` | GitHub Actions runner 默认架构 | [Workflow](.github/workflows/openclaw-upstream-docker.yml) · [加固补丁](patches/openclaw-runtime-hardening.patch) |
+| OpenClaw Sandbox | `ghcr.io/okxlin/openclaw-sandbox` | GitHub Actions runner 默认架构 | [Workflow](.github/workflows/openclaw-upstream-docker.yml) · [加固脚本](scripts/apply-openclaw-runtime-hardening.sh) |
 
 根 README 是导航入口。具体镜像的启动参数、鉴权、持久化、工具链、升级和权限边界，以项目目录中的 README、Compose 文件和工作流为准。
 
@@ -76,7 +76,7 @@ gh workflow run build-deepseek-harness.yml \
 - 在推送前构建本地测试镜像，并运行项目对应的容器、鉴权、WebSocket、工具链或运行时冒烟测试。
 - 使用 [Trivy 门禁](SECURITY_SCAN.md)统计可修复的 HIGH/CRITICAL 漏洞；阈值按镜像类型独立配置，不代表所有工作流都采用零阈值。
 - DeepSeek Harness 额外执行 pnpm audit、Caddy 依赖图检查、`govulncheck`、双架构冒烟测试和 Workstation Compose 权限契约检查。
-- Codex Workstation 校验 Paseo 供应链记录与运行时契约；OpenClaw 校验上游 Release 标签、仓库内加固补丁和关键基础镜像摘要。
+- Codex Workstation 校验 Paseo 供应链记录与运行时契约；OpenClaw 校验上游 Release 标签、仓库内加固脚本和关键基础镜像摘要。
 
 通过安全扫描不等于不存在任何漏洞。门禁主要约束有修复版本的 HIGH/CRITICAL 问题；使用者仍需结合镜像来源、运行权限、网络暴露和业务环境评估风险。
 
@@ -102,7 +102,6 @@ gh workflow run build-deepseek-harness.yml \
 | [`gemini-skill-browser-builder/`](gemini-skill-browser-builder/) | 基于 Kasm Edge 的 Gemini Skill Browser |
 | [`gemini-skill-browser-linuxserver-builder/`](gemini-skill-browser-linuxserver-builder/) | 基于 LinuxServer Chrome 的 Gemini Skill Browser |
 | [`opencode-workstation-builder/`](opencode-workstation-builder/) | OpenCode 持久化开发工作站 |
-| [`patches/`](patches/) | 经审查的上游构建或运行时补丁 |
 | [`scripts/`](scripts/) | 跨项目共享的 CI 门禁脚本 |
 | [`SECURITY_SCAN.md`](SECURITY_SCAN.md) | 漏洞阈值、安全例外和客户端依赖说明 |
 

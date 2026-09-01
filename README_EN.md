@@ -17,7 +17,7 @@ Release Factory maintains build and publication pipelines for 1Panel offline pac
 | Gemini Skill Browser (Kasm) | `ghcr.io/okxlin/gemini-skill-browser` | `linux/amd64` | [Documentation](gemini-skill-browser-builder/README.md) · [Workflow](.github/workflows/build-gemini-skill-browser.yml) |
 | Gemini Skill Browser (LinuxServer) | Shares the Kasm repository and uses `-linuxserver` tags | `linux/amd64` | [Documentation](gemini-skill-browser-linuxserver-builder/README.md) · [Workflow](.github/workflows/build-gemini-skill-browser-linuxserver.yml) |
 | OpenCode Workstation | `ghcr.io/okxlin/opencode-workstation` | `linux/amd64`, `linux/arm64` | [Documentation](opencode-workstation-builder/README.md) · [Workflow](.github/workflows/build-opencode-workstation.yml) |
-| OpenClaw Sandbox | `ghcr.io/okxlin/openclaw-sandbox` | GitHub Actions runner default | [Workflow](.github/workflows/openclaw-upstream-docker.yml) · [Hardening patch](patches/openclaw-runtime-hardening.patch) |
+| OpenClaw Sandbox | `ghcr.io/okxlin/openclaw-sandbox` | GitHub Actions runner default | [Workflow](.github/workflows/openclaw-upstream-docker.yml) · [Hardening script](scripts/apply-openclaw-runtime-hardening.sh) |
 
 The root README is a navigation map. Project READMEs, Compose files, and workflows are authoritative for image startup, authentication, persistence, toolchains, upgrades, and permission boundaries.
 
@@ -102,7 +102,6 @@ When the root README differs from a project README or workflow, follow the sourc
 | [`gemini-skill-browser-builder/`](gemini-skill-browser-builder/) | Kasm Edge based Gemini Skill Browser |
 | [`gemini-skill-browser-linuxserver-builder/`](gemini-skill-browser-linuxserver-builder/) | LinuxServer Chrome based Gemini Skill Browser |
 | [`opencode-workstation-builder/`](opencode-workstation-builder/) | Persistent OpenCode development workstation |
-| [`patches/`](patches/) | Reviewed upstream build or runtime patches |
 | [`scripts/`](scripts/) | Shared CI gate scripts |
 | [`SECURITY_SCAN.md`](SECURITY_SCAN.md) | Vulnerability thresholds, security exceptions, and client dependency notes |
 
