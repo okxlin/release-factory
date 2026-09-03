@@ -4,6 +4,10 @@ packages:
 # pnpm 10+ blocks dependency lifecycle scripts unless they are reviewed here.
 # Keep the allowlist aligned with the DeepSeek Harness upstream workspace.
 strictDepBuilds: true
+overrides:
+  # Keep Ajv's 3.x fast-uri dependency on the first patched release while
+  # allowing future consumers that require another major to resolve normally.
+  'fast-uri@': 3.1.6
 allowBuilds:
   '@deepseek-ai/dsh-subprocess-local': true
   '@google/genai': false
