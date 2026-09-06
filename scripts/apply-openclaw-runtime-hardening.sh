@@ -208,7 +208,7 @@ function emit_docker_toolchain_overlay(indent) {
     from_count++
   }
 
-  if ($0 ~ /^FROM[[:space:]]+build[[:space:]]+AS[[:space:]]+runtime-assets[[:space:]]*$/) {
+  if ($0 ~ /^FROM[[:space:]]+.*[[:space:]]+AS[[:space:]]+runtime-assets[[:space:]]*$/) {
     in_runtime_assets = 1
     runtime_assets_stages++
   } else if ($0 ~ /^FROM[[:space:]]+/) {
@@ -260,7 +260,7 @@ function emit_docker_toolchain_overlay(indent) {
 
 END {
   if (runtime_assets_stages != 1) {
-    fail("expected exactly one FROM build AS runtime-assets stage")
+    fail("expected exactly one FROM ... AS runtime-assets stage")
   }
   if (openclaw_anchor_count != 1) {
     fail("expected exactly one OpenClaw runtime-assets removal anchor")
@@ -304,7 +304,7 @@ END {
       docker_toolchain_stage_emitted = 1
     }
 
-    if (line ~ /^FROM[[:space:]]+build[[:space:]]+AS[[:space:]]+runtime-assets[[:space:]]*$/) {
+    if (line ~ /^FROM[[:space:]]+.*[[:space:]]+AS[[:space:]]+runtime-assets[[:space:]]*$/) {
       in_runtime_assets = 1
     } else if (line ~ /^FROM[[:space:]]+/) {
       in_runtime_assets = 0

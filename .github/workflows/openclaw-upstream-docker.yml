@@ -94,6 +94,10 @@ jobs:
         if: steps.check_exists.outputs.skip == 'false'
         uses: actions/checkout@v7
 
+      - name: Validate OpenClaw runtime hardening transformer
+        if: steps.check_exists.outputs.skip == 'false'
+        run: bash scripts/test-apply-openclaw-runtime-hardening.sh
+
       - name: Checkout OpenClaw Official Repository
         if: steps.check_exists.outputs.skip == 'false'
         uses: actions/checkout@v7
