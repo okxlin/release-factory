@@ -6,5 +6,8 @@
   "license": "AGPL-3.0-or-later",
   "dependencies": {
     "@getpaseo/cli": "0.3.1"
+  },
+  "overrides": {
+    "fast-uri": "3.1.6"
   }
 }

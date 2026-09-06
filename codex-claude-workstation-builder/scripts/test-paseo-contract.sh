@@ -75,10 +75,11 @@ license_sha256="$(sha256sum "${RUNTIME_DIR}/LICENSE" | cut -d' ' -f1)"
 [ "${license_sha256}" = "2d29a730f15470509f7a36e63a024c2f121958471474dfcd6b272c99586fc337" ] || \
   fail "unexpected Paseo LICENSE digest: ${license_sha256}"
 
-node - "${RUNTIME_DIR}/package-lock.json" <<'NODE'
+node - "${RUNTIME_DIR}/package.json" "${RUNTIME_DIR}/package-lock.json" <<'NODE'
 const fs = require("node:fs");
 
-const lockPath = process.argv[2];
+const [packagePath, lockPath] = process.argv.slice(2);
+const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
 const lock = JSON.parse(fs.readFileSync(lockPath, "utf8"));
 const root = lock.packages?.[""];
 if (root?.dependencies?.["@getpaseo/cli"] !== "0.3.1") {
@@ -86,6 +87,12 @@ if (root?.dependencies?.["@getpaseo/cli"] !== "0.3.1") {
 }
 if (lock.packages?.["node_modules/@getpaseo/cli"]?.version !== "0.3.1") {
   throw new Error("package-lock does not resolve @getpaseo/cli 0.3.1");
+}
+if (packageJson.overrides?.["fast-uri"] !== "3.1.6") {
+  throw new Error("package.json must pin the fast-uri security override to 3.1.6");
+}
+if (lock.packages?.["node_modules/fast-uri"]?.version !== "3.1.6") {
+  throw new Error("package-lock does not resolve fast-uri 3.1.6");
 }
 
 const installScripts = [];
