@@ -112,6 +112,11 @@ jobs:
           set -euo pipefail
           bash codex-claude-workstation-builder/scripts/test-paseo-contract.sh
 
+      - name: Validate proxy core source-build contract
+        run: |
+          set -euo pipefail
+          bash codex-claude-workstation-builder/scripts/test-proxy-core-contract.sh
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
 

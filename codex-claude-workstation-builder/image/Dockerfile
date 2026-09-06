@@ -16,6 +16,19 @@ ARG BUN_VERSION=latest
 ARG DENO_VERSION=latest
 ARG ACTIONLINT_VERSION=1.7.12
 ARG CODE_SERVER_TAR_VERSION=7.5.22
+ARG MIHOMO_VERSION=1.19.30
+ARG MIHOMO_SOURCE_REF=ac017cdd246ce8bd547653d927e7bf77d7ee73d5
+ARG MIHOMO_SOURCE_SHA256=971dd4533e4e2c3dad7473e8115200da8c0d7471b4b61da54da896345c5b3850
+ARG SING_BOX_VERSION=1.14.0
+ARG SING_BOX_SOURCE_REF=0b8995879f29a9b98ee027bc17b75e101445b238
+ARG SING_BOX_SOURCE_SHA256=faa17ef1634429371401b495f32c498fa35b92e5872dce245ba44a9155f95f14
+ARG XRAY_VERSION=26.7.28
+ARG XRAY_SOURCE_REF=5ca6f4b7d4dc20a881d4330e498892697627ec0c
+ARG XRAY_SOURCE_SHA256=45de3ead5186fea442b04c662c554a1ffd1d7bd9093a83410f2edabe74fb766e
+ARG PROXY_X_CRYPTO_VERSION=0.55.0
+ARG PROXY_X_NET_VERSION=0.58.0
+ARG PROXY_X_TEXT_VERSION=0.41.0
+ARG PROXY_GRPC_VERSION=1.83.1
 ARG PNPM_VERSION=latest
 ARG YARN_VERSION=stable
 ARG RUFF_VERSION=latest
@@ -218,48 +231,92 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
     && rm -f "/tmp/${actionlint_asset}" /tmp/actionlint_checksums.txt /tmp/actionlint.sha256 /tmp/actionlint
 
 # ── Proxy cores: Clash.Meta (mihomo), sing-box, Xray ──
+# Build from immutable upstream source revisions so the Go security fixes are
+# present in the binaries even when a release artifact lags behind its source.
 RUN dpkg_arch="$(dpkg --print-architecture)" \
     && case "${dpkg_arch}" in \
-        amd64) \
-            mihomo_arch="amd64-compatible"; \
-            mihomo_sha256="db214c7a2517e63c150d123178d16d102e03a241ccdae4e5e07ffbe9cf56c6f9"; \
-            sing_box_arch="amd64-glibc"; \
-            sing_box_sha256="77e26226c111b8a269f559aec7999f6f5ae1961f25374b58b126d06405d4f516"; \
-            xray_arch="64"; \
-            xray_sha256="23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae"; \
-            ;; \
-        arm64) \
-            mihomo_arch="arm64"; \
-            mihomo_sha256="58896873736d28628f66de3677c8654fa0f180662523148e136cff4f6e890069"; \
-            sing_box_arch="arm64-glibc"; \
-            sing_box_sha256="c79c76bf2f804579768ad4683dc58ff7f3873f0e8159131219290f1ae79b2a38"; \
-            xray_arch="arm64-v8a"; \
-            xray_sha256="4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c"; \
-            ;; \
-        *) echo "unsupported architecture for proxy core install: ${dpkg_arch}" >&2; exit 1 ;; \
+        amd64) go_arch="amd64"; export GOAMD64=v1 ;; \
+        arm64) go_arch="arm64"; unset GOAMD64 ;; \
+        *) echo "unsupported architecture for proxy core build: ${dpkg_arch}" >&2; exit 1 ;; \
     esac \
-    && mihomo_version="1.19.30" \
-    && sing_box_version="1.13.19" \
-    && xray_version="26.3.27" \
-    && mihomo_asset="mihomo-linux-${mihomo_arch}-v${mihomo_version}.gz" \
-    && sing_box_dir="sing-box-${sing_box_version}-linux-${sing_box_arch}" \
-    && sing_box_asset="${sing_box_dir}.tar.gz" \
-    && xray_asset="Xray-linux-${xray_arch}.zip" \
-    && curl -fsSL "https://github.com/MetaCubeX/mihomo/releases/download/v${mihomo_version}/${mihomo_asset}" -o /tmp/mihomo.gz \
-    && printf '%s  %s\n' "${mihomo_sha256}" /tmp/mihomo.gz | sha256sum -c - \
-    && gunzip -c /tmp/mihomo.gz > /usr/local/bin/mihomo \
-    && chmod +x /usr/local/bin/mihomo \
+    && export PATH="/usr/local/go/bin:${PATH}" CGO_ENABLED=0 GOOS=linux GOARCH="${go_arch}" GOTOOLCHAIN=local \
+    && [[ "${MIHOMO_SOURCE_REF}" =~ ^[0-9a-fA-F]{40}$ ]] \
+    && [[ "${SING_BOX_SOURCE_REF}" =~ ^[0-9a-fA-F]{40}$ ]] \
+    && [[ "${XRAY_SOURCE_REF}" =~ ^[0-9a-fA-F]{40}$ ]] \
+    && [[ "${MIHOMO_SOURCE_SHA256}" =~ ^[0-9a-fA-F]{64}$ ]] \
+    && [[ "${SING_BOX_SOURCE_SHA256}" =~ ^[0-9a-fA-F]{64}$ ]] \
+    && [[ "${XRAY_SOURCE_SHA256}" =~ ^[0-9a-fA-F]{64}$ ]] \
+    && mihomo_version="${MIHOMO_VERSION#v}" \
+    && sing_box_version="${SING_BOX_VERSION#v}" \
+    && xray_version="${XRAY_VERSION#v}" \
+    && mihomo_source_ref="${MIHOMO_SOURCE_REF#v}" \
+    && sing_box_source_ref="${SING_BOX_SOURCE_REF#v}" \
+    && xray_source_ref="${XRAY_SOURCE_REF#v}" \
+    && mihomo_source_archive="/tmp/mihomo-${mihomo_source_ref}.tar.gz" \
+    && sing_box_source_archive="/tmp/sing-box-${sing_box_source_ref}.tar.gz" \
+    && xray_source_archive="/tmp/xray-${xray_source_ref}.tar.gz" \
+    && mkdir -p /tmp/proxy-build/mihomo /tmp/proxy-build/sing-box /tmp/proxy-build/xray \
+    && curl -fsSL "https://github.com/MetaCubeX/mihomo/archive/${mihomo_source_ref}.tar.gz" -o "${mihomo_source_archive}" \
+    && printf '%s  %s\n' "${MIHOMO_SOURCE_SHA256}" "${mihomo_source_archive}" | sha256sum -c - \
+    && curl -fsSL "https://github.com/SagerNet/sing-box/archive/${sing_box_source_ref}.tar.gz" -o "${sing_box_source_archive}" \
+    && printf '%s  %s\n' "${SING_BOX_SOURCE_SHA256}" "${sing_box_source_archive}" | sha256sum -c - \
+    && curl -fsSL "https://github.com/XTLS/Xray-core/archive/${xray_source_ref}.tar.gz" -o "${xray_source_archive}" \
+    && printf '%s  %s\n' "${XRAY_SOURCE_SHA256}" "${xray_source_archive}" | sha256sum -c - \
+    && tar -xzf "${mihomo_source_archive}" --strip-components=1 -C /tmp/proxy-build/mihomo \
+    && tar -xzf "${sing_box_source_archive}" --strip-components=1 -C /tmp/proxy-build/sing-box \
+    && tar -xzf "${xray_source_archive}" --strip-components=1 -C /tmp/proxy-build/xray \
+    && export GOMODCACHE=/tmp/proxy-build/go-modcache GOCACHE=/tmp/proxy-build/go-cache \
+    && build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    && (cd /tmp/proxy-build/mihomo \
+        && go mod edit \
+            -require="golang.org/x/crypto@v${PROXY_X_CRYPTO_VERSION}" \
+            -require="golang.org/x/net@v${PROXY_X_NET_VERSION}" \
+            -require="golang.org/x/text@v${PROXY_X_TEXT_VERSION}" \
+            -require="google.golang.org/grpc@v${PROXY_GRPC_VERSION}" \
+        && go mod tidy \
+        && go build -tags with_gvisor -trimpath \
+            -ldflags "-X github.com/metacubex/mihomo/constant.Version=${mihomo_version} -X github.com/metacubex/mihomo/constant.BuildTime=${build_time} -w -s -buildid=" \
+            -o /tmp/proxy-build/mihomo-bin .) \
+    && sing_box_tags="$(tr -d '\n' < /tmp/proxy-build/sing-box/release/DEFAULT_BUILD_TAGS_OTHERS)" \
+    && sing_box_ldflags="$(cat /tmp/proxy-build/sing-box/release/LDFLAGS)" \
+    && (cd /tmp/proxy-build/sing-box \
+        && go mod edit \
+            -require="golang.org/x/crypto@v${PROXY_X_CRYPTO_VERSION}" \
+            -require="golang.org/x/net@v${PROXY_X_NET_VERSION}" \
+            -require="golang.org/x/text@v${PROXY_X_TEXT_VERSION}" \
+            -require="google.golang.org/grpc@v${PROXY_GRPC_VERSION}" \
+        && go mod tidy \
+        && go build -trimpath -tags "${sing_box_tags}" \
+            -ldflags "${sing_box_ldflags} -X github.com/sagernet/sing-box/constant.Version=${sing_box_version} -s -w -buildid=" \
+            -o /tmp/proxy-build/sing-box-bin ./cmd/sing-box) \
+    && (cd /tmp/proxy-build/xray \
+        && go mod edit \
+            -require="golang.org/x/crypto@v${PROXY_X_CRYPTO_VERSION}" \
+            -require="golang.org/x/net@v${PROXY_X_NET_VERSION}" \
+            -require="golang.org/x/text@v${PROXY_X_TEXT_VERSION}" \
+            -require="google.golang.org/grpc@v${PROXY_GRPC_VERSION}" \
+        && go mod tidy \
+        && go build -trimpath -buildvcs=false -ldflags '-s -w -buildid=' \
+            -o /tmp/proxy-build/xray-bin ./main) \
+    && install -m 0755 /tmp/proxy-build/mihomo-bin /usr/local/bin/mihomo \
+    && install -m 0755 /tmp/proxy-build/sing-box-bin /usr/local/bin/sing-box \
+    && install -m 0755 /tmp/proxy-build/xray-bin /usr/local/bin/xray \
     && ln -sf /usr/local/bin/mihomo /usr/local/bin/clash-meta \
-    && curl -fsSL "https://github.com/SagerNet/sing-box/releases/download/v${sing_box_version}/${sing_box_asset}" -o /tmp/sing-box.tgz \
-    && printf '%s  %s\n' "${sing_box_sha256}" /tmp/sing-box.tgz | sha256sum -c - \
-    && tar xzf /tmp/sing-box.tgz -C /tmp \
-    && mv "/tmp/${sing_box_dir}/sing-box" /usr/local/bin/sing-box \
-    && chmod +x /usr/local/bin/sing-box \
-    && curl -fsSL "https://github.com/XTLS/Xray-core/releases/download/v${xray_version}/${xray_asset}" -o /tmp/xray.zip \
-    && printf '%s  %s\n' "${xray_sha256}" /tmp/xray.zip | sha256sum -c - \
-    && unzip -o /tmp/xray.zip xray -d /usr/local/bin/ \
-    && chmod +x /usr/local/bin/xray \
-    && rm -rf /tmp/mihomo.gz /tmp/sing-box.tgz "/tmp/${sing_box_dir}" /tmp/xray.zip
+    && for binary in mihomo sing-box xray; do \
+        go version -m "/usr/local/bin/${binary}" | grep -Fq $'\tdep\tgolang.org/x/crypto\tv'"${PROXY_X_CRYPTO_VERSION}" || { echo "${binary} has an unexpected x/crypto version" >&2; exit 1; }; \
+        go version -m "/usr/local/bin/${binary}" | grep -Fq $'\tdep\tgolang.org/x/net\tv'"${PROXY_X_NET_VERSION}" || { echo "${binary} has an unexpected x/net version" >&2; exit 1; }; \
+        go version -m "/usr/local/bin/${binary}" | grep -Fq $'\tdep\tgolang.org/x/text\tv'"${PROXY_X_TEXT_VERSION}" || { echo "${binary} has an unexpected x/text version" >&2; exit 1; }; \
+    done \
+    && for binary in sing-box xray; do \
+        go version -m "/usr/local/bin/${binary}" | grep -Fq $'\tdep\tgoogle.golang.org/grpc\tv'"${PROXY_GRPC_VERSION}" || { echo "${binary} has an unexpected grpc version" >&2; exit 1; }; \
+    done \
+    && mihomo_output="$(/usr/local/bin/mihomo -v)" \
+    && grep -Fq "Mihomo Meta ${mihomo_version}" <<<"${mihomo_output}" \
+    && sing_box_output="$(/usr/local/bin/sing-box version)" \
+    && grep -Fq "sing-box version ${sing_box_version}" <<<"${sing_box_output}" \
+    && xray_output="$(/usr/local/bin/xray version)" \
+    && grep -Fq "Xray ${xray_version}" <<<"${xray_output}" \
+    && rm -rf /tmp/proxy-build
 # ── code-server ──
 RUN curl -fsSL https://code-server.dev/install.sh | sh
 
