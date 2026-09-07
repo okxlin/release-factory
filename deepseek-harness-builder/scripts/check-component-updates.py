@@ -15,7 +15,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SEMVER_RE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
+SEMVER_RE = re.compile(
+    r"^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
+)
 ARG_RE = re.compile(
     r"^\s*ARG\s+([A-Za-z_][A-Za-z0-9_]*)=([^\s#]*)\s*(?:#.*)?$",
     re.IGNORECASE,
@@ -170,11 +172,33 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def semver_key(version: str) -> tuple[int, int, int]:
+def semver_key(
+    version: str,
+) -> tuple[int, int, int, int, tuple[tuple[int, int | str], ...]]:
     match = SEMVER_RE.fullmatch(version)
     if not match:
-        raise UpdateCheckError(f"unsupported non-stable semantic version: {version}")
-    return tuple(int(part) for part in match.groups())
+        raise UpdateCheckError(f"unsupported semantic version: {version}")
+
+    major, minor, patch, prerelease = match.groups()
+    if prerelease is None:
+        return int(major), int(minor), int(patch), 1, ()
+
+    identifiers: list[tuple[int, int | str]] = []
+    for identifier in prerelease.split("."):
+        if identifier.isdigit():
+            if len(identifier) > 1 and identifier.startswith("0"):
+                raise UpdateCheckError(
+                    f"unsupported semantic version with a leading-zero prerelease identifier: {version}"
+                )
+            identifiers.append((0, int(identifier)))
+        else:
+            identifiers.append((1, identifier))
+    return int(major), int(minor), int(patch), 0, tuple(identifiers)
+
+
+def is_stable_semver(version: str) -> bool:
+    match = SEMVER_RE.fullmatch(version)
+    return match is not None and match.group(4) is None
 
 
 def normalize_semver(version: str) -> str:
@@ -182,11 +206,17 @@ def normalize_semver(version: str) -> str:
     return version.removeprefix("v")
 
 
+def normalize_stable_semver(version: str) -> str:
+    if not is_stable_semver(version):
+        raise UpdateCheckError(f"unsupported stable semantic version: {version}")
+    return normalize_semver(version)
+
+
 def latest_stable(versions: Iterable[str]) -> str:
     stable = [
-        normalize_semver(version)
+        normalize_stable_semver(version)
         for version in versions
-        if isinstance(version, str) and SEMVER_RE.fullmatch(version)
+        if isinstance(version, str) and is_stable_semver(version)
     ]
     if not stable:
         raise UpdateCheckError("upstream returned no stable semantic versions")
@@ -284,7 +314,7 @@ def node_release_entries(data: Any, major: int) -> list[dict[str, Any]]:
         if isinstance(entry, dict)
         and entry.get("lts") not in (False, None, "")
         and isinstance(entry.get("version"), str)
-        and SEMVER_RE.fullmatch(entry["version"])
+        and is_stable_semver(entry["version"])
         and semver_key(entry["version"])[0] == major
     ]
     if not entries:
@@ -306,12 +336,54 @@ def upstream_version(
 
     if source_type == "github_release":
         repo = str(source["repo"])
+        tag_prefix = source.get("tag_prefix", "")
+        include_prereleases = source.get("include_prereleases", False)
+        if not isinstance(tag_prefix, str):
+            raise UpdateCheckError(f"GitHub release tag_prefix for {repo} is invalid")
+        if not isinstance(include_prereleases, bool):
+            raise UpdateCheckError(
+                f"GitHub release include_prereleases for {repo} is invalid"
+            )
+
+        fixture = f"github-release-{repo.replace('/', '-')}.json"
+        if tag_prefix or include_prereleases:
+            url = f"https://api.github.com/repos/{repo}/releases?per_page=100"
+            data = client.get_json(fixture, url)
+            if not isinstance(data, list):
+                raise UpdateCheckError(f"GitHub releases for {repo} are not a JSON array")
+
+            candidates: list[tuple[str, str]] = []
+            for release in data:
+                if not isinstance(release, dict) or release.get("draft"):
+                    continue
+                tag_name = release.get("tag_name")
+                if not isinstance(tag_name, str) or not tag_name.startswith(tag_prefix):
+                    continue
+                version_text = tag_name[len(tag_prefix) :]
+                if not SEMVER_RE.fullmatch(version_text):
+                    continue
+                if not include_prereleases and not is_stable_semver(version_text):
+                    continue
+                try:
+                    version = normalize_semver(version_text)
+                except UpdateCheckError:
+                    continue
+                candidates.append((version, tag_name))
+
+            if not candidates:
+                raise UpdateCheckError(
+                    f"GitHub releases for {repo} have no matching semantic version"
+                )
+            version, tag_name = max(candidates, key=lambda item: semver_key(item[0]))
+            encoded_tag = urllib.parse.quote(tag_name, safe="")
+            return version, f"https://github.com/{repo}/releases/tag/{encoded_tag}"
+
         url = f"https://api.github.com/repos/{repo}/releases/latest"
-        data = client.get_json(f"github-release-{repo.replace('/', '-')}.json", url)
+        data = client.get_json(fixture, url)
         if not isinstance(data, dict) or not isinstance(data.get("tag_name"), str):
             raise UpdateCheckError(f"GitHub latest release for {repo} has no tag_name")
         tag_name = data["tag_name"]
-        version = normalize_semver(tag_name)
+        version = normalize_stable_semver(tag_name)
         encoded_tag = urllib.parse.quote(tag_name, safe="")
         return version, f"https://github.com/{repo}/releases/tag/{encoded_tag}"
 
@@ -340,13 +412,13 @@ def upstream_version(
         lines = client.get_text("go-stable.txt", url).splitlines()
         if not lines:
             raise UpdateCheckError("Go stable endpoint returned an empty response")
-        return normalize_semver(lines[0].removeprefix("go")), "https://go.dev/dl/"
+        return normalize_stable_semver(lines[0].removeprefix("go")), "https://go.dev/dl/"
 
     if source_type == "node_release_line":
         url = "https://nodejs.org/dist/index.json"
         major = int(source["major"])
         release = latest_node_release(client.get_json("node-index.json", url), major)
-        node_version = normalize_semver(release["version"])
+        node_version = normalize_stable_semver(release["version"])
         release_url = f"https://nodejs.org/en/download/archive/v{node_version}"
         return node_version, release_url
 
@@ -364,7 +436,7 @@ def upstream_version(
         data = client.get_json(fixture, url)
         if not isinstance(data, dict) or not isinstance(data.get("version"), str):
             raise UpdateCheckError(f"npm metadata for {package} has no version")
-        version = normalize_semver(data["version"])
+        version = normalize_stable_semver(data["version"])
         return version, f"https://www.npmjs.com/package/{package}/v/{version}"
 
     if source_type == "pypi":
@@ -377,7 +449,7 @@ def upstream_version(
             raise UpdateCheckError(f"PyPI metadata for {package} has no version") from exc
         if not isinstance(version, str):
             raise UpdateCheckError(f"PyPI metadata for {package} has an invalid version")
-        return normalize_semver(version), f"https://pypi.org/project/{package}/"
+        return normalize_stable_semver(version), f"https://pypi.org/project/{package}/"
 
     if source_type == "python_release_line":
         url = str(source["url"])
