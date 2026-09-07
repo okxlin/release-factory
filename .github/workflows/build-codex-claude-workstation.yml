@@ -52,6 +52,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Run proxy core resolver regression tests
+        run: |
+          set -euo pipefail
+          python3 codex-claude-workstation-builder/scripts/test-resolve-proxy-core-versions.py
+
+      - name: Resolve latest proxy core build inputs
+        id: proxy
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 codex-claude-workstation-builder/scripts/resolve-proxy-core-versions.py \
+            --github-output "$GITHUB_OUTPUT" \
+            --summary "$GITHUB_STEP_SUMMARY"
+
       - name: Resolve release policy
         id: release
         env:
@@ -142,6 +157,8 @@ jobs:
           file: ./codex-claude-workstation-builder/image/Dockerfile
           platforms: linux/amd64
           load: true
+          build-args: |
+            ${{ steps.proxy.outputs.build_args }}
           tags: ${{ env.TEST_IMAGE }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=codex-claude-workstation
@@ -262,6 +279,8 @@ jobs:
           file: ./codex-claude-workstation-builder/image/Dockerfile
           platforms: ${{ steps.params.outputs.platforms }}
           push: true
+          build-args: |
+            ${{ steps.proxy.outputs.build_args }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=codex-claude-workstation
