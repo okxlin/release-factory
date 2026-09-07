@@ -16,6 +16,8 @@ ARG BUN_VERSION=latest
 ARG DENO_VERSION=latest
 ARG ACTIONLINT_VERSION=1.7.12
 ARG CODE_SERVER_TAR_VERSION=7.5.22
+# CI overrides these proxy inputs from the upstream resolver; defaults keep
+# standalone local builds reproducible when no build arguments are supplied.
 ARG MIHOMO_VERSION=1.19.30
 ARG MIHOMO_SOURCE_REF=ac017cdd246ce8bd547653d927e7bf77d7ee73d5
 ARG MIHOMO_SOURCE_SHA256=971dd4533e4e2c3dad7473e8115200da8c0d7471b4b61da54da896345c5b3850

@@ -69,7 +69,7 @@ docker build \
 - Systems: Go 1.27.0, Rust stable, Java 21 LTS, Maven, Docker CLI, Buildx, Compose plugin
 - Tooling: git, gh, ripgrep, fd, jq, yq, shellcheck, shfmt, actionlint, pre-commit, yamllint, direnv
 - Debugging: curl, httpie, dig, nc, lsof, strace, htop, iotop, nethogs, ncdu
-- Proxy cores: mihomo 1.19.30/clash-meta, sing-box 1.13.19, Xray managed by supervisord
+- Proxy cores: mihomo/clash-meta, sing-box, and Xray are resolved to current upstream releases by CI and built from immutable source commits
 
 ## Runtime Environment
 
@@ -192,6 +192,8 @@ Default release policy:
 - `sha-*` tags are intentionally not published by default to avoid long-lived tag sprawl.
 - The workflow builds a local `linux/amd64` test image first, runs `healthcheck.sh`, `doctor.sh`, and `smoke-test.sh`, then builds and pushes the requested platforms after tests pass.
 - Before building, it validates the pinned Paseo dependency graph, reviewed lifecycle-script allowlist, direct 6767 listener, disabled relay/voice defaults, and exact upstream source notice.
+- Before building, it resolves the current proxy-core release inputs, verifies their immutable source archives, selects Go modules compatible with the Dockerfile's Go version, and passes those inputs as build arguments. The Dockerfile's proxy pins are local-build fallbacks rather than the CI update source.
+- The proxy resolver records release tags, source commits, source archive SHA256 values, and selected Go module versions in the Actions step summary. It accepts Xray's upstream release channel, whose production tags are marked as prereleases, while keeping prereleases excluded for mihomo and sing-box.
 - The CI test container intentionally does not mount `/var/run/docker.sock`, and GHCR login happens only after tests pass.
 - Manual workflow inputs are validated before they are written to GitHub Actions outputs.
 - BuildKit cache uses GitHub Actions cache with `mode=min` to reduce cache storage pressure.

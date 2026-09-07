@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "github_releases": [
+    {
+      "name": "mihomo",
+      "repository": "MetaCubeX/mihomo",
+      "version_arg": "MIHOMO_VERSION",
+      "source_ref_arg": "MIHOMO_SOURCE_REF",
+      "source_sha256_arg": "MIHOMO_SOURCE_SHA256"
+    },
+    {
+      "name": "sing-box",
+      "repository": "SagerNet/sing-box",
+      "version_arg": "SING_BOX_VERSION",
+      "source_ref_arg": "SING_BOX_SOURCE_REF",
+      "source_sha256_arg": "SING_BOX_SOURCE_SHA256"
+    },
+    {
+      "name": "Xray",
+      "repository": "XTLS/Xray-core",
+      "include_prereleases": true,
+      "version_arg": "XRAY_VERSION",
+      "source_ref_arg": "XRAY_SOURCE_REF",
+      "source_sha256_arg": "XRAY_SOURCE_SHA256"
+    }
+  ],
+  "go_modules": [
+    {
+      "module": "golang.org/x/crypto",
+      "version_arg": "PROXY_X_CRYPTO_VERSION"
+    },
+    {
+      "module": "golang.org/x/net",
+      "version_arg": "PROXY_X_NET_VERSION"
+    },
+    {
+      "module": "golang.org/x/text",
+      "version_arg": "PROXY_X_TEXT_VERSION"
+    },
+    {
+      "module": "google.golang.org/grpc",
+      "version_arg": "PROXY_GRPC_VERSION"
+    }
+  ],
+  "go_version_arg": "GO_VERSION"
+}
