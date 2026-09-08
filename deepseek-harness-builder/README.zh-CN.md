@@ -13,7 +13,7 @@
 
 两个工作流都会把相同标签发布到 `ghcr.io/okxlin/deepseek-harness` 和 `docker.io/$DOCKERHUB_USERNAME/deepseek-harness`。请把 `DOCKERHUB_USERNAME` 配置为 GitHub Actions 仓库变量或 Secret，并把 `DOCKERHUB_TOKEN` 配置为仓库 Secret。Docker Hub token 只用于 Registry 登录，不会传入镜像构建上下文。
 
-定时任务使用 [`image/dsh-source.json`](image/dsh-source.json) 中固定的 GitHub 源码版本，并发布匹配的 `<DSH_VERSION>` 和 `<DSH_VERSION>-workstation` 标签；这样上游源码版本可以在发布到 npm 之前进入镜像。手动显式传入已发布的 npm 版本或 dist-tag 时，仍按请求的 npm selector 解析。手动工作流也可覆盖发布标签。AppStore `latest` 通道使用浮动标签，编号 AppStore 版本使用匹配的版本标签。
+定时任务以及留空版本的手动运行会从 DeepSeek Harness GitHub Releases 选择最高的非 draft `dsh-v*` 源码版本，校验对应 tag、commit 和源码归档 SHA-256 后构建，并发布匹配的 `<DSH_VERSION>` 和 `<DSH_VERSION>-workstation` 标签；因此上游源码版本可以在发布到 npm 之前进入镜像。手动显式传入 `dsh-v*` 可以选择指定的源码 release，传入已发布的 npm 版本或 dist-tag 时仍按请求的 npm selector 解析。`image/dsh-source.json` 保留可复现的本地/PR 基线，未来源码 release 不需要修改 Dockerfile。手动工作流也可覆盖发布标签。AppStore `latest` 通道使用浮动标签，编号 AppStore 版本使用匹配的版本标签。
 
 组件的准确固定版本由 [Dockerfile](image/Dockerfile)、[package.json](image/package.json)、[pnpm-lock.yaml](image/pnpm-lock.yaml)，以及 [runtime](../.github/workflows/build-deepseek-harness.yml) 和 [workstation](../.github/workflows/build-deepseek-harness-workstation.yml) 工作流定义。这些构建输入是唯一版本来源；README 只说明能力和更新策略，不重复维护具体版本号。
 
@@ -53,7 +53,7 @@ deepseek-harness-builder/scripts/build-local.sh \
   --tag deepseek-harness-workstation:local
 ```
 
-本地构建辅助脚本默认使用 [`image/dsh-source.json`](image/dsh-source.json) 中固定的源码版本，并把其版本作为 Docker `DSH_VERSION` 传入。使用 `--version <source-release>` 可以显式构建该源码版本；也可以传入已发布的 npm 版本或 dist-tag，走兼容旧版本的 npm 构建路径。使用 npm selector 时，脚本只会在临时构建上下文中更新 `package.json` 和 `pnpm-lock.yaml`。直接 `docker build` 仍支持已提交的源码基线上下文。
+本地构建辅助脚本默认使用 [`image/dsh-source.json`](image/dsh-source.json) 中固定的源码版本，并把其版本作为 Docker `DSH_VERSION` 传入。使用 `--version <source-release>` 可以显式构建该源码版本；也可以传入已发布的 npm 版本或 dist-tag，走兼容旧版本的 npm 构建路径。使用 npm selector 时，脚本只会在临时构建上下文中更新 `package.json` 和 `pnpm-lock.yaml`。直接 `docker build` 仍支持已提交的源码基线上下文；GitHub Actions 的留空版本解析会在构建上下文中注入当次选定的源码 metadata，因此新增源码 release 不需要手工修改 Dockerfile。
 
 对于仓库固定的源码版本，Docker 会校验不可变的 GitHub 源码归档，使用上游 lockfile，构建官方 CLI 和 Web UI，打包 DSH 与 vendor workspace，再将本地 tarball 安装到扁平的 npm runtime 依赖树中。安装脚本默认关闭，只有审查过的 `koffi`/`node-pty` 原生重编译和 subprocess helper 会被显式执行。已发布的 npm 版本仍使用仓库冻结的 `pnpm-lock.yaml` 路径。这样两个发布路径都可复现，同时允许尚未发布到 npm 的上游源码版本通过相同的补丁和 smoke 合约。
 
@@ -434,4 +434,4 @@ Caddy 生产二进制文件已 stripped。Go 文档说明，在没有可提取�
 `/data` 挂载。如果新的认证状态为空，entrypoint 会把旧 workstation 应用状态复制到
 `/data`。确认迁移数据后，后续容器仍必须挂载 `/data`；旧路径不能替代它。
 
-Caddy 和 caddy-security 会一起编译并固定版本。不能假设只更新 Caddy 是安全的。定时发布工作流会构建 `image/dsh-source.json` 中记录的不可变源码版本，把其版本作为 Docker `DSH_VERSION` 构建参数，并把 `runtime` target 发布为 `latest` 加 `<DSH_VERSION>`，把 `workstation` target 发布为 `workstation` 加 `<DSH_VERSION>-workstation`。手动运行可以选择该源码版本、已发布的 DSH npm 版本或 dist-tag，也可覆盖最终镜像标签，同时保留相同验证和可选浮动标签行为。每个工作流都会先审计依赖树、重建并验证插件、运行 Caddy 依赖图和 `govulncheck` 门禁，并执行 amd64 和 arm64 烟雾合约，然后才把验证过的多平台 manifest 推送到 GHCR 和 Docker Hub。runtime 发布继续应用零可修复 HIGH/CRITICAL Trivy 门禁；工具链范围更广的 workstation 会阻断可修复 CRITICAL，并报告可修复 HIGH 供确定性审查，同时由每日组件检查发现新的上游版本。任一 registry 登录或发布失败，工作流都会失败，而不是报告完整发布。
+Caddy 和 caddy-security 会一起编译并固定版本。不能假设只更新 Caddy 是安全的。定时发布工作流会解析最高的非 draft GitHub 源码 release，校验 tag、commit 和归档 checksum，把当次版本作为 Docker `DSH_VERSION` 构建参数，并把 `runtime` target 发布为 `latest` 加 `<DSH_VERSION>`，把 `workstation` target 发布为 `workstation` 加 `<DSH_VERSION>-workstation`。手动运行可以选择指定的源码版本、已发布的 DSH npm 版本或 dist-tag，也可覆盖最终镜像标签，同时保留相同验证和可选浮动标签行为。每个工作流都会先审计依赖树、重建并验证插件、运行 Caddy 依赖图和 `govulncheck` 门禁，并执行 amd64 和 arm64 烟雾合约，然后才把验证过的多平台 manifest 推送到 GHCR 和 Docker Hub。runtime 发布继续应用零可修复 HIGH/CRITICAL Trivy 门禁；工具链范围更广的 workstation 会阻断可修复 CRITICAL，并报告可修复 HIGH 供确定性审查，同时由每日组件检查发现新的上游版本。任一 registry 登录或发布失败，工作流都会失败，而不是报告完整发布。

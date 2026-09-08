@@ -328,8 +328,14 @@ expected_remote_adds["https://registry.npmjs.org/npm/-/npm-${arg_values[NPM_VERS
 expected_remote_adds["https://codeload.github.com/docker/cli/tar.gz/refs/tags/v${arg_values[DOCKER_VERSION]:-}"]=1
 expected_remote_adds["https://codeload.github.com/docker/compose/tar.gz/refs/tags/v${arg_values[DOCKER_COMPOSE_VERSION]:-}"]=1
 expected_remote_adds["https://codeload.github.com/docker/buildx/tar.gz/refs/tags/v${arg_values[DOCKER_BUILDX_VERSION]:-}"]=1
-expected_remote_adds["https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/refs/tags/${arg_values[DSH_SOURCE_REF]:-}"]=1
+expected_remote_adds['https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/refs/tags/${DSH_SOURCE_REF}']=1
 declare -A seen_remote_adds=()
+
+has_valid_add_checksum() {
+    local line="$1"
+    [[ "${line}" =~ --checksum=sha256:([a-f0-9]{64})([[:space:]]|$) ]] \
+        || [[ "${line}" == *'--checksum=sha256:${DSH_SOURCE_ARCHIVE_SHA256}'* ]]
+}
 
 for line_number in "${!docker_lines[@]}"; do
     line="${docker_lines[${line_number}]}"
@@ -339,13 +345,12 @@ for line_number in "${!docker_lines[@]}"; do
         fail "Dockerfile logical line ${source_line}: ADD must include source and destination arguments"
         continue
     fi
-    if [[ "${line}" == *'--checksum='* \
-        && ! "${line}" =~ --checksum=sha256:([a-f0-9]{64})([[:space:]]|$) ]]; then
+    if [[ "${line}" == *'--checksum='* ]] && ! has_valid_add_checksum "${line}"; then
         fail "Dockerfile logical line ${source_line}: ADD checksum must be lowercase sha256:<64-hex>"
     fi
     if [[ "${line}" =~ (https?://[^[:space:]]+) ]]; then
         remote_url="${BASH_REMATCH[1]}"
-        if [[ ! "${line}" =~ --checksum=sha256:([a-f0-9]{64})([[:space:]]|$) ]]; then
+        if ! has_valid_add_checksum "${line}"; then
             fail "Dockerfile logical line ${source_line}: remote ADD must use a lowercase SHA-256 checksum: ${remote_url}"
         fi
         if [[ ! -v "expected_remote_adds[${remote_url}]" ]]; then
@@ -395,8 +400,11 @@ require_literal \
     "golang.org/x/crypto=golang.org/x/crypto@v\${X_CRYPTO_VERSION}" \
     'the Caddy x/crypto security override'
 require_literal \
-    'https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/refs/tags/dsh-v0.1.2-alpha.1' \
-    'the DeepSeek Harness source archive URL'
+    'https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/refs/tags/${DSH_SOURCE_REF}' \
+    'the DeepSeek Harness source archive URL tied to DSH_SOURCE_REF'
+require_literal \
+    '--checksum=sha256:${DSH_SOURCE_ARCHIVE_SHA256}' \
+    'the DeepSeek Harness source archive checksum tied to DSH_SOURCE_ARCHIVE_SHA256'
 require_literal \
     '"${DSH_SOURCE_ARCHIVE_SHA256}" /tmp/dsh-source.tar.gz | sha256sum -c -' \
     'the DeepSeek Harness source archive checksum verification'

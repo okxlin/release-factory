@@ -8,7 +8,7 @@ on:
         required: false
         default: ""
       dsh_version:
-        description: "DeepSeek Harness npm version/dist-tag or source release; leave empty to use the checked-in source release"
+        description: "DeepSeek Harness npm version/dist-tag or dsh-v source release; leave empty to resolve the latest GitHub source release"
         required: false
         default: ""
       platforms:
@@ -74,13 +74,28 @@ jobs:
         id: dsh
         env:
           INPUT_DSH_VERSION: ${{ inputs.dsh_version }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          default_dsh_version="$(jq -er '.version' deepseek-harness-builder/image/dsh-source.json)"
-          args=(--version "${INPUT_DSH_VERSION:-${default_dsh_version}}")
-          deepseek-harness-builder/scripts/prepare-dsh-version.sh \
-            "${args[@]}" \
-            --github-output "$GITHUB_OUTPUT"
+          if [[ -z "${INPUT_DSH_VERSION}" || "${INPUT_DSH_VERSION}" == dsh-v* ]]; then
+            source_args=()
+            if [[ -n "${INPUT_DSH_VERSION}" ]]; then
+              source_args+=(--version "${INPUT_DSH_VERSION}")
+            fi
+            deepseek-harness-builder/scripts/resolve-dsh-source.sh \
+              "${source_args[@]}" \
+              --github-output "$GITHUB_OUTPUT" \
+              --metadata-output "$RUNNER_TEMP/dsh-source.json"
+            cp -- "$RUNNER_TEMP/dsh-source.json" deepseek-harness-builder/image/dsh-source.json
+            source_version="$(jq -er '.version' deepseek-harness-builder/image/dsh-source.json)"
+            deepseek-harness-builder/scripts/prepare-dsh-version.sh \
+              --version "${source_version}" \
+              --github-output "$GITHUB_OUTPUT"
+          else
+            deepseek-harness-builder/scripts/prepare-dsh-version.sh \
+              --version "${INPUT_DSH_VERSION}" \
+              --github-output "$GITHUB_OUTPUT"
+          fi
 
       - name: Validate Docker Hub credentials
         env:
@@ -150,7 +165,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: "1.27.0"
+          go-version: "1.27.1"
           cache: false
 
       - name: Install pinned govulncheck
@@ -183,6 +198,10 @@ jobs:
           tags: ${{ env.AUDIT_IMAGE }}
           build-args: |
             DSH_VERSION=${{ steps.release.outputs.dsh_version }}
+            DSH_SOURCE_VERSION=${{ steps.dsh.outputs.dsh_source_version }}
+            DSH_SOURCE_REF=${{ steps.dsh.outputs.dsh_source_ref }}
+            DSH_SOURCE_COMMIT=${{ steps.dsh.outputs.dsh_source_commit }}
+            DSH_SOURCE_ARCHIVE_SHA256=${{ steps.dsh.outputs.dsh_source_archive_sha256 }}
           cache-from: type=gha,scope=deepseek-harness
           cache-to: type=gha,mode=min,scope=deepseek-harness
 
@@ -204,6 +223,10 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             DSH_VERSION=${{ steps.release.outputs.dsh_version }}
+            DSH_SOURCE_VERSION=${{ steps.dsh.outputs.dsh_source_version }}
+            DSH_SOURCE_REF=${{ steps.dsh.outputs.dsh_source_ref }}
+            DSH_SOURCE_COMMIT=${{ steps.dsh.outputs.dsh_source_commit }}
+            DSH_SOURCE_ARCHIVE_SHA256=${{ steps.dsh.outputs.dsh_source_archive_sha256 }}
           cache-from: type=gha,scope=deepseek-harness
           cache-to: type=gha,mode=min,scope=deepseek-harness
 
@@ -250,6 +273,10 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             DSH_VERSION=${{ steps.release.outputs.dsh_version }}
+            DSH_SOURCE_VERSION=${{ steps.dsh.outputs.dsh_source_version }}
+            DSH_SOURCE_REF=${{ steps.dsh.outputs.dsh_source_ref }}
+            DSH_SOURCE_COMMIT=${{ steps.dsh.outputs.dsh_source_commit }}
+            DSH_SOURCE_ARCHIVE_SHA256=${{ steps.dsh.outputs.dsh_source_archive_sha256 }}
           cache-from: type=gha,scope=deepseek-harness
           cache-to: type=gha,mode=min,scope=deepseek-harness
 
@@ -301,6 +328,10 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             DSH_VERSION=${{ steps.release.outputs.dsh_version }}
+            DSH_SOURCE_VERSION=${{ steps.dsh.outputs.dsh_source_version }}
+            DSH_SOURCE_REF=${{ steps.dsh.outputs.dsh_source_ref }}
+            DSH_SOURCE_COMMIT=${{ steps.dsh.outputs.dsh_source_commit }}
+            DSH_SOURCE_ARCHIVE_SHA256=${{ steps.dsh.outputs.dsh_source_archive_sha256 }}
           cache-from: type=gha,scope=deepseek-harness
           cache-to: type=gha,mode=min,scope=deepseek-harness
 

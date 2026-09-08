@@ -39,6 +39,7 @@ jobs:
       - name: Run DeepSeek Harness version resolver regression tests
         run: |
           node --test deepseek-harness-builder/scripts/test-resolve-latest-npm-version.mjs
+          node --test deepseek-harness-builder/scripts/test-resolve-dsh-source.mjs
           bash deepseek-harness-builder/scripts/test-prepare-dsh-version.sh
 
       - name: Check authoritative upstream versions

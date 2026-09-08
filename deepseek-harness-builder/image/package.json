@@ -4,7 +4,7 @@
   "private": true,
   "description": "Pinned runtime dependency closure for the DeepSeek Harness container image.",
   "license": "MIT",
-  "packageManager": "pnpm@11.24.0",
+  "packageManager": "pnpm@12.3.4",
   "engines": {
     "node": "24.20.0"
   },

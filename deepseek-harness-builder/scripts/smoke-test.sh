@@ -1053,8 +1053,8 @@ check_runtime_versions() {
         || fail "Node.js version is not pinned to v24.20.0"
     pass "Node.js version is pinned"
 
-    [[ "$(docker exec "${container_name}" pnpm --version)" == "11.24.0" ]] \
-        || fail "pnpm version is not pinned to 11.24.0"
+    [[ "$(docker exec "${container_name}" pnpm --version)" == "12.3.4" ]] \
+        || fail "pnpm version is not pinned to 12.3.4"
     pass "standalone pnpm version is pinned"
 
     if docker exec "${container_name}" sh -c 'command -v corepack >/dev/null 2>&1'; then
@@ -1088,8 +1088,8 @@ check_runtime_versions() {
             || fail "npm is not pinned to 11.19.1"
         [[ "$(docker exec "${container_name}" npx --version)" == "11.19.1" ]] \
             || fail "npx is not pinned to 11.19.1"
-        [[ "$(docker exec "${container_name}" go version)" == go\ version\ go1.27.0* ]] \
-            || fail "Go version is not pinned to 1.27.0"
+        [[ "$(docker exec "${container_name}" go version)" == go\ version\ go1.27.1* ]] \
+            || fail "Go version is not pinned to 1.27.1"
         if docker exec "${container_name}" sh -c 'command -v rustc >/dev/null 2>&1'; then
             fail "Rust compiler is unexpectedly present in the workstation image"
         fi
@@ -1100,18 +1100,18 @@ check_runtime_versions() {
             || fail "actionlint is not pinned to 1.7.12"
         docker exec "${container_name}" yq --version | grep -Fq 'version v4.53.6' \
             || fail "yq is not pinned to 4.53.6"
-        docker exec "${container_name}" uv --version | grep -Fq 'uv 0.12.7 ' \
-            || fail "uv is not pinned to 0.12.7"
-        docker exec "${container_name}" uvx --version | grep -Fq 'uvx 0.12.7 ' \
-            || fail "uvx is not pinned to 0.12.7"
-        [[ "$(docker exec "${container_name}" ruff --version)" == "ruff 0.16.5" ]] \
-            || fail "Ruff is not pinned to 0.16.5"
-        [[ "$(docker exec "${container_name}" docker --version)" == Docker\ version\ 29.7.2,* ]] \
-            || fail "Docker CLI is not pinned to 29.7.2"
-        docker exec "${container_name}" docker compose version | grep -Fq 'Docker Compose version v5.5.0' \
-            || fail "Docker Compose is not pinned to 5.5.0"
-        docker exec "${container_name}" docker buildx version | grep -Fq 'github.com/docker/buildx v0.36.1 ' \
-            || fail "Docker Buildx is not pinned to 0.36.1"
+        docker exec "${container_name}" uv --version | grep -Fq 'uv 0.12.10 ' \
+            || fail "uv is not pinned to 0.12.10"
+        docker exec "${container_name}" uvx --version | grep -Fq 'uvx 0.12.10 ' \
+            || fail "uvx is not pinned to 0.12.10"
+        [[ "$(docker exec "${container_name}" ruff --version)" == "ruff 0.16.6" ]] \
+            || fail "Ruff is not pinned to 0.16.6"
+        [[ "$(docker exec "${container_name}" docker --version)" == Docker\ version\ 29.8.0,* ]] \
+            || fail "Docker CLI is not pinned to 29.8.0"
+        docker exec "${container_name}" docker compose version | grep -Fq 'Docker Compose version v5.5.1' \
+            || fail "Docker Compose is not pinned to 5.5.1"
+        docker exec "${container_name}" docker buildx version | grep -Fq 'github.com/docker/buildx v0.37.0 ' \
+            || fail "Docker Buildx is not pinned to 0.37.0"
         if docker exec "${container_name}" test -S /var/run/docker.sock; then
             fail "Docker daemon socket is unexpectedly mounted by default"
         fi

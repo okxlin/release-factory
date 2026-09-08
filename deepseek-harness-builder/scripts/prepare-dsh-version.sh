@@ -7,6 +7,10 @@ dsh_version=""
 github_output_path="${GITHUB_OUTPUT:-/dev/null}"
 version_resolver="${script_dir}/resolve-latest-npm-version.mjs"
 source_version=""
+source_ref=""
+source_commit=""
+source_archive_sha256=""
+source_archive_url=""
 source_mode=false
 
 usage() {
@@ -66,7 +70,7 @@ const fs = require('fs')
 
 const sourcePath = process.argv[2]
 const source = JSON.parse(fs.readFileSync(sourcePath, 'utf8'))
-const semver = /^[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+$/
+const semver = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
 const digest = /^[a-f0-9]{64}$/
 const commit = /^[a-f0-9]{40}$/
 if (source === null || typeof source !== 'object' || Array.isArray(source)) {
@@ -77,7 +81,7 @@ for (const field of ['version', 'repository', 'ref', 'commit', 'archiveSha256', 
     throw new Error('source metadata field ' + field + ' must be a non-empty string')
   }
 }
-if (!semver.test(source.version)) throw new Error('source metadata version is not a prerelease: ' + source.version)
+if (!semver.test(source.version)) throw new Error('source metadata version is not valid semantic version: ' + source.version)
 if (source.repository !== 'deepseek-ai/deepseek-harness') throw new Error('unexpected source repository: ' + source.repository)
 if (source.ref !== 'dsh-v' + source.version) throw new Error('source ref does not match source version: ' + source.ref)
 if (!commit.test(source.commit)) throw new Error('source commit is not an immutable Git commit: ' + source.commit)
@@ -87,6 +91,10 @@ if (source.archiveUrl !== expectedUrl) throw new Error('source archive URL does 
 process.stdout.write(source.version)
 NODE
 )"
+  source_ref="$(node -e 'const fs = require("fs"); process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).ref)' "${image_dir}/dsh-source.json")"
+  source_commit="$(node -e 'const fs = require("fs"); process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).commit)' "${image_dir}/dsh-source.json")"
+  source_archive_sha256="$(node -e 'const fs = require("fs"); process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).archiveSha256)' "${image_dir}/dsh-source.json")"
+  source_archive_url="$(node -e 'const fs = require("fs"); process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).archiveUrl)' "${image_dir}/dsh-source.json")"
 fi
 
 if [[ -n "${dsh_version}" && -n "${source_version}" ]]; then
@@ -148,6 +156,13 @@ fi
 if [[ -n "${github_output_path}" && "${github_output_path}" != "/dev/null" ]]; then
   printf 'dsh_version=%s\n' "${dsh_version}" >> "${github_output_path}"
   printf 'dsh_source_mode=%s\n' "${source_mode}" >> "${github_output_path}"
+  if [[ -n "${source_version}" ]]; then
+    printf 'dsh_source_version=%s\n' "${source_version}" >> "${github_output_path}"
+    printf 'dsh_source_ref=%s\n' "${source_ref}" >> "${github_output_path}"
+    printf 'dsh_source_commit=%s\n' "${source_commit}" >> "${github_output_path}"
+    printf 'dsh_source_archive_sha256=%s\n' "${source_archive_sha256}" >> "${github_output_path}"
+    printf 'dsh_source_archive_url=%s\n' "${source_archive_url}" >> "${github_output_path}"
+  fi
 fi
 
 printf 'dsh_version=%s\n' "${dsh_version}"
