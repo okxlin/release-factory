@@ -237,6 +237,9 @@ RUN mkdir -p /opt/pnpm \
     && tar -xzf /tmp/pnpm.tgz -C /opt/pnpm --strip-components=1 \
     && test "$(node -p "require('/opt/pnpm/package.json').version")" = "${PNPM_VERSION}" \
     && test "$(node /opt/pnpm/bin/pnpm.mjs --version)" = "${PNPM_VERSION}" \
+    && chmod 0755 /opt/pnpm/bin/pnpm.mjs /opt/pnpm/bin/pnpx.mjs \
+    && test -x /opt/pnpm/bin/pnpm.mjs \
+    && test -x /opt/pnpm/bin/pnpx.mjs \
     && rm -f /tmp/pnpm.tgz
 
 FROM node:24.20.0-trixie-slim@sha256:50c3b2f6988dfc307b86e5301d69611af31f4789bdf232863b07d3b02fe55ae0 AS npm-bundle

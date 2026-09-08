@@ -406,6 +406,9 @@ require_literal \
     '--checksum=sha256:${DSH_SOURCE_ARCHIVE_SHA256}' \
     'the DeepSeek Harness source archive checksum tied to DSH_SOURCE_ARCHIVE_SHA256'
 require_literal \
+    'chmod 0755 /opt/pnpm/bin/pnpm.mjs /opt/pnpm/bin/pnpx.mjs' \
+    'the executable pnpm entrypoints after bundle extraction'
+require_literal \
     '"${DSH_SOURCE_ARCHIVE_SHA256}" /tmp/dsh-source.tar.gz | sha256sum -c -' \
     'the DeepSeek Harness source archive checksum verification'
 require_literal \
