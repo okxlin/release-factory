@@ -392,7 +392,7 @@ require_literal \
     'the Buildx go-archive version pin'
 require_literal \
     "golang.org/x/mod@v\${X_MOD_VERSION}" \
-    'the Buildx and Compose x/mod version pin'
+    'the Buildx and optional Compose x/mod version pin'
 require_literal \
     '-require="cel.dev/cel-go@v${CEL_GO_VERSION}"' \
     'the Caddy CEL module relocation pin'

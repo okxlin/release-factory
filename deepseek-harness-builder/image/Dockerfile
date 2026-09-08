@@ -361,8 +361,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     && /out/docker-compose version \
         | grep -F "Docker Compose version v${DOCKER_COMPOSE_VERSION}" \
     && go version -m /out/docker-compose | grep -F "go${GO_VERSION}" \
-    && go version -m /out/docker-compose | grep -Eq \
-        "golang\\.org/x/mod[[:space:]]+v${X_MOD_VERSION}([[:space:]]|$)" \
+    && if compose_x_mod_version="$(go list -m -f '{{.Version}}' golang.org/x/mod 2>/dev/null)"; then \
+        test "${compose_x_mod_version}" = "v${X_MOD_VERSION}"; \
+    fi \
     && ! go version -m /out/docker-compose \
         | grep -Eq '^[[:space:]]*dep[[:space:]]+github.com/docker/docker[[:space:]]'
 
