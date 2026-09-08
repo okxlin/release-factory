@@ -128,6 +128,16 @@
       }
     },
     {
+      "name": "DeepSeek Harness source",
+      "pin": "DSH_SOURCE_VERSION",
+      "source": {
+        "type": "github_release",
+        "repo": "deepseek-ai/deepseek-harness",
+        "tag_prefix": "dsh-v",
+        "include_prereleases": true
+      }
+    },
+    {
       "name": "Docker CLI",
       "pin": "DOCKER_VERSION",
       "source": {

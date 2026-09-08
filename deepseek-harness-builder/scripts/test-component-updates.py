@@ -72,6 +72,40 @@ class ComponentUpdateCheckerTests(unittest.TestCase):
             ],
         }
 
+    @staticmethod
+    def github_release_policy() -> dict[str, object]:
+        return {
+            "version": 1,
+            "components": [
+                {
+                    "name": "Caddy",
+                    "pin": "CADDY_VERSION",
+                    "source": {
+                        "type": "github_release",
+                        "repo": "caddyserver/caddy",
+                    },
+                }
+            ],
+        }
+
+    @staticmethod
+    def dsh_source_policy() -> dict[str, object]:
+        return {
+            "version": 1,
+            "components": [
+                {
+                    "name": "DeepSeek Harness source",
+                    "pin": "DSH_SOURCE_VERSION",
+                    "source": {
+                        "type": "github_release",
+                        "repo": "deepseek-ai/deepseek-harness",
+                        "tag_prefix": "dsh-v",
+                        "include_prereleases": True,
+                    },
+                }
+            ],
+        }
+
     def test_update_is_reported_and_strict_mode_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             result, summary_path = self.run_checker(
@@ -101,6 +135,50 @@ class ComponentUpdateCheckerTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("component_updates=0", result.stdout)
             self.assertIn("current", summary_path.read_text(encoding="utf-8"))
+
+    def test_github_latest_release_remains_stable_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            result, summary_path = self.run_checker(
+                Path(temporary),
+                self.github_release_policy(),
+                "ARG CADDY_VERSION=2.0.0\n",
+                {"github-release-caddyserver-caddy.json": '{"tag_name":"v2.0.0"}\n'},
+                "--fail-on-updates",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("component_updates=0", result.stdout)
+            self.assertIn("current", summary_path.read_text(encoding="utf-8"))
+
+    def test_github_source_release_selects_highest_prerelease(self) -> None:
+        releases = [
+            {"tag_name": "dsh-v0.1.2-alpha.2", "draft": False, "prerelease": True},
+            {"tag_name": "dsh-v0.1.2-alpha.10", "draft": False, "prerelease": True},
+            {"tag_name": "dsh-v0.1.2-rc.1", "draft": False, "prerelease": True},
+            {"tag_name": "dsh-v0.1.3-alpha.1", "draft": False, "prerelease": True},
+            {"tag_name": "dsh-v99.0.0-alpha.01", "draft": False, "prerelease": True},
+            {"tag_name": "v99.0.0", "draft": False, "prerelease": False},
+            {"tag_name": "dsh-v9.0.0-alpha.1", "draft": True, "prerelease": True},
+        ]
+
+        with tempfile.TemporaryDirectory() as temporary:
+            result, summary_path = self.run_checker(
+                Path(temporary),
+                self.dsh_source_policy(),
+                "ARG DSH_SOURCE_VERSION=0.1.2-alpha.1\n",
+                {
+                    "github-release-deepseek-ai-deepseek-harness.json": json.dumps(
+                        releases
+                    )
+                },
+                "--fail-on-updates",
+            )
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            summary = summary_path.read_text(encoding="utf-8")
+            self.assertIn("`0.1.2-alpha.1`", summary)
+            self.assertIn("[0.1.3-alpha.1]", summary)
+            self.assertIn("update available", summary)
 
     def test_missing_fixture_is_a_source_error(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
