@@ -197,7 +197,12 @@ RUN corepack enable \
         && npm install --ignore-scripts --include=optional --no-audit --no-fund --package-lock=false \
             /tmp/dsh-pack/dsh/*.tgz /tmp/dsh-pack/vendor/*.tgz \
         && node /opt/dsh/node_modules/@deepseek-ai/dsh-subprocess-local/scripts/ensure-spawn-helper.mjs \
-        && npm rebuild --foreground-scripts koffi node-pty \
+        && npm install-scripts approve fs-ext \
+        && npm rebuild --foreground-scripts koffi node-pty fs-ext \
+        && find node_modules \
+            -path '*/fs-ext/build/Release/fs_ext.node' \
+            -type f -print -quit | grep -q . \
+        && node -e "require('fs-ext')" \
         && node /tmp/patch-dsh-directory-picker.mjs /opt/dsh/node_modules \
         && node /tmp/patch-dsh-authenticated-settings.mjs /opt/dsh/node_modules; \
       else \

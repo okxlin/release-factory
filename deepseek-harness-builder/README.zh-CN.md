@@ -55,7 +55,7 @@ deepseek-harness-builder/scripts/build-local.sh \
 
 本地构建辅助脚本默认使用 [`image/dsh-source.json`](image/dsh-source.json) 中固定的源码版本，并把其版本作为 Docker `DSH_VERSION` 传入。使用 `--version <source-release>` 可以显式构建该源码版本；也可以传入已发布的 npm 版本或 dist-tag，走兼容旧版本的 npm 构建路径。使用 npm selector 时，脚本只会在临时构建上下文中更新 `package.json` 和 `pnpm-lock.yaml`。直接 `docker build` 仍支持已提交的源码基线上下文；GitHub Actions 的留空版本解析会在构建上下文中注入当次选定的源码 metadata，因此新增源码 release 不需要手工修改 Dockerfile。
 
-对于仓库固定的源码版本，Docker 会校验不可变的 GitHub 源码归档，使用上游 lockfile，构建官方 CLI 和 Web UI，打包 DSH 与 vendor workspace，再将本地 tarball 安装到扁平的 npm runtime 依赖树中。安装脚本默认关闭，只有审查过的 `koffi`/`node-pty` 原生重编译和 subprocess helper 会被显式执行。已发布的 npm 版本仍使用仓库冻结的 `pnpm-lock.yaml` 路径。这样两个发布路径都可复现，同时允许尚未发布到 npm 的上游源码版本通过相同的补丁和 smoke 合约。
+对于仓库固定的源码版本，Docker 会校验不可变的 GitHub 源码归档，使用上游 lockfile，构建官方 CLI 和 Web UI，打包 DSH 与 vendor workspace，再将本地 tarball 安装到扁平的 npm runtime 依赖树中。安装脚本默认关闭，只有审查过的 `koffi`/`node-pty`/`fs-ext` 原生重编译和 subprocess helper 会被显式执行。已发布的 npm 版本仍使用仓库冻结的 `pnpm-lock.yaml` 路径。这样两个发布路径都可复现，同时允许尚未发布到 npm 的上游源码版本通过相同的补丁和 smoke 合约。
 
 镜像构建会对 DSH browse 目录选择器应用一个范围很小、并且会校验源码形状的兼容性补丁，使网页的 **Add workspace** 对话框在未指定路径时从 `DSH_WORKSPACE` 开始，而不是从进程 `HOME` 开始。如果上游实现发生变化，构建会 fail-closed，直到重新审查补丁和 smoke 合约。该补丁不会改变 workstation 的 `HOME` 值或工具持久化路径。
 

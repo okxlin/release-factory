@@ -409,6 +409,12 @@ require_literal \
     'chmod 0755 /opt/pnpm/bin/pnpm.mjs /opt/pnpm/bin/pnpx.mjs' \
     'the executable pnpm entrypoints after bundle extraction'
 require_literal \
+    'npm install-scripts approve fs-ext' \
+    'the explicit fs-ext native install-script approval'
+require_literal \
+    'npm rebuild --foreground-scripts koffi node-pty fs-ext' \
+    'the native dependency rebuild including fs-ext'
+require_literal \
     '"${DSH_SOURCE_ARCHIVE_SHA256}" /tmp/dsh-source.tar.gz | sha256sum -c -' \
     'the DeepSeek Harness source archive checksum verification'
 require_literal \
