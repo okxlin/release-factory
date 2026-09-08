@@ -8,7 +8,7 @@ ARG CADDY_SECURITY_VERSION=1.1.64
 ARG CEL_GO_VERSION=0.32.0
 ARG GO_AUTHCRUNCH_VERSION=1.1.41
 ARG GRPC_VERSION=1.83.2
-ARG KLAUSPOST_COMPRESS_VERSION=1.19.2
+ARG KLAUSPOST_COMPRESS_VERSION=1.20.0
 ARG X_CRYPTO_VERSION=0.56.0
 ARG X_TEXT_VERSION=0.41.0
 ARG CADDY_RATELIMIT_REF=5625512f24f6f59d6f64fb3aafe5eecff0b286db
@@ -70,7 +70,7 @@ RUN xcaddy build "v${CADDY_VERSION}" \
     && ./caddy list-modules | grep -Fx 'http.handlers.rate_limit'
 
 RUN PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "google\.golang\.org/grpc[[:space:]]+v${GRPC_VERSION}" \
-    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'github\.com/klauspost/compress[[:space:]]+v1\.19\.2' \
+    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "github\\.com/klauspost/compress[[:space:]]+v${KLAUSPOST_COMPRESS_VERSION}" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "cel\.dev/cel-go[[:space:]]+v${CEL_GO_VERSION}" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "golang\.org/x/crypto[[:space:]]+v${X_CRYPTO_VERSION}" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'golang\.org/x/text[[:space:]]+v0\.41\.0' \
@@ -138,17 +138,17 @@ RUN python3 --version | grep -Fx "Python ${PYTHON_VERSION}" \
 
 FROM node:24.20.0-trixie-slim@sha256:50c3b2f6988dfc307b86e5301d69611af31f4789bdf232863b07d3b02fe55ae0 AS dsh-deps
 
-ARG DSH_VERSION=0.1.2-alpha.1
-ARG DSH_SOURCE_VERSION=0.1.2-alpha.1
-ARG DSH_SOURCE_REF=dsh-v0.1.2-alpha.1
-ARG DSH_SOURCE_COMMIT=cd5ef8148158c3a752a658978873241fdf8e2bbc
-ARG DSH_SOURCE_ARCHIVE_SHA256=08aaf69a036d893fbc63a8feb59acd293c6970f7ccc4d77779243e8140fa359e
+ARG DSH_VERSION=0.1.3-alpha.2
+ARG DSH_SOURCE_VERSION=0.1.3-alpha.2
+ARG DSH_SOURCE_REF=dsh-v0.1.3-alpha.2
+ARG DSH_SOURCE_COMMIT=82a5fd61a7cf5c293cec4bdff68f455398d685e9
+ARG DSH_SOURCE_ARCHIVE_SHA256=9ca737f46117be079ed95c61911ec34e8dbf7480b726e1ec8c73138e8276843c
 ARG PYTHON_VERSION=3.12.14
 ARG PYTEST_VERSION=9.1.1
-ARG PNPM_VERSION=11.24.0
+ARG PNPM_VERSION=12.3.4
 
-ADD --checksum=sha256:08aaf69a036d893fbc63a8feb59acd293c6970f7ccc4d77779243e8140fa359e \
-    https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/refs/tags/dsh-v0.1.2-alpha.1 /tmp/dsh-source.tar.gz
+ADD --checksum=sha256:${DSH_SOURCE_ARCHIVE_SHA256} \
+    https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/refs/tags/${DSH_SOURCE_REF} /tmp/dsh-source.tar.gz
 
 ENV PYTHON=/usr/local/bin/python3
 
@@ -177,7 +177,7 @@ RUN corepack enable \
     && corepack prepare "pnpm@${PNPM_VERSION}" --activate \
     && resolved_dsh_version="${DSH_VERSION:-${DSH_SOURCE_VERSION}}" \
     && test "${DSH_SOURCE_REF}" = "dsh-v${DSH_SOURCE_VERSION}" \
-    && test "${DSH_SOURCE_COMMIT}" = 'cd5ef8148158c3a752a658978873241fdf8e2bbc' \
+    && printf '%s\n' "${DSH_SOURCE_COMMIT}" | grep -Eq '^[a-f0-9]{40}$' \
     && printf '%s  %s\n' "${DSH_SOURCE_ARCHIVE_SHA256}" /tmp/dsh-source.tar.gz | sha256sum -c - \
     && if [ "${resolved_dsh_version}" = "${DSH_SOURCE_VERSION}" ]; then \
         mkdir -p /tmp/dsh-source \
@@ -197,7 +197,12 @@ RUN corepack enable \
         && npm install --ignore-scripts --include=optional --no-audit --no-fund --package-lock=false \
             /tmp/dsh-pack/dsh/*.tgz /tmp/dsh-pack/vendor/*.tgz \
         && node /opt/dsh/node_modules/@deepseek-ai/dsh-subprocess-local/scripts/ensure-spawn-helper.mjs \
-        && npm rebuild --foreground-scripts koffi node-pty \
+        && npm install-scripts approve fs-ext \
+        && npm rebuild --foreground-scripts koffi node-pty fs-ext \
+        && find node_modules \
+            -path '*/fs-ext/build/Release/fs_ext.node' \
+            -type f -print -quit | grep -q . \
+        && node -e "require('fs-ext')" \
         && node /tmp/patch-dsh-directory-picker.mjs /opt/dsh/node_modules \
         && node /tmp/patch-dsh-authenticated-settings.mjs /opt/dsh/node_modules; \
       else \
@@ -226,17 +231,20 @@ RUN corepack enable \
 
 FROM node:24.20.0-trixie-slim@sha256:50c3b2f6988dfc307b86e5301d69611af31f4789bdf232863b07d3b02fe55ae0 AS pnpm-bundle
 
-ARG PNPM_VERSION=11.24.0
+ARG PNPM_VERSION=12.3.4
 
 # The registry tarball is checksum-pinned so the runtime can provide pnpm
 # without retaining npm or Corepack.
-ADD --checksum=sha256:d1eab2433172661cc36a18ec85fce93f771db1962717329cc01ec9c2824ca24f \
-    https://registry.npmjs.org/pnpm/-/pnpm-11.24.0.tgz /tmp/pnpm.tgz
+ADD --checksum=sha256:08a3d2d539b377a6b7ea2469b612672255ca71c30a62698530582cb9d35c268f \
+    https://registry.npmjs.org/pnpm/-/pnpm-12.3.4.tgz /tmp/pnpm.tgz
 
 RUN mkdir -p /opt/pnpm \
     && tar -xzf /tmp/pnpm.tgz -C /opt/pnpm --strip-components=1 \
     && test "$(node -p "require('/opt/pnpm/package.json').version")" = "${PNPM_VERSION}" \
     && test "$(node /opt/pnpm/bin/pnpm.mjs --version)" = "${PNPM_VERSION}" \
+    && chmod 0755 /opt/pnpm/bin/pnpm.mjs /opt/pnpm/bin/pnpx.mjs \
+    && test -x /opt/pnpm/bin/pnpm.mjs \
+    && test -x /opt/pnpm/bin/pnpx.mjs \
     && rm -f /tmp/pnpm.tgz
 
 FROM node:24.20.0-trixie-slim@sha256:50c3b2f6988dfc307b86e5301d69611af31f4789bdf232863b07d3b02fe55ae0 AS npm-bundle
@@ -256,22 +264,23 @@ RUN mkdir -p /opt/npm \
     && test "$(node /opt/npm/bin/npx-cli.js --version)" = "${NPM_VERSION}" \
     && rm -f /tmp/npm.tgz
 
-FROM golang:1.27.0-trixie@sha256:6212da3924947f4b6a939df02ea627c13f338f1a41d6c3fcb0dd9d076eef46c4 AS docker-tools-builder
+FROM golang:1.27.1-trixie@sha256:9baa6b4187bbb98d240372a8a235ac0bb6b5ddd52bba1431dc2f7c0705862728 AS docker-tools-builder
 
-ARG DOCKER_BUILDX_VERSION=0.36.1
-ARG DOCKER_COMPOSE_VERSION=5.5.0
-ARG DOCKER_VERSION=29.7.2
+ARG DOCKER_BUILDX_VERSION=0.37.0
+ARG DOCKER_COMPOSE_VERSION=5.5.1
+ARG DOCKER_VERSION=29.8.0
+ARG GO_VERSION=1.27.1
 ARG MOBY_GO_ARCHIVE_VERSION=0.3.3
 ARG X_MOD_VERSION=0.40.0
 
 COPY patches/docker-buildx-local-namesgenerator.patch /tmp/docker-buildx-local-namesgenerator.patch
 
-ADD --checksum=sha256:225b7ab2a15f5230b482df8461069cd4bce38891266fb9898d4188d0a3cbf54a \
-    https://codeload.github.com/docker/cli/tar.gz/refs/tags/v29.7.2 /tmp/docker-cli.tar.gz
-ADD --checksum=sha256:504ed1541f4bc5c301dc9cf7b86ae8e2d26b57a558a248d9b832af188b298bba \
-    https://codeload.github.com/docker/compose/tar.gz/refs/tags/v5.5.0 /tmp/docker-compose.tar.gz
-ADD --checksum=sha256:8959987919445ab61564f50decde4dae810137063d84e2d3c969c9a4a68ecdeb \
-    https://codeload.github.com/docker/buildx/tar.gz/refs/tags/v0.36.1 /tmp/docker-buildx.tar.gz
+ADD --checksum=sha256:c5fadbc00c02dbecb1b7c9936e188baf9c80421a9107e7e9ad36a0923a0fc764 \
+    https://codeload.github.com/docker/cli/tar.gz/refs/tags/v29.8.0 /tmp/docker-cli.tar.gz
+ADD --checksum=sha256:311077662698fd8e34769a894f9d5240befb1730990efa8ed58e0fa8725d2d84 \
+    https://codeload.github.com/docker/compose/tar.gz/refs/tags/v5.5.1 /tmp/docker-compose.tar.gz
+ADD --checksum=sha256:c6e3efdfb9778d9ef69e005ea43abc3041511f088760c927637e3cf6be7cb410 \
+    https://codeload.github.com/docker/buildx/tar.gz/refs/tags/v0.37.0 /tmp/docker-buildx.tar.gz
 
 RUN mkdir -p \
         /usr/src/docker-buildx \
@@ -296,13 +305,13 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
             -X github.com/docker/cli/cli/version.BuildTime=unknown" \
         -o /out/docker ./cmd/docker \
     && /out/docker --version | grep -F "Docker version ${DOCKER_VERSION}," \
-    && go version -m /out/docker | grep -F 'go1.27.0'
+    && go version -m /out/docker | grep -F "go${GO_VERSION}"
 
 WORKDIR /usr/src/docker-buildx
 
 # Buildx uses the old github.com/docker/docker module only for its frozen random
 # name generator. Keep that exact vendored package locally and remove the broad
-# daemon module from the client dependency graph before compiling. Its v0.36.1
+# daemon module from the client dependency graph before compiling. Its v0.37.0
 # module graph also selects vulnerable go-archive and x/mod releases, so raise
 # both dependencies to their advisory-fixed releases before compiling.
 RUN mkdir -p store/namesgenerator \
@@ -327,7 +336,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         -o /out/docker-buildx ./cmd/buildx \
     && /out/docker-buildx version \
         | grep -F "github.com/docker/buildx v${DOCKER_BUILDX_VERSION} " \
-    && go version -m /out/docker-buildx | grep -F 'go1.27.0' \
+    && go version -m /out/docker-buildx | grep -F "go${GO_VERSION}" \
     && go version -m /out/docker-buildx | grep -Eq \
         "github\\.com/moby/go-archive[[:space:]]+v${MOBY_GO_ARCHIVE_VERSION}([[:space:]]|$)" \
     && go version -m /out/docker-buildx | grep -Eq \
@@ -351,9 +360,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         -o /out/docker-compose ./cmd \
     && /out/docker-compose version \
         | grep -F "Docker Compose version v${DOCKER_COMPOSE_VERSION}" \
-    && go version -m /out/docker-compose | grep -F 'go1.27.0' \
-    && go version -m /out/docker-compose | grep -Eq \
-        "golang\\.org/x/mod[[:space:]]+v${X_MOD_VERSION}([[:space:]]|$)" \
+    && go version -m /out/docker-compose | grep -F "go${GO_VERSION}" \
+    && if compose_x_mod_version="$(go list -m -f '{{.Version}}' golang.org/x/mod 2>/dev/null)"; then \
+        test "${compose_x_mod_version}" = "v${X_MOD_VERSION}"; \
+    fi \
     && ! go version -m /out/docker-compose \
         | grep -Eq '^[[:space:]]*dep[[:space:]]+github.com/docker/docker[[:space:]]'
 
@@ -367,18 +377,20 @@ RUN printf '%s  %s\n' \
         'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30' \
         /licenses/DOCKER_BUILDX_LICENSE | sha256sum -c -
 
-FROM golang:1.27.0-trixie@sha256:6212da3924947f4b6a939df02ea627c13f338f1a41d6c3fcb0dd9d076eef46c4 AS go-toolchain
+FROM golang:1.27.1-trixie@sha256:9baa6b4187bbb98d240372a8a235ac0bb6b5ddd52bba1431dc2f7c0705862728 AS go-toolchain
 
-RUN go version | grep -F 'go1.27.0'
+ARG GO_VERSION=1.27.1
+
+RUN go version | grep -F "go${GO_VERSION}"
 
 FROM node:24.20.0-trixie-slim@sha256:50c3b2f6988dfc307b86e5301d69611af31f4789bdf232863b07d3b02fe55ae0 AS runtime-base
 
 ARG CADDY_VERSION=2.11.4
 ARG CADDY_SECURITY_VERSION=1.1.64
-ARG DSH_VERSION=0.1.2-alpha.1
-ARG DSH_SOURCE_VERSION=0.1.2-alpha.1
+ARG DSH_VERSION=0.1.3-alpha.2
+ARG DSH_SOURCE_VERSION=0.1.3-alpha.2
 ARG PYTHON_VERSION=3.12.14
-ARG PNPM_VERSION=11.24.0
+ARG PNPM_VERSION=12.3.4
 
 ENV AUTH_MODE=caddy-security \
     AUTH_STATE_DIR=/data/auth \
@@ -457,12 +469,12 @@ FROM go-toolchain AS workstation-tools
 ARG TARGETARCH
 ARG ACTIONLINT_VERSION=1.7.12
 ARG ACTIONLINT_SOURCE_SHA256=454800bd4f854592bcfe79b161f71d56e35940eb7016e48a26dd356adc9d400a
-ARG RUFF_VERSION=0.16.5
-ARG RUFF_SHA256_AMD64=65b8bae7e43f12a91b71036a52176012b3aefb725d5ae263e2771474110a0983
-ARG RUFF_SHA256_ARM64=796079ea998dba3e455394077ba51a4c500c2402d3920580c646a0580f20370c
-ARG UV_VERSION=0.12.7
-ARG UV_SHA256_AMD64=788f18abea7c5f55d6216e4f5613fd89d4d59b631efeec117b2b07fe72f1da21
-ARG UV_SHA256_ARM64=66393193038dd7eb108abd7a218d9cec04ac70ab98242b0720fa94de19223b7c
+ARG RUFF_VERSION=0.16.6
+ARG RUFF_SHA256_AMD64=0696335ef16615d8c7445ad438750eb0f55b3da6f153df21265a7c6d5750254f
+ARG RUFF_SHA256_ARM64=3c1b99f65b8bf2df64ff099ee072e11b4652813e2c164ec875a26fc9e99be88f
+ARG UV_VERSION=0.12.10
+ARG UV_SHA256_AMD64=173d95a0c32d18c896c46ba6fafbf3cf9c14ab74b033f81b76c883ef492a976b
+ARG UV_SHA256_ARM64=9ff6b9d4665edcdd3a88dcc73cd1eb641754deb927f14e8c62ebfde6bf4f5f5e
 ARG YQ_VERSION=4.53.6
 ARG YQ_SHA256_AMD64=c5f056448f973ae7d39b5401949648a78f2dc1947d6a8eb65be60d5c504b9385
 ARG YQ_SHA256_ARM64=88a1016bc1d657375a35864e4f44b6f333df8ff97b559f51bba0adcb2169df09
@@ -550,7 +562,7 @@ RUN case "${TARGETARCH}" in \
         /tmp/ruff-license | sha256sum -c - \
     && install -m 0644 /tmp/ruff-license /out/licenses/ruff/LICENSE \
     && /out/bin/actionlint -version | grep -Fx "${ACTIONLINT_VERSION}" \
-    && go version -m /out/bin/actionlint | grep -F 'go1.27.0' \
+    && go version -m /out/bin/actionlint | grep -F "go${GO_VERSION}" \
     && /out/bin/yq --version | grep -F "version v${YQ_VERSION}" \
     && /out/bin/uv --version | grep -F "uv ${UV_VERSION} " \
     && /out/bin/uvx --version | grep -F "uvx ${UV_VERSION} " \
@@ -560,14 +572,14 @@ FROM runtime-base AS workstation
 
 WORKDIR /
 
-ARG DOCKER_BUILDX_VERSION=0.36.1
-ARG DOCKER_COMPOSE_VERSION=5.5.0
-ARG DOCKER_VERSION=29.7.2
-ARG GO_VERSION=1.27.0
+ARG DOCKER_BUILDX_VERSION=0.37.0
+ARG DOCKER_COMPOSE_VERSION=5.5.1
+ARG DOCKER_VERSION=29.8.0
+ARG GO_VERSION=1.27.1
 ARG NPM_VERSION=11.19.1
 ARG PYTHON_VERSION=3.12.14
 ARG PYTEST_VERSION=9.1.1
-ARG PNPM_VERSION=11.24.0
+ARG PNPM_VERSION=12.3.4
 
 ENV AUTH_STATE_DIR=/data/auth \
     CADDY_CONFIG_HOME=/data/caddy/config \
@@ -695,7 +707,7 @@ VOLUME ["/home/node"]
 
 FROM runtime-base AS runtime
 
-ARG PNPM_VERSION=11.24.0
+ARG PNPM_VERSION=12.3.4
 
 ENV DSH_IMAGE_VARIANT=runtime
 

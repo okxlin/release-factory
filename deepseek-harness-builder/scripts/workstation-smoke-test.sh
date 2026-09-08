@@ -234,8 +234,8 @@ pass "home, /data application state, and workspace use direct directories withou
 [[ "$(node --version)" == "v24.20.0" ]] || fail "Node.js version drifted"
 [[ "$(npm --version)" == "11.19.1" ]] || fail "npm version drifted"
 [[ "$(npx --version)" == "11.19.1" ]] || fail "npx version drifted"
-[[ "$(pnpm --version)" == "11.24.0" ]] || fail "pnpm version drifted"
-[[ "$(go version)" == go\ version\ go1.27.0* ]] || fail "Go version drifted"
+[[ "$(pnpm --version)" == "12.3.4" ]] || fail "pnpm version drifted"
+[[ "$(go version)" == go\ version\ go1.27.1* ]] || fail "Go version drifted"
 python3 --version | grep -Fxq 'Python 3.12.14' || fail "Python is not pinned to 3.12.14"
 python3 -m pytest --version | grep -Fxq 'pytest 9.1.1' || fail "pytest is not available for Python 3.12.14"
 command -v rustc >/dev/null 2>&1 && fail "Rust compiler should not be installed"
@@ -244,15 +244,15 @@ pass "pinned language runtimes are executable"
 
 [[ "$(actionlint -version | head -n 1)" == "1.7.12" ]] || fail "actionlint version drifted"
 yq --version | grep -Fq 'version v4.53.6' || fail "yq version drifted"
-uv --version | grep -Fq 'uv 0.12.7 ' || fail "uv version drifted"
-uvx --version | grep -Fq 'uvx 0.12.7 ' || fail "uvx version drifted"
-[[ "$(ruff --version)" == "ruff 0.16.5" ]] || fail "Ruff version drifted"
+uv --version | grep -Fq 'uv 0.12.10 ' || fail "uv version drifted"
+uvx --version | grep -Fq 'uvx 0.12.10 ' || fail "uvx version drifted"
+[[ "$(ruff --version)" == "ruff 0.16.6" ]] || fail "Ruff version drifted"
 pass "checksum-pinned standalone development tools are executable"
 
-docker --version | grep -Fq 'Docker version 29.7.2,' || fail "Docker CLI version drifted"
-docker compose version | grep -Fq 'Docker Compose version v5.5.0' \
+docker --version | grep -Fq 'Docker version 29.8.0,' || fail "Docker CLI version drifted"
+docker compose version | grep -Fq 'Docker Compose version v5.5.1' \
     || fail "Docker Compose version drifted"
-docker buildx version | grep -Fq 'github.com/docker/buildx v0.36.1 ' \
+docker buildx version | grep -Fq 'github.com/docker/buildx v0.37.0 ' \
     || fail "Docker Buildx version drifted"
 [[ ! -S /var/run/docker.sock ]] || fail "Docker socket is unexpectedly present by default"
 for docker_binary in \
@@ -260,7 +260,7 @@ for docker_binary in \
     /usr/local/libexec/docker/cli-plugins/docker-buildx \
     /usr/local/libexec/docker/cli-plugins/docker-compose; do
     binary_metadata="$(go version -m "${docker_binary}")"
-    grep -Fq 'go1.27.0' <<< "${binary_metadata}" \
+    grep -Fq 'go1.27.1' <<< "${binary_metadata}" \
         || fail "Docker tool was not built with the pinned fixed Go release: ${docker_binary}"
     if grep -Eq '^[[:space:]]*dep[[:space:]]+github.com/docker/docker[[:space:]]' \
         <<< "${binary_metadata}"; then

@@ -92,12 +92,12 @@ expect_failure 'mixed-case-arg' "${mixed_case_arg}" 'ARG PNPM_VERSION has incons
 
 bad_checksum="${tmp_dir}/bad-checksum.Dockerfile"
 cp -- "${source_dockerfile}" "${bad_checksum}"
-sed -i '0,/^[[:space:]]*ADD --checksum=sha256:/s/^\([[:space:]]*ADD --checksum=sha256:\)[a-f0-9]\{64\}/\1deadbeef/' "${bad_checksum}"
+sed -i 's#^ADD --checksum=sha256:${DSH_SOURCE_ARCHIVE_SHA256}#ADD --checksum=sha256:deadbeef#' "${bad_checksum}"
 expect_failure 'bad-checksum' "${bad_checksum}" 'remote ADD must use a lowercase SHA-256 checksum'
 
 mixed_case_add="${tmp_dir}/mixed-case-add.Dockerfile"
 cp -- "${source_dockerfile}" "${mixed_case_add}"
-sed -i '0,/^[[:space:]]*ADD --checksum=sha256:/s/^\([[:space:]]*\)ADD --checksum=sha256:\([a-f0-9]\{64\}\)/\1aDd --checksum=sha256:deadbeef/' "${mixed_case_add}"
+sed -i 's#^ADD --checksum=sha256:${DSH_SOURCE_ARCHIVE_SHA256}#aDd --checksum=sha256:deadbeef#' "${mixed_case_add}"
 expect_failure 'mixed-case-add' "${mixed_case_add}" 'remote ADD must use a lowercase SHA-256 checksum'
 
 local_bad_checksum="${tmp_dir}/local-bad-checksum.Dockerfile"

@@ -108,6 +108,16 @@ EOF
     || fail "${name}: resolved ${actual_version}, expected ${expected_version}"
   grep -Fxq "dsh_version=${expected_version}" "${github_output}" \
     || fail "${name}: GitHub output does not contain ${expected_version}"
+  if [[ "${with_source_metadata}" == true ]]; then
+    grep -Fxq 'dsh_source_mode=true' "${github_output}" \
+      || fail "${name}: source mode output is missing"
+    grep -Fxq 'dsh_source_ref=dsh-v0.1.2-alpha.1' "${github_output}" \
+      || fail "${name}: source ref output is missing"
+    grep -Fxq 'dsh_source_commit=cd5ef8148158c3a752a658978873241fdf8e2bbc' "${github_output}" \
+      || fail "${name}: source commit output is missing"
+    grep -Fxq 'dsh_source_archive_sha256=08aaf69a036d893fbc63a8feb59acd293c6970f7ccc4d77779243e8140fa359e' "${github_output}" \
+      || fail "${name}: source archive checksum output is missing"
+  fi
   if [[ -n "${expected_npm_call}" ]]; then
     grep -Fxq "${expected_npm_call}" "${npm_call_log}" \
       || fail "${name}: npm query did not match the expected resolution mode"
