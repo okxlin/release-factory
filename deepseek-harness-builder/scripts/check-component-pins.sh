@@ -400,6 +400,12 @@ require_literal \
     "golang.org/x/crypto=golang.org/x/crypto@v\${X_CRYPTO_VERSION}" \
     'the Caddy x/crypto security override'
 require_literal \
+    'golang.org/x/text=golang.org/x/text@v${X_TEXT_VERSION}' \
+    'the Caddy x/text security override'
+require_literal \
+    'grep -Eq "golang\.org/x/text[[:space:]]+v${X_TEXT_VERSION}"' \
+    'the Caddy x/text module verification'
+require_literal \
     'https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/refs/tags/${DSH_SOURCE_REF}' \
     'the DeepSeek Harness source archive URL tied to DSH_SOURCE_REF'
 require_literal \

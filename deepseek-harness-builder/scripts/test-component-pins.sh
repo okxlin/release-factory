@@ -151,3 +151,8 @@ missing_node_addon_probe="${tmp_dir}/missing-node-addon-probe.Dockerfile"
 cp -- "${source_dockerfile}" "${missing_node_addon_probe}"
 sed -i '/@deepseek-ai\/node-addon-system\/flock/d' "${missing_node_addon_probe}"
 expect_failure 'missing-node-addon-probe' "${missing_node_addon_probe}" 'the node-addon-system native lock probe'
+
+missing_x_text_verification="${tmp_dir}/missing-x-text-verification.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_x_text_verification}"
+sed -i '/grep -Eq.*x\/text.*X_TEXT_VERSION/d' "${missing_x_text_verification}"
+expect_failure 'missing-x-text-verification' "${missing_x_text_verification}" 'the Caddy x/text module verification'

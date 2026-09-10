@@ -73,7 +73,7 @@ RUN PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "google\.g
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "github\\.com/klauspost/compress[[:space:]]+v${KLAUSPOST_COMPRESS_VERSION}" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "cel\.dev/cel-go[[:space:]]+v${CEL_GO_VERSION}" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "golang\.org/x/crypto[[:space:]]+v${X_CRYPTO_VERSION}" \
-    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'golang\.org/x/text[[:space:]]+v0\.41\.0' \
+    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "golang\.org/x/text[[:space:]]+v${X_TEXT_VERSION}" \
     && set -- /tmp/buildenv_* \
     && test "$#" -eq 1 \
     && test -d "$1" \
