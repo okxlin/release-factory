@@ -231,7 +231,7 @@ done
 [[ "${DSH_HOME}" == "/data/dsh" ]] \
     || fail "DeepSeek Harness state is not stored under /data"
 pass "home, /data application state, and workspace use direct directories without symbolic links"
-[[ "$(node --version)" == "v24.20.0" ]] || fail "Node.js version drifted"
+[[ "$(node --version)" == "v24.21.0" ]] || fail "Node.js version drifted"
 [[ "$(npm --version)" == "11.19.1" ]] || fail "npm version drifted"
 [[ "$(npx --version)" == "11.19.1" ]] || fail "npx version drifted"
 [[ "$(pnpm --version)" == "12.3.4" ]] || fail "pnpm version drifted"
@@ -244,8 +244,8 @@ pass "pinned language runtimes are executable"
 
 [[ "$(actionlint -version | head -n 1)" == "1.7.12" ]] || fail "actionlint version drifted"
 yq --version | grep -Fq 'version v4.53.6' || fail "yq version drifted"
-uv --version | grep -Fq 'uv 0.12.10 ' || fail "uv version drifted"
-uvx --version | grep -Fq 'uvx 0.12.10 ' || fail "uvx version drifted"
+uv --version | grep -Fq 'uv 0.12.12 ' || fail "uv version drifted"
+uvx --version | grep -Fq 'uvx 0.12.12 ' || fail "uvx version drifted"
 [[ "$(ruff --version)" == "ruff 0.16.6" ]] || fail "Ruff version drifted"
 pass "checksum-pinned standalone development tools are executable"
 
