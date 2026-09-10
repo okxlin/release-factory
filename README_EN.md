@@ -75,7 +75,7 @@ Publication pipelines apply the following gates as appropriate for each project:
 - Validate image repository names, tags, target platforms, and manual inputs, rejecting unsupported architectures.
 - Build a local test image before publication and run project-specific container, authentication, WebSocket, toolchain, or runtime smoke tests.
 - Use the [Trivy gate](SECURITY_SCAN.md) to count fixable HIGH/CRITICAL vulnerabilities. Thresholds are configured per image type and are not uniformly zero.
-- Run additional pnpm audit, Caddy dependency-graph checks, `govulncheck`, dual-architecture smoke tests, and the Workstation Compose permission contract for DeepSeek Harness.
+- Run the DeepSeek Harness runtime dependency audit, Caddy dependency-graph checks, `govulncheck`, dual-architecture smoke tests, and the Workstation Compose permission contract.
 - Validate the Paseo supply-chain record and runtime contract for Codex Workstation. OpenClaw validates the upstream Release tag, runs the repository hardening script, rebuilds the sandbox Docker CLI/Compose with a pinned and verified Go toolchain, and pins critical base-image digests.
 
 A passing security scan does not mean that an image has no vulnerabilities. The gates primarily constrain HIGH/CRITICAL issues with an available fix; users must still assess image provenance, runtime privileges, network exposure, and deployment-specific risk.

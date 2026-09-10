@@ -68,7 +68,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: "24.20.0"
+          node-version: "24.21.0"
 
       - name: Prepare DeepSeek Harness version
         id: dsh
@@ -211,11 +211,11 @@ jobs:
           cache-from: type=gha,scope=deepseek-harness-workstation
           cache-to: type=gha,mode=min,scope=deepseek-harness-workstation
 
-      - name: Audit pinned pnpm production dependencies
+      - name: Audit runtime dependency tree
         run: |
           set -euo pipefail
-          docker run --rm --entrypoint pnpm "${AUDIT_IMAGE}" \
-            audit --prod --audit-level high
+          bash deepseek-harness-builder/scripts/audit-runtime-dependencies.sh \
+            --image "${AUDIT_IMAGE}"
 
       - name: Build amd64 workstation test image
         uses: docker/build-push-action@v7
@@ -372,5 +372,5 @@ jobs:
             echo "- Platforms: ${PARAM_PLATFORMS}"
             echo "- amd64: full authentication, WebSocket, isolation, resource, and compiler smoke"
             echo "- arm64: QEMU authentication, native-module, and compiler smoke; host-kernel sandbox probe skipped under user-mode emulation"
-            echo "- Security: pnpm audit, Caddy dependency-graph/govulncheck gate, zero-fixable CRITICAL Trivy gate, and reported HIGH findings"
+            echo "- Security: runtime dependency audit, Caddy dependency-graph/govulncheck gate, zero-fixable CRITICAL Trivy gate, and reported HIGH findings"
           } >> "$GITHUB_STEP_SUMMARY"
