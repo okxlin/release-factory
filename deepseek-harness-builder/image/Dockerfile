@@ -9,8 +9,8 @@ ARG CEL_GO_VERSION=0.32.0
 ARG GO_AUTHCRUNCH_VERSION=1.1.41
 ARG GRPC_VERSION=1.83.2
 ARG KLAUSPOST_COMPRESS_VERSION=1.20.0
-ARG X_CRYPTO_VERSION=0.56.0
-ARG X_TEXT_VERSION=0.41.0
+ARG X_CRYPTO_VERSION=0.57.0
+ARG X_TEXT_VERSION=0.42.0
 ARG CADDY_RATELIMIT_REF=5625512f24f6f59d6f64fb3aafe5eecff0b286db
 
 COPY patches/caddy-cel-go-v0.30.patch /tmp/caddy-cel-go-v0.30.patch
@@ -73,7 +73,7 @@ RUN PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "google\.g
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "github\\.com/klauspost/compress[[:space:]]+v${KLAUSPOST_COMPRESS_VERSION}" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "cel\.dev/cel-go[[:space:]]+v${CEL_GO_VERSION}" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "golang\.org/x/crypto[[:space:]]+v${X_CRYPTO_VERSION}" \
-    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq 'golang\.org/x/text[[:space:]]+v0\.41\.0' \
+    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "golang\.org/x/text[[:space:]]+v${X_TEXT_VERSION}" \
     && set -- /tmp/buildenv_* \
     && test "$#" -eq 1 \
     && test -d "$1" \
@@ -136,13 +136,13 @@ RUN python3 --version | grep -Fx "Python ${PYTHON_VERSION}" \
     && python3 -m pytest --version | grep -Fx "pytest ${PYTEST_VERSION}" \
     && rm -f /tmp/python-requirements.txt
 
-FROM node:24.20.0-trixie-slim@sha256:50c3b2f6988dfc307b86e5301d69611af31f4789bdf232863b07d3b02fe55ae0 AS dsh-deps
+FROM node:24.21.0-trixie-slim@sha256:db3ae80f5d8df06e04dabdf7b44cbf008d32de168205fa0294444aabbc08c590 AS dsh-deps
 
-ARG DSH_VERSION=0.1.3-alpha.2
-ARG DSH_SOURCE_VERSION=0.1.3-alpha.2
-ARG DSH_SOURCE_REF=dsh-v0.1.3-alpha.2
-ARG DSH_SOURCE_COMMIT=82a5fd61a7cf5c293cec4bdff68f455398d685e9
-ARG DSH_SOURCE_ARCHIVE_SHA256=9ca737f46117be079ed95c61911ec34e8dbf7480b726e1ec8c73138e8276843c
+ARG DSH_VERSION=0.1.5-rc.1
+ARG DSH_SOURCE_VERSION=0.1.5-rc.1
+ARG DSH_SOURCE_REF=dsh-v0.1.5-rc.1
+ARG DSH_SOURCE_COMMIT=183f08e9c6dde7e36cd2318eaee70b0da08fb35e
+ARG DSH_SOURCE_ARCHIVE_SHA256=c9525f2568fa58efa7c7364e2757521c1a50a95c4105d30e594c6929d61ebc3e
 ARG PYTHON_VERSION=3.12.14
 ARG PYTEST_VERSION=9.1.1
 ARG PNPM_VERSION=12.3.4
@@ -190,19 +190,26 @@ RUN corepack enable \
         && CI=true pnpm install --lockfile-only --ignore-scripts \
         && DSH_CLIENT_COMMIT_HASH="${DSH_SOURCE_COMMIT}" CI=true pnpm run build:official \
         && mkdir -p /tmp/dsh-pack/dsh /tmp/dsh-pack/vendor \
-        && DSH_CLIENT_COMMIT_HASH="${DSH_SOURCE_COMMIT}" CI=true pnpm exec tsx scripts/release/pack.ts --family dsh --out /tmp/dsh-pack/dsh \
-        && DSH_CLIENT_COMMIT_HASH="${DSH_SOURCE_COMMIT}" CI=true pnpm exec tsx scripts/release/pack.ts --family vendor --out /tmp/dsh-pack/vendor \
+        && npm_execpath="$(command -v pnpm)" DSH_CLIENT_COMMIT_HASH="${DSH_SOURCE_COMMIT}" CI=true pnpm exec tsx scripts/release/pack.ts --family dsh --out /tmp/dsh-pack/dsh \
+        && npm_execpath="$(command -v pnpm)" DSH_CLIENT_COMMIT_HASH="${DSH_SOURCE_COMMIT}" CI=true pnpm exec tsx scripts/release/pack.ts --family vendor --out /tmp/dsh-pack/vendor \
         && cd /opt/dsh \
         && npm init --yes >/dev/null \
         && npm install --ignore-scripts --include=optional --no-audit --no-fund --package-lock=false \
             /tmp/dsh-pack/dsh/*.tgz /tmp/dsh-pack/vendor/*.tgz \
         && node /opt/dsh/node_modules/@deepseek-ai/dsh-subprocess-local/scripts/ensure-spawn-helper.mjs \
-        && npm install-scripts approve fs-ext \
-        && npm rebuild --foreground-scripts koffi node-pty fs-ext \
-        && find node_modules \
-            -path '*/fs-ext/build/Release/fs_ext.node' \
-            -type f -print -quit | grep -q . \
-        && node -e "require('fs-ext')" \
+        && if find node_modules -type d -path '*/fs-ext' -print -quit | grep -q .; then \
+            npm install-scripts approve fs-ext \
+            && npm rebuild --foreground-scripts koffi node-pty fs-ext \
+            && find node_modules \
+                -path '*/fs-ext/build/Release/fs_ext.node' \
+                -type f -print -quit | grep -q . \
+            && node -e "require('fs-ext')"; \
+          else \
+            npm rebuild --foreground-scripts koffi node-pty; \
+          fi \
+        && if find node_modules -type d -path '*/@deepseek-ai/node-addon-system' -print -quit | grep -q .; then \
+            node --input-type=module -e "import { closeSync, openSync, unlinkSync } from 'node:fs'; import { tryLockExclusive } from '@deepseek-ai/node-addon-system/flock'; const path='/tmp/dsh-flock-probe'; const fd=openSync(path, 'w'); try { await tryLockExclusive(fd); } finally { closeSync(fd); unlinkSync(path); }"; \
+          fi \
         && node /tmp/patch-dsh-directory-picker.mjs /opt/dsh/node_modules \
         && node /tmp/patch-dsh-authenticated-settings.mjs /opt/dsh/node_modules; \
       else \
@@ -229,7 +236,7 @@ RUN corepack enable \
         \) \
         -type f -print -quit | grep -q .
 
-FROM node:24.20.0-trixie-slim@sha256:50c3b2f6988dfc307b86e5301d69611af31f4789bdf232863b07d3b02fe55ae0 AS pnpm-bundle
+FROM node:24.21.0-trixie-slim@sha256:db3ae80f5d8df06e04dabdf7b44cbf008d32de168205fa0294444aabbc08c590 AS pnpm-bundle
 
 ARG PNPM_VERSION=12.3.4
 
@@ -247,7 +254,7 @@ RUN mkdir -p /opt/pnpm \
     && test -x /opt/pnpm/bin/pnpx.mjs \
     && rm -f /tmp/pnpm.tgz
 
-FROM node:24.20.0-trixie-slim@sha256:50c3b2f6988dfc307b86e5301d69611af31f4789bdf232863b07d3b02fe55ae0 AS npm-bundle
+FROM node:24.21.0-trixie-slim@sha256:db3ae80f5d8df06e04dabdf7b44cbf008d32de168205fa0294444aabbc08c590 AS npm-bundle
 
 ARG NPM_VERSION=11.19.1
 
@@ -271,7 +278,7 @@ ARG DOCKER_COMPOSE_VERSION=5.5.1
 ARG DOCKER_VERSION=29.8.0
 ARG GO_VERSION=1.27.1
 ARG MOBY_GO_ARCHIVE_VERSION=0.3.3
-ARG X_MOD_VERSION=0.40.0
+ARG X_MOD_VERSION=0.41.0
 
 COPY patches/docker-buildx-local-namesgenerator.patch /tmp/docker-buildx-local-namesgenerator.patch
 
@@ -383,12 +390,12 @@ ARG GO_VERSION=1.27.1
 
 RUN go version | grep -F "go${GO_VERSION}"
 
-FROM node:24.20.0-trixie-slim@sha256:50c3b2f6988dfc307b86e5301d69611af31f4789bdf232863b07d3b02fe55ae0 AS runtime-base
+FROM node:24.21.0-trixie-slim@sha256:db3ae80f5d8df06e04dabdf7b44cbf008d32de168205fa0294444aabbc08c590 AS runtime-base
 
 ARG CADDY_VERSION=2.11.4
 ARG CADDY_SECURITY_VERSION=1.1.64
-ARG DSH_VERSION=0.1.3-alpha.2
-ARG DSH_SOURCE_VERSION=0.1.3-alpha.2
+ARG DSH_VERSION=0.1.5-rc.1
+ARG DSH_SOURCE_VERSION=0.1.5-rc.1
 ARG PYTHON_VERSION=3.12.14
 ARG PNPM_VERSION=12.3.4
 
@@ -451,7 +458,7 @@ RUN install -d -m 0750 -o node -g node \
     && caddy version | grep -F "v${CADDY_VERSION}" \
     && caddy list-modules | grep -Fx 'security' \
     && dsh --version | grep -Fx "${resolved_dsh_version}" \
-    && node --version | grep -Fx 'v24.20.0' \
+    && node --version | grep -Fx 'v24.21.0' \
     && pnpm --version | grep -Fx "${PNPM_VERSION}"
 
 ENV DSH_VERSION_FILE=/etc/deepseek-harness-version
@@ -472,9 +479,9 @@ ARG ACTIONLINT_SOURCE_SHA256=454800bd4f854592bcfe79b161f71d56e35940eb7016e48a26d
 ARG RUFF_VERSION=0.16.6
 ARG RUFF_SHA256_AMD64=0696335ef16615d8c7445ad438750eb0f55b3da6f153df21265a7c6d5750254f
 ARG RUFF_SHA256_ARM64=3c1b99f65b8bf2df64ff099ee072e11b4652813e2c164ec875a26fc9e99be88f
-ARG UV_VERSION=0.12.10
-ARG UV_SHA256_AMD64=173d95a0c32d18c896c46ba6fafbf3cf9c14ab74b033f81b76c883ef492a976b
-ARG UV_SHA256_ARM64=9ff6b9d4665edcdd3a88dcc73cd1eb641754deb927f14e8c62ebfde6bf4f5f5e
+ARG UV_VERSION=0.12.12
+ARG UV_SHA256_AMD64=ab9b309d4586403f024e100abaceb396616e178a553e2500c36087d180f09509
+ARG UV_SHA256_ARM64=fe08db50cc1b56cd1da7801065ed1103d27ed3f9571cd122386cfc7faf1b8df5
 ARG YQ_VERSION=4.53.6
 ARG YQ_SHA256_AMD64=c5f056448f973ae7d39b5401949648a78f2dc1947d6a8eb65be60d5c504b9385
 ARG YQ_SHA256_ARM64=88a1016bc1d657375a35864e4f44b6f333df8ff97b559f51bba0adcb2169df09

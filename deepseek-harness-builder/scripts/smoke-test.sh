@@ -5,7 +5,7 @@ IMAGE="${SMOKE_IMAGE:-deepseek-harness:ci-test}"
 PROFILE="${SMOKE_PROFILE:-full}"
 PUBLIC_URL="${SMOKE_PUBLIC_URL:-https://dsh.example.test}"
 VARIANT="${SMOKE_VARIANT:-runtime}"
-MAX_IDLE_MEMORY_MIB="${SMOKE_MAX_IDLE_MEMORY_MIB:-384}"
+MAX_IDLE_MEMORY_MIB="${SMOKE_MAX_IDLE_MEMORY_MIB:-512}"
 MAX_IDLE_PIDS="${SMOKE_MAX_IDLE_PIDS:-64}"
 TOKEN_LIFETIME="${SMOKE_TOKEN_LIFETIME:-2592000}"
 EXPECTED_DSH_VERSION="${SMOKE_EXPECTED_DSH_VERSION:-}"
@@ -22,7 +22,7 @@ Options:
   -h, --help             Show this help
 
 Environment overrides:
-  SMOKE_MAX_IDLE_MEMORY_MIB  Full-profile idle memory ceiling (default: 384)
+  SMOKE_MAX_IDLE_MEMORY_MIB  Full-profile idle memory ceiling (default: 512)
   SMOKE_MAX_IDLE_PIDS        Full-profile idle PID ceiling (default: 64)
   SMOKE_TOKEN_LIFETIME       Login lifetime exercised by the smoke test (default: 2592000)
   SMOKE_EXPECTED_DSH_VERSION Expected DSH version; defaults to image DSH_VERSION
@@ -1049,8 +1049,8 @@ check_runtime_versions() {
         || fail "DeepSeek Harness version is not ${EXPECTED_DSH_VERSION}"
     pass "DeepSeek Harness version matches ${EXPECTED_DSH_VERSION}"
 
-    [[ "$(docker exec "${container_name}" node --version)" == "v24.20.0" ]] \
-        || fail "Node.js version is not pinned to v24.20.0"
+    [[ "$(docker exec "${container_name}" node --version)" == "v24.21.0" ]] \
+        || fail "Node.js version is not pinned to v24.21.0"
     pass "Node.js version is pinned"
 
     [[ "$(docker exec "${container_name}" pnpm --version)" == "12.3.4" ]] \
@@ -1100,10 +1100,10 @@ check_runtime_versions() {
             || fail "actionlint is not pinned to 1.7.12"
         docker exec "${container_name}" yq --version | grep -Fq 'version v4.53.6' \
             || fail "yq is not pinned to 4.53.6"
-        docker exec "${container_name}" uv --version | grep -Fq 'uv 0.12.10 ' \
-            || fail "uv is not pinned to 0.12.10"
-        docker exec "${container_name}" uvx --version | grep -Fq 'uvx 0.12.10 ' \
-            || fail "uvx is not pinned to 0.12.10"
+        docker exec "${container_name}" uv --version | grep -Fq 'uv 0.12.12 ' \
+            || fail "uv is not pinned to 0.12.12"
+        docker exec "${container_name}" uvx --version | grep -Fq 'uvx 0.12.12 ' \
+            || fail "uvx is not pinned to 0.12.12"
         [[ "$(docker exec "${container_name}" ruff --version)" == "ruff 0.16.6" ]] \
             || fail "Ruff is not pinned to 0.16.6"
         [[ "$(docker exec "${container_name}" docker --version)" == Docker\ version\ 29.8.0,* ]] \

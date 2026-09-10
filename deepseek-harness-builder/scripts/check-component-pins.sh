@@ -400,11 +400,23 @@ require_literal \
     "golang.org/x/crypto=golang.org/x/crypto@v\${X_CRYPTO_VERSION}" \
     'the Caddy x/crypto security override'
 require_literal \
+    'golang.org/x/text=golang.org/x/text@v${X_TEXT_VERSION}' \
+    'the Caddy x/text security override'
+require_literal \
+    'grep -Eq "golang\.org/x/text[[:space:]]+v${X_TEXT_VERSION}"' \
+    'the Caddy x/text module verification'
+require_literal \
     'https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/refs/tags/${DSH_SOURCE_REF}' \
     'the DeepSeek Harness source archive URL tied to DSH_SOURCE_REF'
 require_literal \
     '--checksum=sha256:${DSH_SOURCE_ARCHIVE_SHA256}' \
     'the DeepSeek Harness source archive checksum tied to DSH_SOURCE_ARCHIVE_SHA256'
+require_literal \
+    'npm_execpath="$(command -v pnpm)" DSH_CLIENT_COMMIT_HASH="${DSH_SOURCE_COMMIT}" CI=true pnpm exec tsx scripts/release/pack.ts --family dsh --out /tmp/dsh-pack/dsh' \
+    'the DeepSeek Harness dsh release pack invocation with pnpm lifecycle metadata'
+require_literal \
+    'npm_execpath="$(command -v pnpm)" DSH_CLIENT_COMMIT_HASH="${DSH_SOURCE_COMMIT}" CI=true pnpm exec tsx scripts/release/pack.ts --family vendor --out /tmp/dsh-pack/vendor' \
+    'the DeepSeek Harness vendor release pack invocation with pnpm lifecycle metadata'
 require_literal \
     'chmod 0755 /opt/pnpm/bin/pnpm.mjs /opt/pnpm/bin/pnpx.mjs' \
     'the executable pnpm entrypoints after bundle extraction'
@@ -414,6 +426,15 @@ require_literal \
 require_literal \
     'npm rebuild --foreground-scripts koffi node-pty fs-ext' \
     'the native dependency rebuild including fs-ext'
+require_literal \
+    "if find node_modules -type d -path '*/fs-ext' -print -quit | grep -q .; then" \
+    'the conditional fs-ext compatibility guard'
+require_literal \
+    "npm rebuild --foreground-scripts koffi node-pty;" \
+    'the native dependency rebuild for releases without fs-ext'
+require_literal \
+    "@deepseek-ai/node-addon-system/flock" \
+    'the node-addon-system native lock probe'
 require_literal \
     '"${DSH_SOURCE_ARCHIVE_SHA256}" /tmp/dsh-source.tar.gz | sha256sum -c -' \
     'the DeepSeek Harness source archive checksum verification'

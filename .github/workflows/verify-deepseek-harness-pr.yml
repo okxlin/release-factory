@@ -23,6 +23,7 @@ env:
   DOCKER_BUILD_RECORD_UPLOAD: "false"
   DOCKER_BUILD_SUMMARY: "false"
   GOVULNCHECK_VERSION: "1.7.0"
+  AUDIT_IMAGE: deepseek-harness:pr-dependency-audit-amd64
   RUNTIME_IMAGE: deepseek-harness:pr-runtime-amd64
   TRIVY_DOCKER_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
   WORKSTATION_IMAGE: deepseek-harness:pr-workstation-amd64
@@ -76,6 +77,26 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
           "$(go env GOPATH)/bin/govulncheck" -version
 
+      - name: Build amd64 dependency-audit stage
+        uses: docker/build-push-action@v7
+        with:
+          github-token: ""
+          context: ./deepseek-harness-builder/image
+          file: ./deepseek-harness-builder/image/Dockerfile
+          target: dsh-deps
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ env.AUDIT_IMAGE }}
+          build-args: |
+            DSH_VERSION=${{ steps.dsh.outputs.dsh_version }}
+
+      - name: Audit runtime dependency tree
+        run: |
+          set -euo pipefail
+          bash deepseek-harness-builder/scripts/audit-runtime-dependencies.sh \
+            --image "${AUDIT_IMAGE}"
+
       - name: Build amd64 runtime test image
         uses: docker/build-push-action@v7
         with:
@@ -89,12 +110,6 @@ jobs:
           tags: ${{ env.RUNTIME_IMAGE }}
           build-args: |
             DSH_VERSION=${{ steps.dsh.outputs.dsh_version }}
-
-      - name: Audit committed pnpm production dependencies
-        run: |
-          set -euo pipefail
-          docker run --rm --entrypoint pnpm "${RUNTIME_IMAGE}" \
-            --dir /opt/dsh audit --prod --audit-level high
 
       - name: Run amd64 runtime smoke tests
         run: |
