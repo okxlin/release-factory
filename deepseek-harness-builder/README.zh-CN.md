@@ -363,11 +363,11 @@ docker run --rm --entrypoint tar \
 
 ## 资源使用
 
-源码版本的 amd64 认证烟雾测试在启动预热后目前稳定在约 `410 MiB` 以下和 `20-22` 个 PID；最近的 `0.1.5-rc.1` 运行达到 `409.1 MiB`。workstation 工具链空闲时不会显著提高内存，但源码构建会因为本地编译上游 CLI 和 vendor workspace 而比历史 npm-only 镜像更大；Debian 或上游重建可能改变这些数字。
+源码版本的 amd64 认证烟雾测试在启动预热后目前稳定在约 `540 MiB` 以下和 `20-22` 个 PID；最近的 `0.1.5-rc.1` PR 验证达到 `409.1 MiB`，发布流程达到 `537.1 MiB`。workstation 工具链空闲时不会显著提高内存，但源码构建会因为本地编译上游 CLI 和 vendor workspace 而比历史 npm-only 镜像更大；Debian 或上游重建可能改变这些数字。
 
-源码版本的 CI 空闲流程上限为 `512 MiB` 和 `64` 个 PID。smoke 会在初始化完成后等待连续三个样本，再应用该上限。这不是工作负载限制：终端、仓库、语言服务器、编译器和模型工具可能需要更多内存。
+源码版本的 CI 空闲流程上限为 `768 MiB` 和 `64` 个 PID。smoke 会在初始化完成后等待连续三个样本，再应用该上限。这不是工作负载限制：终端、仓库、语言服务器、编译器和模型工具可能需要更多内存。
 
-`GOMEMLIMIT=128MiB` 和 `GOMAXPROCS=2` 只限制 Caddy 的 Go runtime。如果 1Panel 需要容器内存限制，轻量镜像建议从 `512 MiB` 开始，workstation 至少从 `1 GiB` 开始，再按观测工作负载调整，不要把 Caddy 限制当成整个容器预算。
+`GOMEMLIMIT=128MiB` 和 `GOMAXPROCS=2` 只限制 Caddy 的 Go runtime。如果 1Panel 需要容器内存限制，轻量镜像建议从 `768 MiB` 开始，workstation 至少从 `1 GiB` 开始，再按观测工作负载调整，不要把 Caddy 限制当成整个容器预算。
 
 ## 验证
 

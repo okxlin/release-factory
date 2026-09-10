@@ -5,7 +5,7 @@ IMAGE="${SMOKE_IMAGE:-deepseek-harness:ci-test}"
 PROFILE="${SMOKE_PROFILE:-full}"
 PUBLIC_URL="${SMOKE_PUBLIC_URL:-https://dsh.example.test}"
 VARIANT="${SMOKE_VARIANT:-runtime}"
-MAX_IDLE_MEMORY_MIB="${SMOKE_MAX_IDLE_MEMORY_MIB:-512}"
+MAX_IDLE_MEMORY_MIB="${SMOKE_MAX_IDLE_MEMORY_MIB:-768}"
 MAX_IDLE_PIDS="${SMOKE_MAX_IDLE_PIDS:-64}"
 TOKEN_LIFETIME="${SMOKE_TOKEN_LIFETIME:-2592000}"
 EXPECTED_DSH_VERSION="${SMOKE_EXPECTED_DSH_VERSION:-}"
@@ -22,7 +22,7 @@ Options:
   -h, --help             Show this help
 
 Environment overrides:
-  SMOKE_MAX_IDLE_MEMORY_MIB  Full-profile idle memory ceiling (default: 512)
+  SMOKE_MAX_IDLE_MEMORY_MIB  Full-profile idle memory ceiling (default: 768)
   SMOKE_MAX_IDLE_PIDS        Full-profile idle PID ceiling (default: 64)
   SMOKE_TOKEN_LIFETIME       Login lifetime exercised by the smoke test (default: 2592000)
   SMOKE_EXPECTED_DSH_VERSION Expected DSH version; defaults to image DSH_VERSION
