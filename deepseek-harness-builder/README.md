@@ -380,9 +380,9 @@ is no longer needed.
 
 ## Resource use
 
-The alpha source release's authenticated amd64 smoke tests currently settle around `240-325 MiB` and about `20-22` PIDs after startup warm-up. The workstation toolchains are dormant, so they do not materially raise idle memory, but they do raise disk use; source builds are larger than the historical npm-only image because the upstream CLI and vendor workspaces are built locally. Debian and upstream rebuilds can move those figures.
+The source release's authenticated amd64 smoke tests currently settle below about `410 MiB` and around `20-22` PIDs after startup warm-up; the recent `0.1.5-rc.1` run reached `409.1 MiB`. The workstation toolchains are dormant, so they do not materially raise idle memory, but they do raise disk use; source builds are larger than the historical npm-only image because the upstream CLI and vendor workspaces are built locally. Debian and upstream rebuilds can move those figures.
 
-The CI ceiling is `384 MiB` for the alpha source-release idle flow. The smoke test waits for three consecutive samples after initialization before applying that ceiling. This is not a workload limit: terminals, repositories, language servers, compilers, and model tools can require substantially more memory.
+The CI ceiling is `512 MiB` and `64` PIDs for the source-release idle flow. The smoke test waits for three consecutive samples after initialization before applying that ceiling. This is not a workload limit: terminals, repositories, language servers, compilers, and model tools can require substantially more memory.
 
 `GOMEMLIMIT=128MiB` and `GOMAXPROCS=2` constrain Caddy's Go runtime only. If 1Panel requires a container memory limit, start at `512 MiB` for the lightweight image and at least `1 GiB` for the workstation, then adjust from observed workloads rather than treating the Caddy limit as the whole-container budget.
 
