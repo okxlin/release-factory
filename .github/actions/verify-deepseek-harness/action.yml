@@ -1,0 +1,204 @@
+name: Verify DeepSeek Harness image
+description: Build and verify one native platform, optionally exporting the tested image.
+
+inputs:
+  variant:
+    description: runtime or workstation
+    required: true
+  arch:
+    description: Native runner architecture, amd64 or arm64
+    required: true
+  dsh-version:
+    description: Prepared release version; empty selects the committed source baseline
+    default: ""
+  refresh-system-packages:
+    description: Refresh APT installation stages while retaining compiler caches
+    default: "false"
+  export-image:
+    description: Export a verified image for the release job
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve and validate native build inputs
+      id: components
+      shell: bash
+      env:
+        ARCH: ${{ inputs.arch }}
+        VARIANT: ${{ inputs.variant }}
+        DSH_VERSION: ${{ inputs.dsh-version }}
+        REFRESH_SYSTEM_PACKAGES: ${{ inputs.refresh-system-packages }}
+      run: |
+        set -euo pipefail
+        case "${ARCH}:$(uname -m)" in
+          amd64:x86_64|arm64:aarch64) ;;
+          *) echo "ERROR: this job requires a native ${ARCH} runner" >&2; exit 1 ;;
+        esac
+        test "$(docker version --format '{{.Server.Arch}}')" = "${ARCH}"
+        case "${VARIANT}" in
+          runtime) refresh_stages=runtime-base ;;
+          workstation) refresh_stages=runtime-base,workstation ;;
+          *) echo 'ERROR: unsupported image variant' >&2; exit 1 ;;
+        esac
+        case "${REFRESH_SYSTEM_PACKAGES}" in
+          true) ;;
+          false) refresh_stages="" ;;
+          *) echo 'ERROR: refresh-system-packages must be true or false' >&2; exit 1 ;;
+        esac
+        python3 deepseek-harness-builder/scripts/component-inputs.py \
+          --dsh-version "${DSH_VERSION}" --github-output "$GITHUB_OUTPUT"
+        bash deepseek-harness-builder/scripts/check-component-pins.sh
+        {
+          echo "image=deepseek-harness:ci-${VARIANT}-${ARCH}"
+          echo "audit_image=deepseek-harness:ci-deps-${VARIANT}-${ARCH}"
+          echo "no_cache_filters=${refresh_stages}"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Prepare committed source manifest
+      if: inputs.dsh-version == ''
+      shell: bash
+      env:
+        DSH_VERSION: ${{ steps.components.outputs.dsh_version }}
+      run: bash deepseek-harness-builder/scripts/prepare-dsh-version.sh --version "$DSH_VERSION" --github-output /dev/null
+
+    - name: Validate workstation Compose contract
+      if: inputs.variant == 'workstation'
+      shell: bash
+      run: bash deepseek-harness-builder/scripts/check-workstation-compose.sh
+
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version: ${{ steps.components.outputs.go_version }}
+        cache: false
+
+    - name: Install pinned govulncheck
+      shell: bash
+      env:
+        GOVULNCHECK_VERSION: "1.7.0"
+      run: |
+        set -euo pipefail
+        go install "golang.org/x/vuln/cmd/govulncheck@v${GOVULNCHECK_VERSION}"
+        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+        "$(go env GOPATH)/bin/govulncheck" -version
+
+    - name: Build native dependency-audit stage
+      uses: docker/build-push-action@v7
+      with:
+        github-token: ""
+        context: ./deepseek-harness-builder/image
+        file: ./deepseek-harness-builder/image/Dockerfile
+        target: dsh-deps
+        platforms: linux/${{ inputs.arch }}
+        load: true
+        push: false
+        tags: ${{ steps.components.outputs.audit_image }}
+        build-args: ${{ steps.components.outputs.build_args }}
+        cache-from: type=gha,scope=deepseek-harness-${{ inputs.variant }}-${{ inputs.arch }}
+
+    - name: Audit production dependencies
+      shell: bash
+      env:
+        AUDIT_IMAGE: ${{ steps.components.outputs.audit_image }}
+      run: bash deepseek-harness-builder/scripts/audit-runtime-dependencies.sh --image "$AUDIT_IMAGE"
+
+    - name: Build native test image
+      id: image
+      uses: docker/build-push-action@v7
+      with:
+        github-token: ""
+        context: ./deepseek-harness-builder/image
+        file: ./deepseek-harness-builder/image/Dockerfile
+        target: ${{ inputs.variant }}
+        platforms: linux/${{ inputs.arch }}
+        load: true
+        push: false
+        # Docker save/load preserves the tested image config and layers, not
+        # BuildKit attestations. The release artifact carries a separate receipt.
+        provenance: false
+        tags: ${{ steps.components.outputs.image }}
+        labels: |
+          org.opencontainers.image.title=DeepSeek Harness (${{ inputs.variant }})
+          org.opencontainers.image.vendor=${{ github.repository_owner }}
+          org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          org.opencontainers.image.revision=${{ github.sha }}
+          org.opencontainers.image.version=${{ steps.components.outputs.dsh_version }}
+        build-args: ${{ steps.components.outputs.build_args }}
+        no-cache-filters: ${{ steps.components.outputs.no_cache_filters }}
+        cache-from: type=gha,scope=deepseek-harness-${{ inputs.variant }}-${{ inputs.arch }}
+        cache-to: type=gha,mode=max,scope=deepseek-harness-${{ inputs.variant }}-${{ inputs.arch }}
+
+    - name: Run full authentication and passthrough smoke
+      shell: bash
+      env:
+        IMAGE: ${{ steps.components.outputs.image }}
+        VARIANT: ${{ inputs.variant }}
+        SMOKE_EXPECTED_DSH_VERSION: ${{ steps.components.outputs.dsh_version }}
+      run: |
+        set -euo pipefail
+        bash deepseek-harness-builder/scripts/smoke-test.sh \
+          --image "$IMAGE" --variant "$VARIANT" --profile full --public-url https://dsh.example.test
+        bash deepseek-harness-builder/scripts/passthrough-smoke-test.sh \
+          --image "$IMAGE" --public-url https://dsh.example.test
+
+    - name: Run workstation toolchain and host-kernel sandbox smoke
+      if: inputs.variant == 'workstation'
+      shell: bash
+      env:
+        IMAGE: ${{ steps.components.outputs.image }}
+      run: bash deepseek-harness-builder/scripts/workstation-smoke-test.sh --image "$IMAGE"
+
+    - name: Check Caddy dependency graph and vulnerabilities
+      shell: bash
+      env:
+        IMAGE: ${{ steps.components.outputs.image }}
+      run: bash deepseek-harness-builder/scripts/check-caddy-vulnerabilities.sh --image "$IMAGE"
+
+    - name: Apply image vulnerability policy
+      shell: bash
+      env:
+        IMAGE: ${{ steps.components.outputs.image }}
+        VARIANT: ${{ inputs.variant }}
+        ARCH: ${{ inputs.arch }}
+        TRIVY_DOCKER_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+      run: |
+        bash scripts/trivy-image-gate.sh --image "$IMAGE" \
+          --output "$RUNNER_TEMP/deepseek-harness-${VARIANT}-${ARCH}.trivy.json" \
+          --policy deepseek-harness-builder/configs/trivy-policy.json --profile "$VARIANT"
+
+    - name: Save raw scan evidence
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: deepseek-harness-${{ inputs.variant }}-trivy-${{ inputs.arch }}
+        path: ${{ runner.temp }}/deepseek-harness-${{ inputs.variant }}-${{ inputs.arch }}.trivy.json
+        if-no-files-found: ignore
+        retention-days: 7
+        overwrite: true
+
+    - name: Export tested image and receipt
+      if: inputs.export-image == 'true'
+      shell: bash
+      env:
+        IMAGE: ${{ steps.components.outputs.image }}
+        IMAGE_ID: ${{ steps.image.outputs.imageid }}
+        DSH_VERSION: ${{ steps.components.outputs.dsh_version }}
+        VARIANT: ${{ inputs.variant }}
+        ARCH: ${{ inputs.arch }}
+      run: |
+        python3 deepseek-harness-builder/scripts/tested-image-artifact.py export \
+          --image "$IMAGE" --image-id "$IMAGE_ID" --variant "$VARIANT" --platform "linux/$ARCH" \
+          --revision "$GITHUB_SHA" --dsh-version "$DSH_VERSION" --run-id "$GITHUB_RUN_ID" \
+          --directory "$RUNNER_TEMP/deepseek-harness-${VARIANT}-image-${ARCH}"
+
+    - name: Upload tested image
+      if: inputs.export-image == 'true'
+      uses: actions/upload-artifact@v7
+      with:
+        name: deepseek-harness-${{ inputs.variant }}-image-${{ inputs.arch }}
+        path: ${{ runner.temp }}/deepseek-harness-${{ inputs.variant }}-image-${{ inputs.arch }}/
+        if-no-files-found: error
+        compression-level: 0
+        retention-days: 1
+        overwrite: true

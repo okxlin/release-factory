@@ -230,6 +230,14 @@ def read_dockerfile(dockerfile: Path) -> tuple[str, dict[str, str]]:
         raise UpdateCheckError(f"cannot read Dockerfile {dockerfile}: {exc}") from exc
 
     pins: dict[str, str] = {}
+    component_lock = dockerfile.with_name("components.lock.json")
+    if component_lock.exists():
+        try:
+            pins.update(json.loads(component_lock.read_text(encoding="utf-8"))["build_args"])
+            source = json.loads(dockerfile.with_name("dsh-source.json").read_text(encoding="utf-8"))
+            pins["DSH_SOURCE_VERSION"] = source["version"]
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise UpdateCheckError(f"cannot read component inputs: {exc}") from exc
     for line in dockerfile_text.splitlines():
         match = ARG_RE.match(line)
         if not match:
@@ -240,6 +248,8 @@ def read_dockerfile(dockerfile: Path) -> tuple[str, dict[str, str]]:
                 f"Dockerfile ARG {name} has inconsistent values: {pins[name]} and {value}"
             )
         pins[name] = value
+    for name, value in pins.items():
+        dockerfile_text = dockerfile_text.replace("${" + name + "}", value)
     return dockerfile_text, pins
 
 

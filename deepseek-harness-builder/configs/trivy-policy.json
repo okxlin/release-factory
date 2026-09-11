@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "runtime": {
+      "max_fixable_critical": 0,
+      "max_fixable_high": 0
+    },
+    "workstation": {
+      "max_fixable_critical": 0,
+      "max_fixable_high": null
+    }
+  },
+  "protected_paths": [
+    "usr/bin/caddy",
+    "opt/dsh/"
+  ],
+  "exceptions": [
+    {
+      "id": "CVE-2026-41567",
+      "package": "github.com/docker/docker",
+      "installed_version": "v28.5.2+incompatible",
+      "path": "usr/local/libexec/docker/cli-plugins/docker-buildx",
+      "type": "gobinary",
+      "profiles": [
+        "workstation"
+      ],
+      "reason": "Daemon archive handling is not linked. The build and workstation smoke check DOCKER_BUILDX_GO_PACKAGES.txt: the only legacy Docker package is pkg/namesgenerator.",
+      "reference": "https://github.com/advisories/GHSA-x86f-5xw2-fm2r",
+      "expires": "2026-12-11"
+    },
+    {
+      "id": "CVE-2026-42306",
+      "package": "github.com/docker/docker",
+      "installed_version": "v28.5.2+incompatible",
+      "path": "usr/local/libexec/docker/cli-plugins/docker-buildx",
+      "type": "gobinary",
+      "profiles": [
+        "workstation"
+      ],
+      "reason": "Daemon archive handling is not linked. The build and workstation smoke check DOCKER_BUILDX_GO_PACKAGES.txt: the only legacy Docker package is pkg/namesgenerator.",
+      "reference": "https://github.com/advisories/GHSA-rg2x-37c3-w2rh",
+      "expires": "2026-12-11"
+    }
+  ]
+}

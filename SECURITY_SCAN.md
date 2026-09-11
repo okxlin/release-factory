@@ -22,7 +22,30 @@ Current workflow thresholds:
 | `build-gemini-skill-browser-linuxserver.yml` | local LinuxServer image | 30 | 450 | Compatibility threshold for the noisier LinuxServer base. |
 | `openclaw-upstream-docker.yml` | local upstream image | 0 | 40 | Scans the upstream checkout before publishing to GHCR. |
 | `build-deepseek-harness.yml` | amd64 and arm64 runtime images | 0 | 0 | Authentication image has no runtime toolchain allowance; both architectures must remain free of fixable HIGH/CRITICAL findings. |
-| `build-deepseek-harness-workstation.yml` | amd64 and arm64 workstation images | 0 | 0 | Full compiler and language toolchains are retained, but fixable HIGH/CRITICAL findings are still not accepted. |
+| `build-deepseek-harness-workstation.yml` | amd64 and arm64 workstation images | 0 | Report | Ordinary toolchain HIGH findings warn; DSH and Caddy findings remain blocking. |
+
+DeepSeek release and PR workflows select the `runtime` or `workstation` profile
+from `deepseek-harness-builder/configs/trivy-policy.json`. Both profiles block
+HIGH/CRITICAL findings in `/opt/dsh/` and `/usr/bin/caddy`, including findings
+without a fix. The production dependency audit and Caddy govulncheck gate also
+remain required. Workstation toolchain HIGH findings are reported for periodic
+maintenance; fixable CRITICAL findings block both profiles. Unfixed findings
+outside the protected paths remain visible and require review.
+
+The policy supports reviewed exceptions only for an exact vulnerability ID,
+package, installed version, scanner type, file path, and image profile. Each
+entry must include a reason, an advisory reference, and an exclusive UTC expiry
+date. Expired entries cannot suppress findings. Exceptions stay in the scan log
+and the original JSON report; there is no global CVE ignore list. A policy or
+report that cannot be interpreted fails the gate. Reproduce a policy decision
+without another image scan with:
+
+```bash
+python3 scripts/evaluate-trivy-policy.py \
+  --report image.trivy.json \
+  --policy deepseek-harness-builder/configs/trivy-policy.json \
+  --profile workstation
+```
 
 The Dockerfiles maintained in this repository run `apt-get upgrade -y` during
 build to pick up base image security fixes before installing additional tools.
@@ -45,7 +68,7 @@ Both DeepSeek Harness workflows additionally run
 
 - patches go-authcrunch `1.1.41` to remove the unused GPG public-key parser;
 - applies Caddy upstream commit `b2693fb`'s two-line CEL compatibility fix to
-  checksum-verified Caddy `2.11.4` source, then pins `cel-go` `0.31.0` for
+  checksum-verified Caddy `2.11.4` source, then pins `cel-go` `0.32.0` for
   `GO-2026-6094`;
 - retains `golang.org/x/crypto/ssh`;
 - records the actual linked package graph in `CADDY_GO_PACKAGES.txt`;
@@ -81,34 +104,26 @@ update.
 
 ## DeepSeek Harness workstation Docker client gate
 
-The workstation image rebuilds Docker CLI `29.7.2`, Compose `5.5.0`, and
-Buildx `0.36.1` from checksum-pinned official source archives with Go `1.27.0`.
-The upstream prebuilt binaries were compiled with Go `1.26.5`, which is inside
-the affected ranges for `CVE-2026-39821` and `CVE-2026-46600`.
+The workstation image rebuilds Docker CLI, Compose, and Buildx from
+checksum-pinned official source archives with the pinned Go release. The build
+still raises `go-archive` and `x/mod` to their fixed releases where used.
 
-Buildx uses `github.com/docker/docker v28.5.2+incompatible` only for the frozen
-`pkg/namesgenerator` package. Trivy consequently attributes the daemon-only
-AuthZ issue `CVE-2026-34040` to both Buildx and Compose even though neither
-client links the vulnerable authorization package. The build copies that exact
-vendored name-generator package into Buildx, changes the import to the local
-package, removes the legacy daemon module from the Buildx and Compose module
-graphs, and verifies all three resulting binaries with `go version -m`.
+Buildx retains the upstream `pkg/namesgenerator` import from
+`github.com/docker/docker v28.5.2+incompatible`. It no longer copies and patches
+that source just to remove the module name from scanner metadata. The build
+records a Go package manifest for each binary, with the same `CGO_ENABLED=0`
+setting as compilation. Build and workstation smoke checks require the real
+main package, reject daemon/authorization packages, and allow the legacy Docker
+module to contribute only `pkg/namesgenerator`. Current Compose does not link
+any package from that legacy module.
 
-Buildx `0.36.1` otherwise selects `github.com/moby/go-archive` `0.2.1`.
-The build explicitly raises it to `0.3.3` (the current release; `0.3.0` and
-later fix `CVE-2026-17106`) and verifies the linked Buildx binary metadata
-before the zero-fixable Trivy gate runs.
-
-Buildx `0.36.1` and Compose `5.5.0` also select `golang.org/x/mod` `0.38.0`,
-which is affected by Go advisories `GO-2026-6179` and `GO-2026-6180`
-([CVE-2026-56865](https://pkg.go.dev/vuln/GO-2026-6179),
-[CVE-2026-56864](https://pkg.go.dev/vuln/GO-2026-6180)). The build raises the
-module to the fixed `0.40.0` release in both client module graphs and verifies
-the selected version in the resulting Buildx and Compose binaries.
-
-This is dependency minimization, not a scanner allowlist: the zero-fixable
-HIGH/CRITICAL threshold remains unchanged. Advisory:
-<https://github.com/moby/moby/security/advisories/GHSA-x744-4wpc-v9h2>.
+The Workstation policy has two expiring exceptions for this exact Buildx binary
+and module version: [CVE-2026-41567](https://github.com/advisories/GHSA-x86f-5xw2-fm2r)
+and [CVE-2026-42306](https://github.com/advisories/GHSA-rg2x-37c3-w2rh). Both affect
+the daemon's archive handling, which is absent from the linked package graph.
+These exceptions do not cover Compose, another module version, other CVEs, or
+any host Docker daemon. Updating the component requires checking the new graph
+and reviewing any remaining finding.
 
 The workstation Compose contract keeps the host Docker socket disabled by
 default by binding `/dev/null` to `/var/run/docker.sock`. The workflow parses

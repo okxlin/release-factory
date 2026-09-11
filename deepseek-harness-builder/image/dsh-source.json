@@ -3,6 +3,6 @@
   "repository": "deepseek-ai/deepseek-harness",
   "ref": "dsh-v0.1.5-rc.1",
   "commit": "183f08e9c6dde7e36cd2318eaee70b0da08fb35e",
-  "archiveSha256": "c9525f2568fa58efa7c7364e2757521c1a50a95c4105d30e594c6929d61ebc3e",
-  "archiveUrl": "https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/refs/tags/dsh-v0.1.5-rc.1"
+  "archiveSha256": "23af26a7f422f3d3ba7ce148492e2937af3fe5cc39e8f05dd109e12dadd8262c",
+  "archiveUrl": "https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/183f08e9c6dde7e36cd2318eaee70b0da08fb35e"
 }

@@ -129,7 +129,7 @@ source_commit="$(node -e 'const fs=require("fs"); const value=JSON.parse(fs.read
     exit 1
 }
 
-archive_url="https://codeload.github.com/${source_repo}/tar.gz/refs/tags/${source_ref}"
+archive_url="https://codeload.github.com/${source_repo}/tar.gz/${source_commit}"
 archive_path="${tmp_dir}/dsh-source.tar.gz"
 curl "${curl_common_args[@]}" "${archive_url}" -o "${archive_path}"
 source_archive_sha256="$(sha256sum "${archive_path}" | awk '{print $1}')"

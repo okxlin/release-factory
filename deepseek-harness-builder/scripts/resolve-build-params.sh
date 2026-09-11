@@ -137,6 +137,15 @@ done
   exit 1
 }
 PLATFORMS="$(IFS=,; printf '%s' "${normalized_platforms[*]}")"
+matrix_entries=()
+for platform in "${normalized_platforms[@]}"; do
+  case "${platform}" in
+    linux/amd64) runner=ubuntu-24.04 ;;
+    linux/arm64) runner=ubuntu-24.04-arm ;;
+  esac
+  matrix_entries+=("{\"arch\":\"${platform#linux/}\",\"runner\":\"${runner}\"}")
+done
+MATRIX="$(IFS=,; printf '{"include":[%s]}' "${matrix_entries[*]}")"
 
 TAGS="type=raw,value=${IMAGE_TAG}"
 if [[ "${PUSH_LATEST}" == "true" && "${IMAGE_TAG}" != "${LATEST_TAG}" ]]; then
@@ -147,6 +156,7 @@ if [[ -n "${GITHUB_OUTPUT_PATH}" && "${GITHUB_OUTPUT_PATH}" != "/dev/null" ]]; t
   {
     printf 'image_repo=%s\n' "${IMAGE_REPO}"
     printf 'platforms=%s\n' "${PLATFORMS}"
+    printf 'matrix=%s\n' "${MATRIX}"
     printf 'image_tag=%s\n' "${IMAGE_TAG}"
     printf 'latest_tag=%s\n' "${LATEST_TAG}"
     printf 'tags<<__DEEPSEEK_HARNESS_TAGS__\n%s\n__DEEPSEEK_HARNESS_TAGS__\n' "${TAGS}"
