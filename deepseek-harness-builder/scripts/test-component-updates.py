@@ -136,6 +136,20 @@ class ComponentUpdateCheckerTests(unittest.TestCase):
             self.assertIn("component_updates=0", result.stdout)
             self.assertIn("current", summary_path.read_text(encoding="utf-8"))
 
+    def test_component_lock_supplies_dockerfile_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "components.lock.json").write_text(json.dumps({
+                "schema_version": 1, "build_args": {"PNPM_VERSION": "1.2.3"},
+            }))
+            (root / "dsh-source.json").write_text('{"version":"0.1.5"}')
+            result, summary_path = self.run_checker(
+                root, self.npm_policy(), "ARG PNPM_VERSION\n",
+                {"npm-pnpm.json": '{"version":"1.2.4"}\n'}, "--fail-on-updates",
+            )
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("| pnpm | `1.2.3` |", summary_path.read_text())
+
     def test_github_latest_release_remains_stable_only(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             result, summary_path = self.run_checker(

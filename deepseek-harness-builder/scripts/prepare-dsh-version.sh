@@ -86,8 +86,8 @@ if (source.repository !== 'deepseek-ai/deepseek-harness') throw new Error('unexp
 if (source.ref !== 'dsh-v' + source.version) throw new Error('source ref does not match source version: ' + source.ref)
 if (!commit.test(source.commit)) throw new Error('source commit is not an immutable Git commit: ' + source.commit)
 if (!digest.test(source.archiveSha256)) throw new Error('source archive checksum is not a lowercase SHA-256 digest: ' + source.archiveSha256)
-const expectedUrl = 'https://codeload.github.com/' + source.repository + '/tar.gz/refs/tags/' + source.ref
-if (source.archiveUrl !== expectedUrl) throw new Error('source archive URL does not match source ref: ' + source.archiveUrl)
+const expectedUrl = 'https://codeload.github.com/' + source.repository + '/tar.gz/' + source.commit
+if (source.archiveUrl !== expectedUrl) throw new Error('source archive URL does not match source commit: ' + source.archiveUrl)
 process.stdout.write(source.version)
 NODE
 )"
@@ -129,6 +129,12 @@ const fs = require('fs');
 const packagePath = process.argv[2];
 const dshVersion = process.argv[3];
 const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+const componentPath = require('path').join(require('path').dirname(packagePath), 'components.lock.json');
+if (fs.existsSync(componentPath)) {
+  const pins = JSON.parse(fs.readFileSync(componentPath, 'utf8')).build_args;
+  pkg.packageManager = `pnpm@${pins.PNPM_VERSION}`;
+  pkg.engines = { ...pkg.engines, node: pins.NODE_VERSION };
+}
 
 pkg.version = dshVersion;
 pkg.dependencies = pkg.dependencies || {};

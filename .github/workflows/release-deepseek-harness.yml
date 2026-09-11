@@ -1,0 +1,237 @@
+name: Release verified DeepSeek Harness images
+
+on:
+  workflow_call:
+    inputs:
+      variant:
+        required: true
+        type: string
+      dsh_version:
+        default: ""
+        type: string
+      image_tag:
+        default: ""
+        type: string
+      platforms:
+        default: linux/amd64,linux/arm64
+        type: string
+      push_latest:
+        default: true
+        type: boolean
+      refresh_system_packages:
+        default: true
+        type: boolean
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: false
+      DOCKERHUB_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
+  DOCKER_BUILD_SUMMARY: "false"
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      dsh_version: ${{ steps.dsh.outputs.dsh_version }}
+      image_tag: ${{ steps.params.outputs.image_tag }}
+      latest_tag: ${{ steps.params.outputs.latest_tag }}
+      platforms: ${{ steps.params.outputs.platforms }}
+      matrix: ${{ steps.params.outputs.matrix }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Resolve locked component inputs
+        id: components
+        run: python3 deepseek-harness-builder/scripts/component-inputs.py --github-output "$GITHUB_OUTPUT"
+
+      - name: Check component pins and publication safety regressions
+        run: |
+          bash deepseek-harness-builder/scripts/check-component-pins.sh
+          python3 deepseek-harness-builder/scripts/test-tested-image-artifact.py
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ steps.components.outputs.node_version }}
+
+      - name: Resolve the release once for all architectures
+        id: dsh
+        env:
+          INPUT_DSH_VERSION: ${{ inputs.dsh_version }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${INPUT_DSH_VERSION}" || "${INPUT_DSH_VERSION}" == dsh-v* ]]; then
+            source_args=()
+            if [[ -n "${INPUT_DSH_VERSION}" ]]; then
+              source_args+=(--version "${INPUT_DSH_VERSION}")
+            fi
+            bash deepseek-harness-builder/scripts/resolve-dsh-source.sh "${source_args[@]}" \
+              --metadata-output "$RUNNER_TEMP/dsh-source.json" --github-output /dev/null
+            cp -- "$RUNNER_TEMP/dsh-source.json" deepseek-harness-builder/image/dsh-source.json
+            source_version="$(jq -er '.version' deepseek-harness-builder/image/dsh-source.json)"
+            bash deepseek-harness-builder/scripts/prepare-dsh-version.sh \
+              --version "${source_version}" --github-output "$GITHUB_OUTPUT"
+          else
+            bash deepseek-harness-builder/scripts/prepare-dsh-version.sh \
+              --version "${INPUT_DSH_VERSION}" --github-output "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve tags and native runner matrix
+        id: params
+        env:
+          VARIANT: ${{ inputs.variant }}
+          DSH_VERSION: ${{ steps.dsh.outputs.dsh_version }}
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
+          INPUT_PLATFORMS: ${{ inputs.platforms }}
+          PUSH_LATEST: ${{ inputs.push_latest }}
+        run: |
+          set -euo pipefail
+          image_tag="${INPUT_IMAGE_TAG:-${DSH_VERSION}}"
+          case "${VARIANT}" in
+            runtime) latest_tag=latest ;;
+            workstation)
+              latest_tag=workstation
+              if [[ "${image_tag}" != *-workstation ]]; then
+                image_tag="${image_tag}-workstation"
+              fi
+              ;;
+            *) echo 'ERROR: unsupported image variant' >&2; exit 1 ;;
+          esac
+          bash deepseek-harness-builder/scripts/resolve-build-params.sh \
+            --platforms "${INPUT_PLATFORMS}" --image-tag "${image_tag}" \
+            --push-latest "${PUSH_LATEST}" --latest-tag "${latest_tag}" --github-output "$GITHUB_OUTPUT"
+
+      - name: Save prepared release inputs
+        uses: actions/upload-artifact@v7
+        with:
+          name: deepseek-harness-${{ inputs.variant }}-inputs
+          path: |
+            deepseek-harness-builder/image/package.json
+            deepseek-harness-builder/image/pnpm-lock.yaml
+            deepseek-harness-builder/image/dsh-source.json
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  verify:
+    needs: prepare
+    name: Verify ${{ inputs.variant }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Restore prepared release inputs
+        uses: actions/download-artifact@v7
+        with:
+          name: deepseek-harness-${{ inputs.variant }}-inputs
+          path: deepseek-harness-builder/image
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+        with:
+          cache-binary: false
+
+      - name: Build, verify, and export native image
+        uses: ./.github/actions/verify-deepseek-harness
+        with:
+          variant: ${{ inputs.variant }}
+          arch: ${{ matrix.arch }}
+          dsh-version: ${{ needs.prepare.outputs.dsh_version }}
+          refresh-system-packages: ${{ inputs.refresh_system_packages }}
+          export-image: "true"
+
+  publish:
+    needs: [prepare, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    env:
+      DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate registry destinations and credentials
+        id: owner
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          owner="$(printf '%s' "$REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          [[ "$owner" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo 'ERROR: invalid GitHub owner' >&2; exit 1; }
+          [[ "$DOCKERHUB_NAMESPACE" =~ ^[a-z0-9]+([._-][a-z0-9]+)*$ ]] \
+            || { echo 'ERROR: DOCKERHUB_USERNAME must be a lowercase Docker Hub namespace' >&2; exit 1; }
+          [[ -n "$DOCKERHUB_TOKEN" ]] || { echo 'ERROR: DOCKERHUB_TOKEN is not configured' >&2; exit 1; }
+          echo "lower_owner=$owner" >> "$GITHUB_OUTPUT"
+
+      - name: Download tested images from this workflow run
+        uses: actions/download-artifact@v7
+        with:
+          pattern: deepseek-harness-${{ inputs.variant }}-image-*
+          path: ${{ runner.temp }}/tested-images
+          merge-multiple: false
+
+      - name: Set up Docker Buildx for manifest publication
+        uses: docker/setup-buildx-action@v4
+        with:
+          cache-binary: false
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          registry: docker.io
+          username: ${{ env.DOCKERHUB_NAMESPACE }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Verify and publish tested image artifacts
+        env:
+          OWNER: ${{ steps.owner.outputs.lower_owner }}
+          VARIANT: ${{ inputs.variant }}
+          DSH_VERSION: ${{ needs.prepare.outputs.dsh_version }}
+          PLATFORMS: ${{ needs.prepare.outputs.platforms }}
+          IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
+          LATEST_TAG: ${{ needs.prepare.outputs.latest_tag }}
+          PUSH_LATEST: ${{ inputs.push_latest }}
+        run: |
+          set -euo pipefail
+          floating_args=()
+          if [[ "$PUSH_LATEST" == true ]]; then
+            floating_args+=(--latest-tag "$LATEST_TAG")
+          fi
+          python3 deepseek-harness-builder/scripts/tested-image-artifact.py publish \
+            --directory "$RUNNER_TEMP/tested-images" --variant "$VARIANT" --platforms "$PLATFORMS" \
+            --revision "$GITHUB_SHA" --dsh-version "$DSH_VERSION" --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --repository "ghcr.io/${OWNER}/deepseek-harness" \
+            --repository "docker.io/${DOCKERHUB_NAMESPACE}/deepseek-harness" \
+            --image-tag "$IMAGE_TAG" "${floating_args[@]}" --summary "$GITHUB_STEP_SUMMARY"

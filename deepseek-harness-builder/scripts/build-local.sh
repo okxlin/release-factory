@@ -8,17 +8,19 @@ target="runtime"
 tag=""
 dsh_version=""
 platform=""
+refresh_system_packages=false
 
 usage() {
   cat <<'EOF'
 Usage: build-local.sh [options] [-- DOCKER_BUILD_ARGS...]
 
 Options:
-  --target TARGET       Docker target: runtime or workstation (default: runtime)
+  --target TARGET       Docker target: runtime, workstation, or dsh-deps (default: runtime)
   --tag TAG             Local image tag; defaults by target
   --version VERSION     DeepSeek Harness npm version/dist-tag or source release;
                         defaults to the checked-in source release
   --platform PLATFORM   Optional Docker build platform
+  --refresh-system-packages  Refresh APT stages while reusing source compilation caches
   -h, --help            Show this help
 EOF
 }
@@ -55,6 +57,10 @@ while [[ $# -gt 0 ]]; do
       platform="$2"
       shift 2
       ;;
+    --refresh-system-packages)
+      refresh_system_packages=true
+      shift
+      ;;
     --)
       shift
       docker_args+=("$@")
@@ -73,9 +79,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "${target}" in
-  runtime|workstation) ;;
+  runtime|workstation|dsh-deps) ;;
   *)
-    printf 'ERROR: target must be runtime or workstation, got: %s\n' "${target}" >&2
+    printf 'ERROR: target must be runtime, workstation, or dsh-deps, got: %s\n' "${target}" >&2
     exit 2
     ;;
 esac
@@ -85,6 +91,8 @@ bash "${script_dir}/check-component-pins.sh" --dockerfile "${image_dir}/Dockerfi
 if [[ -z "${tag}" ]]; then
   if [[ "${target}" == "workstation" ]]; then
     tag="deepseek-harness-workstation:local"
+  elif [[ "${target}" == "dsh-deps" ]]; then
+    tag="deepseek-harness:dsh-deps-local"
   else
     tag="deepseek-harness:local"
   fi
@@ -110,7 +118,14 @@ trap cleanup EXIT
 
 tmp_image_dir="${tmp_dir}/image"
 mkdir -p -- "${tmp_image_dir}"
+printf '[build-local] Build context: %s -> %s\n' "${image_dir}" "${tmp_image_dir}"
 cp -a "${image_dir}/." "${tmp_image_dir}/"
+
+if [[ "${dsh_version}" == dsh-v* ]] \
+  && [[ "${dsh_version#dsh-v}" != "$(node -p "require('${tmp_image_dir}/dsh-source.json').version")" ]]; then
+  "${script_dir}/resolve-dsh-source.sh" --version "${dsh_version}" \
+    --metadata-output "${tmp_image_dir}/dsh-source.json" --github-output /dev/null
+fi
 
 prepare_args=(--image-dir "${tmp_image_dir}")
 prepare_args+=(--version "${dsh_version}")
@@ -125,11 +140,23 @@ resolved_dsh_version="$(sed -n 's/^dsh_version=//p' "${version_output}" | tail -
 build_cmd=(
   docker build
   --target "${target}"
-  --build-arg "DSH_VERSION=${resolved_dsh_version}"
   -t "${tag}"
 )
+component_inputs="$(python3 "${script_dir}/component-inputs.py" \
+  --image-dir "${tmp_image_dir}" --dsh-version "${resolved_dsh_version}")"
+while IFS= read -r input; do
+  build_cmd+=(--build-arg "${input}")
+done <<< "${component_inputs}"
 if [[ -n "${platform}" ]]; then
   build_cmd+=(--platform "${platform}")
+fi
+if [[ "${refresh_system_packages}" == true ]]; then
+  case "${target}" in
+    runtime) refresh_stages=runtime-base ;;
+    workstation) refresh_stages=runtime-base,workstation ;;
+    dsh-deps) refresh_stages=dsh-deps ;;
+  esac
+  build_cmd+=(--no-cache-filter "${refresh_stages}")
 fi
 build_cmd+=("${docker_args[@]}" "${tmp_image_dir}")
 

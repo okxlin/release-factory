@@ -8,7 +8,12 @@ on:
       - ".github/workflows/check-deepseek-harness-component-updates.yml"
       - ".github/workflows/validate-deepseek-harness-component-pins.yml"
       - ".github/workflows/verify-deepseek-harness-pr.yml"
+      - ".github/workflows/release-deepseek-harness.yml"
+      - ".github/actions/verify-deepseek-harness/**"
       - "deepseek-harness-builder/**"
+      - "scripts/trivy-image-gate.sh"
+      - "scripts/evaluate-trivy-policy.py"
+      - "scripts/test-evaluate-trivy-policy.py"
       - "SECURITY_SCAN.md"
   workflow_dispatch:
 
@@ -24,10 +29,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Resolve locked component inputs
+        id: components
+        run: python3 deepseek-harness-builder/scripts/component-inputs.py --github-output "$GITHUB_OUTPUT"
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: "24.20.0"
+          node-version: ${{ steps.components.outputs.node_version }}
 
       - name: Validate pinned component contract
         run: bash deepseek-harness-builder/scripts/check-component-pins.sh
@@ -37,6 +46,12 @@ jobs:
 
       - name: Run component-update checker regression tests
         run: python3 deepseek-harness-builder/scripts/test-component-updates.py
+
+      - name: Run image security policy regression tests
+        run: python3 scripts/test-evaluate-trivy-policy.py
+
+      - name: Run tested image publication regression tests
+        run: python3 deepseek-harness-builder/scripts/test-tested-image-artifact.py
 
       - name: Run DeepSeek Harness version resolver regression tests
         run: |

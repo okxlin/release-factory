@@ -4,10 +4,12 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage: trivy-image-gate.sh --image IMAGE [--output PATH] [--max-fixable-critical N] [--max-fixable-high N]
+       trivy-image-gate.sh --image IMAGE --policy FILE --profile NAME [--output PATH]
 
 Scans a container image with Trivy and fails when fixable HIGH/CRITICAL
 vulnerabilities exceed the configured thresholds. Findings within the
 thresholds remain visible in the log and emit a GitHub Actions warning.
+An explicit policy selects thresholds, protected paths, and scoped exceptions.
 
 Set TRIVY_TIMEOUT to override the default image analysis timeout.
 EOF
@@ -15,6 +17,9 @@ EOF
 
 image=""
 output=""
+policy=""
+profile=""
+explicit_threshold=false
 max_fixable_critical="${TRIVY_MAX_FIXABLE_CRITICAL:-0}"
 max_fixable_high="${TRIVY_MAX_FIXABLE_HIGH:-999999}"
 severity="${TRIVY_SEVERITY:-HIGH,CRITICAL}"
@@ -32,10 +37,20 @@ while [[ $# -gt 0 ]]; do
       ;;
     --max-fixable-critical)
       max_fixable_critical="${2:-}"
+      explicit_threshold=true
       shift 2
       ;;
     --max-fixable-high)
       max_fixable_high="${2:-}"
+      explicit_threshold=true
+      shift 2
+      ;;
+    --policy)
+      policy="${2:-}"
+      shift 2
+      ;;
+    --profile)
+      profile="${2:-}"
       shift 2
       ;;
     --help|-h)
@@ -54,6 +69,17 @@ if [[ -z "${image}" ]]; then
   echo "ERROR: --image is required" >&2
   usage >&2
   exit 2
+fi
+
+scan_policy_args=()
+if [[ -n "${policy}${profile}" ]]; then
+  if [[ ! -f "${policy}" || -z "${profile}" || "${explicit_threshold}" == true ]]; then
+    echo 'ERROR: use --policy FILE and --profile NAME together, without threshold overrides' >&2
+    exit 2
+  fi
+  severity="HIGH,CRITICAL"
+  # Evaluate the raw findings; implicit local ignore files must not bypass policy.
+  scan_policy_args=(--ignorefile /dev/null --ignore-unfixed=false)
 fi
 
 if [[ ! "${max_fixable_critical}" =~ ^[0-9]+$ || ! "${max_fixable_high}" =~ ^[0-9]+$ ]]; then
@@ -76,6 +102,7 @@ if command -v trivy >/dev/null 2>&1; then
     --scanners vuln \
     --skip-version-check \
     --timeout "${timeout}" \
+    "${scan_policy_args[@]}" \
     "${image}"
 else
   trivy_image="${TRIVY_DOCKER_IMAGE:-aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969}"
@@ -90,7 +117,15 @@ else
       --scanners vuln \
       --skip-version-check \
       --timeout "${timeout}" \
+      "${scan_policy_args[@]}" \
       "${image}" > "${output}"
+fi
+
+if [[ -n "${policy}" ]]; then
+  echo "Trivy gate for ${image}; report: ${output}"
+  script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  exec python3 "${script_dir}/evaluate-trivy-policy.py" \
+    --report "${output}" --policy "${policy}" --profile "${profile}"
 fi
 
 set +e

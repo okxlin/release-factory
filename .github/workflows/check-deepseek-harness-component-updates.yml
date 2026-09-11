@@ -28,10 +28,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Resolve locked component inputs
+        id: components
+        run: python3 deepseek-harness-builder/scripts/component-inputs.py --github-output "$GITHUB_OUTPUT"
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: "24.20.0"
+          node-version: ${{ steps.components.outputs.node_version }}
 
       - name: Run component-update checker regression tests
         run: python3 deepseek-harness-builder/scripts/test-component-updates.py

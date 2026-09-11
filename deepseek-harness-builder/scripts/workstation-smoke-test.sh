@@ -231,28 +231,33 @@ done
 [[ "${DSH_HOME}" == "/data/dsh" ]] \
     || fail "DeepSeek Harness state is not stored under /data"
 pass "home, /data application state, and workspace use direct directories without symbolic links"
-[[ "$(node --version)" == "v24.21.0" ]] || fail "Node.js version drifted"
-[[ "$(npm --version)" == "11.19.1" ]] || fail "npm version drifted"
-[[ "$(npx --version)" == "11.19.1" ]] || fail "npx version drifted"
-[[ "$(pnpm --version)" == "12.3.4" ]] || fail "pnpm version drifted"
-[[ "$(go version)" == go\ version\ go1.27.1* ]] || fail "Go version drifted"
-python3 --version | grep -Fxq 'Python 3.12.14' || fail "Python is not pinned to 3.12.14"
-python3 -m pytest --version | grep -Fxq 'pytest 9.1.1' || fail "pytest is not available for Python 3.12.14"
+
+component_version() {
+    node -e 'const value = require("/usr/share/deepseek-harness/components.lock.json").build_args[process.argv[1]]; if (typeof value !== "string" || !value) process.exit(1); process.stdout.write(value)' "$1"
+}
+
+[[ "$(node --version)" == "v$(component_version NODE_VERSION)" ]] || fail "Node.js version drifted"
+[[ "$(npm --version)" == "$(component_version NPM_VERSION)" ]] || fail "npm version drifted"
+[[ "$(npx --version)" == "$(component_version NPM_VERSION)" ]] || fail "npx version drifted"
+[[ "$(pnpm --version)" == "$(component_version PNPM_VERSION)" ]] || fail "pnpm version drifted"
+[[ "$(go version)" == "go version go$(component_version GO_VERSION)"* ]] || fail "Go version drifted"
+python3 --version | grep -Fxq "Python $(component_version PYTHON_VERSION)" || fail "Python version drifted"
+python3 -m pytest --version | grep -Fxq "pytest $(component_version PYTEST_VERSION)" || fail "pytest version drifted"
 command -v rustc >/dev/null 2>&1 && fail "Rust compiler should not be installed"
 command -v cargo >/dev/null 2>&1 && fail "Cargo should not be installed"
 pass "pinned language runtimes are executable"
 
-[[ "$(actionlint -version | head -n 1)" == "1.7.12" ]] || fail "actionlint version drifted"
-yq --version | grep -Fq 'version v4.53.6' || fail "yq version drifted"
-uv --version | grep -Fq 'uv 0.12.12 ' || fail "uv version drifted"
-uvx --version | grep -Fq 'uvx 0.12.12 ' || fail "uvx version drifted"
-[[ "$(ruff --version)" == "ruff 0.16.6" ]] || fail "Ruff version drifted"
+[[ "$(actionlint -version | head -n 1)" == "$(component_version ACTIONLINT_VERSION)" ]] || fail "actionlint version drifted"
+yq --version | grep -Fq "version v$(component_version YQ_VERSION)" || fail "yq version drifted"
+uv --version | grep -Fq "uv $(component_version UV_VERSION) " || fail "uv version drifted"
+uvx --version | grep -Fq "uvx $(component_version UV_VERSION) " || fail "uvx version drifted"
+[[ "$(ruff --version)" == "ruff $(component_version RUFF_VERSION)" ]] || fail "Ruff version drifted"
 pass "checksum-pinned standalone development tools are executable"
 
-docker --version | grep -Fq 'Docker version 29.8.0,' || fail "Docker CLI version drifted"
-docker compose version | grep -Fq 'Docker Compose version v5.5.1' \
+docker --version | grep -Fq "Docker version $(component_version DOCKER_VERSION)," || fail "Docker CLI version drifted"
+docker compose version | grep -Fq "Docker Compose version v$(component_version DOCKER_COMPOSE_VERSION)" \
     || fail "Docker Compose version drifted"
-docker buildx version | grep -Fq 'github.com/docker/buildx v0.37.0 ' \
+docker buildx version | grep -Fq "github.com/docker/buildx v$(component_version DOCKER_BUILDX_VERSION) " \
     || fail "Docker Buildx version drifted"
 [[ ! -S /var/run/docker.sock ]] || fail "Docker socket is unexpectedly present by default"
 for docker_binary in \
@@ -260,14 +265,28 @@ for docker_binary in \
     /usr/local/libexec/docker/cli-plugins/docker-buildx \
     /usr/local/libexec/docker/cli-plugins/docker-compose; do
     binary_metadata="$(go version -m "${docker_binary}")"
-    grep -Fq 'go1.27.1' <<< "${binary_metadata}" \
+    grep -Fq "go$(component_version GO_VERSION)" <<< "${binary_metadata}" \
         || fail "Docker tool was not built with the pinned fixed Go release: ${docker_binary}"
-    if grep -Eq '^[[:space:]]*dep[[:space:]]+github.com/docker/docker[[:space:]]' \
-        <<< "${binary_metadata}"; then
-        fail "Docker tool retains the unrelated legacy daemon module: ${docker_binary}"
+    case "${docker_binary##*/}" in
+        docker) component=CLI; main_package=github.com/docker/cli/cmd/docker ;;
+        docker-buildx) component=BUILDX; main_package=github.com/docker/buildx/cmd/buildx ;;
+        docker-compose) component=COMPOSE; main_package=github.com/docker/compose/v5/cmd ;;
+    esac
+    package_manifest="/usr/share/licenses/deepseek-harness-docker/DOCKER_${component}_GO_PACKAGES.txt"
+    grep -Fxq "${main_package}" "${package_manifest}" \
+        || fail "Docker client package manifest is missing its main package: ${docker_binary}"
+    legacy_packages="$(grep -E '^github.com/docker/docker(/|$)' "${package_manifest}" || true)"
+    if [[ "${component}" == CLI ]]; then
+        [[ -z "${legacy_packages}" ]] || fail "Docker CLI unexpectedly links the legacy Docker module"
+    else
+        [[ -z "${legacy_packages}" || "${legacy_packages}" == 'github.com/docker/docker/pkg/namesgenerator' ]] \
+            || fail "Docker client links legacy Docker code beyond namesgenerator: ${docker_binary}"
+    fi
+    if grep -Eq '^github.com/(docker/docker|moby/moby(/v[0-9]+)?)/(pkg/authorization|daemon)(/|$)' "${package_manifest}"; then
+        fail "Docker client links daemon authorization code: ${docker_binary}"
     fi
 done
-pass "Docker CLI, Compose, and Buildx use the hardened client-only dependency graph without default daemon access"
+pass "Docker client package manifests exclude daemon AuthZ code; the socket is disabled by default"
 
 bash -lc 'command -v go >/dev/null && command -v npm >/dev/null && command -v npx >/dev/null && command -v pnpm >/dev/null && ! command -v rustc >/dev/null && ! command -v cargo >/dev/null' \
     || fail "login shells lose workstation tool paths"

@@ -3,16 +3,20 @@ set -Eeuo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 dockerfile="${script_dir}/../image/Dockerfile"
+components_file="${script_dir}/../image/components.lock.json"
+source_file="${script_dir}/../image/dsh-source.json"
 failures=0
 
 usage() {
     cat <<'EOF'
 Usage: check-component-pins.sh [options]
 
-Validate the checked-in DeepSeek Harness Dockerfile component-pin contract.
+Validate locked DeepSeek Harness inputs and their Dockerfile consumers.
 
 Options:
   --dockerfile FILE  Dockerfile to validate
+  --components-file FILE  Component lock file to validate
+  --source-file FILE      Source release metadata to validate
   -h, --help         Show this help
 EOF
 }
@@ -31,6 +35,16 @@ while [[ $# -gt 0 ]]; do
         --dockerfile)
             require_value "$1" "$#"
             dockerfile="$2"
+            shift 2
+            ;;
+        --components-file)
+            require_value "$1" "$#"
+            components_file="$2"
+            shift 2
+            ;;
+        --source-file)
+            require_value "$1" "$#"
+            source_file="$2"
             shift 2
             ;;
         -h|--help)
@@ -114,56 +128,45 @@ normalize_official_image_name() {
 
 declare -A arg_values=()
 declare -A arg_counts=()
+component_inputs="$(python3 "${script_dir}/component-inputs.py" \
+    --components-file "${components_file}" --source-file "${source_file}")"
+while IFS='=' read -r arg_name arg_value; do
+    arg_values["${arg_name}"]="${arg_value}"
+done <<< "${component_inputs}"
 for line in "${docker_lines[@]}"; do
     if arg_remainder="$(instruction_remainder "${line}" ARG)" \
-        && [[ "${arg_remainder}" =~ ^[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)=([^[:space:]#]*)[[:space:]]*(#.*)?$ ]]; then
+        && [[ "${arg_remainder}" =~ ^[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)(=([^[:space:]#]*))?[[:space:]]*(#.*)?$ ]]; then
         arg_name="${BASH_REMATCH[1]}"
-        arg_value="${BASH_REMATCH[2]}"
-        if [[ -v "arg_values[${arg_name}]" && "${arg_values[${arg_name}]}" != "${arg_value}" ]]; then
-            fail "ARG ${arg_name} has inconsistent defaults: ${arg_values[${arg_name}]} and ${arg_value}"
+        if [[ -n "${BASH_REMATCH[2]}" ]]; then
+            fail "ARG ${arg_name} default belongs in the component lock, not the Dockerfile"
         fi
-        arg_values["${arg_name}"]="${arg_value}"
+        if [[ "${arg_name}" != TARGETARCH && ! -v "arg_values[${arg_name}]" ]]; then
+            fail "required locked ARG ${arg_name} is missing"
+        fi
         arg_counts["${arg_name}"]=$(( ${arg_counts[${arg_name}]:-0} + 1 ))
     fi
 done
 
 require_arg() {
     local name="$1"
-    local minimum_count="$2"
-    if [[ ! -v "arg_values[${name}]" ]]; then
+    if [[ ! -v "arg_values[${name}]" || ! -v "arg_counts[${name}]" ]]; then
         fail "required ARG ${name} is missing"
         return
     fi
-    if (( ${arg_counts[${name}]:-0} < minimum_count )); then
-        fail "ARG ${name} must be declared at least ${minimum_count} times"
-    fi
 }
 
-for name_and_count in \
-    'CADDY_VERSION:2' \
-    'CADDY_SECURITY_VERSION:2' \
-    'DSH_VERSION:2' \
-    'DSH_SOURCE_VERSION:2' \
-    'DSH_SOURCE_REF:1' \
-    'DSH_SOURCE_COMMIT:1' \
-    'DSH_SOURCE_ARCHIVE_SHA256:1' \
-    'PYTHON_VERSION:4' \
-    'PYTEST_VERSION:3' \
-    'PNPM_VERSION:5' \
-    'DOCKER_BUILDX_VERSION:2' \
-    'DOCKER_COMPOSE_VERSION:2' \
-    'DOCKER_VERSION:2' \
-    'GO_VERSION:1' \
-    'NPM_VERSION:2' \
-    'ACTIONLINT_VERSION:1' \
-    'RUFF_VERSION:1' \
-    'UV_VERSION:1' \
-    'YQ_VERSION:1' \
-    'MOBY_GO_ARCHIVE_VERSION:1' \
-    'X_MOD_VERSION:1' \
-    'X_CRYPTO_VERSION:1'; do
-    require_arg "${name_and_count%%:*}" "${name_and_count##*:}"
+for name in "${!arg_values[@]}"; do
+    require_arg "${name}"
 done
+
+resolve_pin_variables() {
+    local value="$1" name needle
+    for name in "${!arg_values[@]}"; do
+        needle="\${${name}}"
+        value="${value//"${needle}"/"${arg_values[${name}]}"}"
+    done
+    printf '%s\n' "${value}"
+}
 
 checksum_arg='CADDY_SOURCE_ARCHIVE_SHA256'
 checksum_value="${arg_values[${checksum_arg}]:-}"
@@ -187,8 +190,8 @@ done
 [[ "${arg_values[CADDY_RATELIMIT_REF]:-}" =~ ^[a-f0-9]{40}$ ]] \
     || fail 'ARG CADDY_RATELIMIT_REF must be an immutable 40-character Git commit'
 
-[[ "${arg_values[DSH_SOURCE_VERSION]:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[0-9A-Za-z.-]+$ ]] \
-    || fail 'ARG DSH_SOURCE_VERSION must be a prerelease semantic version'
+[[ "${arg_values[DSH_SOURCE_VERSION]:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] \
+    || fail 'ARG DSH_SOURCE_VERSION must be an exact semantic version'
 [[ "${arg_values[DSH_SOURCE_REF]:-}" == "dsh-v${arg_values[DSH_SOURCE_VERSION]:-}" ]] \
     || fail 'ARG DSH_SOURCE_REF must match dsh-vDSH_SOURCE_VERSION'
 [[ "${arg_values[DSH_SOURCE_COMMIT]:-}" =~ ^[a-f0-9]{40}$ ]] \
@@ -230,7 +233,7 @@ for line_number in "${!docker_lines[@]}"; do
         continue
     fi
 
-    image_ref="${from_parts[${from_index}]}"
+    image_ref="$(resolve_pin_variables "${from_parts[${from_index}]}")"
     remaining_parts=$(( ${#from_parts[@]} - from_index - 1 ))
     stage_name=""
     if (( remaining_parts == 2 )); then
@@ -328,18 +331,18 @@ expected_remote_adds["https://registry.npmjs.org/npm/-/npm-${arg_values[NPM_VERS
 expected_remote_adds["https://codeload.github.com/docker/cli/tar.gz/refs/tags/v${arg_values[DOCKER_VERSION]:-}"]=1
 expected_remote_adds["https://codeload.github.com/docker/compose/tar.gz/refs/tags/v${arg_values[DOCKER_COMPOSE_VERSION]:-}"]=1
 expected_remote_adds["https://codeload.github.com/docker/buildx/tar.gz/refs/tags/v${arg_values[DOCKER_BUILDX_VERSION]:-}"]=1
-expected_remote_adds['https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/refs/tags/${DSH_SOURCE_REF}']=1
+expected_remote_adds["https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/${arg_values[DSH_SOURCE_COMMIT]}"]=1
 declare -A seen_remote_adds=()
 
 has_valid_add_checksum() {
     local line="$1"
-    [[ "${line}" =~ --checksum=sha256:([a-f0-9]{64})([[:space:]]|$) ]] \
-        || [[ "${line}" == *'--checksum=sha256:${DSH_SOURCE_ARCHIVE_SHA256}'* ]]
+    [[ "${line}" =~ --checksum=sha256:([a-f0-9]{64})([[:space:]]|$) ]]
 }
 
 for line_number in "${!docker_lines[@]}"; do
     line="${docker_lines[${line_number}]}"
     add_remainder="$(instruction_remainder "${line}" ADD)" || continue
+    line="$(resolve_pin_variables "${line}")"
     source_line=$((line_number + 1))
     if [[ ! "${add_remainder}" =~ ^[[:space:]]+ ]]; then
         fail "Dockerfile logical line ${source_line}: ADD must include source and destination arguments"
@@ -406,8 +409,8 @@ require_literal \
     'grep -Eq "golang\.org/x/text[[:space:]]+v${X_TEXT_VERSION}"' \
     'the Caddy x/text module verification'
 require_literal \
-    'https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/refs/tags/${DSH_SOURCE_REF}' \
-    'the DeepSeek Harness source archive URL tied to DSH_SOURCE_REF'
+    'https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/${DSH_SOURCE_COMMIT}' \
+    'the DeepSeek Harness source archive URL tied to DSH_SOURCE_COMMIT'
 require_literal \
     '--checksum=sha256:${DSH_SOURCE_ARCHIVE_SHA256}' \
     'the DeepSeek Harness source archive checksum tied to DSH_SOURCE_ARCHIVE_SHA256'
@@ -493,4 +496,4 @@ if (( failures > 0 )); then
     exit 1
 fi
 
-printf '[component-pins] PASS: Dockerfile component pins, checksums, and repeated version contracts are consistent\n'
+printf '[component-pins] PASS: locked component versions, checksums, and Dockerfile consumers are consistent\n'

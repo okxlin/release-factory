@@ -15,15 +15,19 @@
 
 定时任务以及留空版本的手动运行会从 DeepSeek Harness GitHub Releases 选择最高的非 draft `dsh-v*` 源码版本，校验对应 tag、commit 和源码归档 SHA-256 后构建，并发布匹配的 `<DSH_VERSION>` 和 `<DSH_VERSION>-workstation` 标签；因此上游源码版本可以在发布到 npm 之前进入镜像。手动显式传入 `dsh-v*` 可以选择指定的源码 release，传入已发布的 npm 版本或 dist-tag 时仍按请求的 npm selector 解析。`image/dsh-source.json` 保留可复现的本地/PR 基线，未来源码 release 不需要修改 Dockerfile。手动工作流也可覆盖发布标签。AppStore `latest` 通道使用浮动标签，编号 AppStore 版本使用匹配的版本标签。
 
-组件的准确固定版本由 [Dockerfile](image/Dockerfile)、用于旧版已发布 npm 路径的 [pnpm-lock.yaml](image/pnpm-lock.yaml)、[package.json](image/package.json)、[image/dsh-source.json](image/dsh-source.json)，以及 [runtime](../.github/workflows/build-deepseek-harness.yml) 和 [workstation](../.github/workflows/build-deepseek-harness-workstation.yml) 工作流定义。源码 release 构建时使用上游自己的 lockfile，再把本地打出的 runtime tarball 用 npm 安装；审计检查的也是这棵实际 npm 依赖树。这些构建输入是唯一版本来源；README 只说明能力和更新策略，不重复维护具体版本号。
+构建版本、基础镜像 digest、源码和工具校验和集中保存在 [`image/components.lock.json`](image/components.lock.json)。Python 依赖使用独立的 [`image/python-requirements.lock`](image/python-requirements.lock)，旧版 npm 路径保留自己的 [package.json](image/package.json) 和 [pnpm-lock.yaml](image/pnpm-lock.yaml)。[`image/dsh-source.json`](image/dsh-source.json) 把源码归档绑定到确定的 commit 和 SHA-256。本地构建与 CI 都通过 `scripts/component-inputs.py` 解析参数，常规组件更新无需手改 Dockerfile 指令。源码构建当前仍由 npm 安装本地打包的 runtime tarball，依赖审计检查这棵实际安装树。
 
-影响 DeepSeek Harness 构建输入的 PR 会运行一个只读的组件固定输入契约检查。它会拒绝浮动基础镜像标签、格式错误的 checksum，以及 Dockerfile 内重复版本声明或源码 URL 不再一致的半更新。另一个 PR 工作流会使用提交的输入构建本地 amd64 runtime 和 workstation 镜像，再运行依赖审计、冒烟契约、Caddy 门禁和 Trivy 门禁。两个工作流都不会获得 registry 凭据、登录或发布镜像；多架构发布仍由发布工作流负责。
+影响 DeepSeek Harness 构建输入的 PR 会运行组件契约检查，拒绝浮动基础镜像标签、错误 checksum、缺失的锁定输入和不匹配的源码 URL。另一个 PR 工作流分别使用原生 `ubuntu-24.04`（amd64）与 `ubuntu-24.04-arm` runner 构建两个变体。两个架构都执行生产依赖审计、完整鉴权和 passthrough smoke、Caddy 检查及 Trivy 策略；Workstation 还会实际执行编译器和宿主内核沙箱探测。PR job 不接收 registry 凭据。
+
+发布工作流只解析一次选定的源码或 npm release，再复用同一个[验证 action](../.github/actions/verify-deepseek-harness/action.yml)。成功的 job 导出已测试镜像，并记录归档 checksum、镜像 config ID、架构、变体、DSH 版本、工作流代码 revision 和 run ID。[发布 job](../.github/workflows/release-deepseek-harness.yml) 在首次推送前校验全部归档和加载后的镜像，再用已核验的 registry digest 组装多架构标签，不重新构建。两个仓库都必须成功；两个版本标签均验证后才更新浮动标签。跨仓库写入不具备原子性，发布任务会排队，避免自动取消正在进行的发布。
+
+构建缓存按变体和架构隔离，使用 `mode=max` 保存中间编译阶段。定时发布主动刷新 `runtime-base`，Workstation 还刷新 `workstation` 的 APT 阶段；手动发布提供默认开启的 `refresh_system_packages`，本地脚本提供 `--refresh-system-packages`。源码编译缓存仍可复用。镜像传输 artifact 保留一天，原始 Trivy 报告保留七天。Docker save/load 保留被测试的 config 和镜像层，但不会保留 BuildKit provenance attestation；随附记录用于工作流追溯，不等同于签名证明。
 
 另有一个每日只读工作流，会把固定组件版本与 GitHub、Go module proxy、Go、Node.js、npm、PyPI 和 Python 的权威版本源进行比较。它会把更新候选写入 Actions Summary 并发出 warning，但不会修改文件、创建 PR 或阻断定时发布。版本源或策略错误会让检查失败；手动运行时也可以启用严格模式，在发现更新时失败。报告出的版本只是待审候选，仍需更新对应 checksum 和镜像 digest，并通过现有构建、smoke 与漏洞门禁。
 
 Go 跟随官方稳定版本端点 <https://go.dev/VERSION?m=text>，其 Docker Official Image index 固定 digest，用于可复现地选择 `amd64` 和 `arm64`。actionlint 使用该固定 Go 工具链从 checksum 固定的官方源码归档重新构建；其他独立 workstation 工具从各自官方 GitHub Release 下载，并按架构固定 SHA-256 checksum。
 
-workstation 中的三个 Docker 客户端二进制文件使用已固定的 Go 版本从校验和固定的官方源码归档重新构建。Buildx 源码闭包只为了冻结的随机名称生成器而导入旧 `github.com/docker/docker` 模块；构建会在本地保留该 vendored 包，并在编译 Buildx 和 Compose 前移除无关 daemon 模块。这样可以把 daemon-only AuthZ 问题 [CVE-2026-34040](https://github.com/moby/moby/security/advisories/GHSA-x744-4wpc-v9h2) 排除在客户端依赖图之外，而不是放宽镜像扫描阈值。
+workstation 的 Docker CLI、Buildx、Compose 从校验和固定的官方源码重新编译。构建和 smoke 会检查各二进制的 Go 包清单，拒绝 daemon 代码；旧 Docker 模块只允许贡献 `pkg/namesgenerator`。不再为守护进程专属的扫描结果维护本地 Buildx 源码补丁。具体漏洞、包版本、二进制路径、依据及到期日期记录在[安全策略](configs/trivy-policy.json)中。
 
 镜像会为 `linux/amd64` 和 `linux/arm64` 构建并测试。
 
@@ -53,9 +57,13 @@ deepseek-harness-builder/scripts/build-local.sh \
   --tag deepseek-harness-workstation:local
 ```
 
-本地构建辅助脚本默认使用 [`image/dsh-source.json`](image/dsh-source.json) 中固定的源码版本，并把其版本作为 Docker `DSH_VERSION` 传入。使用 `--version <source-release>` 可以显式构建该源码版本；也可以传入已发布的 npm 版本或 dist-tag，走兼容旧版本的 npm 构建路径。使用 npm selector 时，脚本只会在临时构建上下文中更新 `package.json` 和 `pnpm-lock.yaml`。直接 `docker build` 仍支持已提交的源码基线上下文；GitHub Actions 的留空版本解析会在构建上下文中注入当次选定的源码 metadata，因此新增源码 release 不需要手工修改 Dockerfile。
+本地辅助脚本默认使用已提交的源码基线和全部组件锁定参数。使用 `--version dsh-v<version>` 可解析另一个源码 release，也可传入已发布的 npm 版本或 dist-tag。源码 metadata、packageManager、Node 版本约束和 npm 锁文件的准备都在临时构建上下文完成。直接调用 `docker build` 时必须传入 `scripts/component-inputs.py` 输出的参数；使用 `build-local.sh` 可以省去这份参数维护。
+
+如需为同一应用版本刷新系统包，在上面的任一本地构建命令追加 `--refresh-system-packages`，无需修改 Dockerfile 来使 APT 缓存失效。
 
 对于仓库固定的源码版本，Docker 会校验不可变的 GitHub 源码归档，使用上游 lockfile，构建官方 CLI 和 Web UI，打包 DSH 与 vendor workspace，再将本地 tarball 安装到扁平的 npm runtime 依赖树中。安装脚本默认关闭，只有 subprocess helper 和审查过的原生重编译会被显式执行：每个源码版本都会重编译 `koffi`/`node-pty`，旧版本仍存在 `fs-ext` 时才走对应路径；提供 `@deepseek-ai/node-addon-system` 的版本还会执行真实的 flock 探测。源码路径用 npm 的 production audit 检查实际安装树；已发布的 npm 兼容路径仍使用仓库冻结的 `pnpm-lock.yaml`，并保留 pnpm audit fallback。这样上游源码解析仍可复现，又不会让源码 release 构建依赖过时的仓库 lockfile，同时允许尚未发布到 npm 的上游源码版本通过相同的补丁和 smoke 合约。
+
+源码路径最后的 npm 安装仍会在构建时解析依赖范围，尚未实现跨构建冻结生产依赖。发布复用已测试产物，解决了发布时再次解析的问题，但不代表不同时间的构建会得到相同依赖树。上游构建按自己的 `packageManager` 选择 pnpm，其版本可能与镜像提供的 pnpm 不同。
 
 镜像构建会对 DSH browse 目录选择器应用一个范围很小、并且会校验源码形状的兼容性补丁，使网页的 **Add workspace** 对话框在未指定路径时从 `DSH_WORKSPACE` 开始，而不是从进程 `HOME` 开始。如果上游实现发生变化，构建会 fail-closed，直到重新审查补丁和 smoke 合约。该补丁不会改变 workstation 的 `HOME` 值或工具持久化路径。
 
@@ -414,7 +422,7 @@ deepseek-harness-builder/scripts/workstation-smoke-test.sh \
   --image deepseek-harness-workstation:local
 ```
 
-Compose 合约检查会解析 socket 开关的两种状态，并证明包内状态 bind 直接挂载到 `/data`、一个命名卷直接挂载到 `/home/node`、包内 workspace 直接挂载到 `/workspace`、默认 socket 源是 `/dev/null`、启用源是 `/var/run/docker.sock`，且 HTTP 端口保持 loopback 绑定。workstation 专用镜像测试会编译并运行 C、C++、Go 探针，创建 Python 虚拟环境，验证 checksum 固定的 actionlint、yq、uv/uvx 和 Ruff，检查普通和登录 shell 的 PATH 行为，验证 CLI 集合，确认 Rust 和 Cargo 保持缺席，确认所有 Docker 客户端二进制文件都使用已固定的 Go 工具链且不包含旧 daemon 模块，确认 Docker 默认没有 daemon 访问，使用隔离 Unix socket 刻画可选 socket group 映射，验证镜像只声明 `/home/node`，并确认 HOME、应用状态和 workspace 都是真实可写目录而不是符号链接。它还会在 `no-new-privileges` 下运行已安装的 DSH sandbox executor：`workspace-write` 必须允许项目写入并拒绝 workspace 外可写路径，而显式 `danger-full-access` 重试必须允许外部写入且不增加容器特权。
+Compose 合约检查会解析 socket 开关的两种状态，并证明包内状态 bind 直接挂载到 `/data`、一个命名卷直接挂载到 `/home/node`、包内 workspace 直接挂载到 `/workspace`、默认 socket 源是 `/dev/null`、启用源是 `/var/run/docker.sock`，且 HTTP 端口保持 loopback 绑定。workstation 专用镜像测试会编译并运行 C、C++、Go 探针，创建 Python 虚拟环境，验证 checksum 固定的 actionlint、yq、uv/uvx 和 Ruff，检查普通和登录 shell 的 PATH 行为，验证 CLI 集合，确认 Rust 和 Cargo 保持缺席，确认所有 Docker 客户端二进制文件都使用已固定的 Go 工具链，且包清单不包含 daemon 代码，确认 Docker 默认没有 daemon 访问，使用隔离 Unix socket 刻画可选 socket group 映射，验证镜像只声明 `/home/node`，并确认 HOME、应用状态和 workspace 都是真实可写目录而不是符号链接。它还会在 `no-new-privileges` 下运行已安装的 DSH sandbox executor：`workspace-write` 必须允许项目写入并拒绝 workspace 外可写路径，而显式 `danger-full-access` 重试必须允许外部写入且不增加容器特权。
 
 构建镜像后运行 Caddy 漏洞门禁：
 
@@ -425,9 +433,16 @@ deepseek-harness-builder/scripts/check-caddy-vulnerabilities.sh \
 
 Caddy 生产二进制文件已 stripped。Go 文档说明，在没有可提取符号的二进制扫描中，扫描器可能退回到 required module 的所有漏洞：<https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck#hdr-Limitations>。因此门禁只在 `GO-2026-5932` 是唯一 finding、符号不可用、且构建产出的包清单证明没有链接 OpenPGP 包时接受它。任何额外 finding 都会失败。
 
-两个 arm64 CI lane 使用 QEMU 在可发布多平台镜像前验证原生 `node-pty` 构建、Caddy 插件模块、认证流程、架构和 loopback 边界。workstation lane 也会在 arm64 上运行编译器探针。由于 Landlock enforcement 取决于宿主内核且在 QEMU user-mode emulation 下不可靠，该 lane 只明确跳过 DSH sandbox enforcement 探针；amd64 workstation lane 仍运行完整探针。
+两个架构都使用原生 runner，在发布前验证 `node-pty`、Caddy 模块、鉴权、架构和 loopback 边界。Workstation 在 amd64 和 arm64 上均执行编译器及 DSH 沙箱 enforcement 探针；CI 不传入 `--skip-sandbox-probe`。
 
 ## 升级行为
+
+Runtime 与 Workstation 的 Trivy 分级规则集中在
+[`configs/trivy-policy.json`](configs/trivy-policy.json)。DSH 与 Caddy 的
+HIGH/CRITICAL 即使没有修复版本也会阻断；Runtime 还会阻断其他可修复 HIGH，
+Workstation 的普通工具链 HIGH 只告警，可修复 CRITICAL 继续阻断。
+例外必须绑定具体漏洞、包版本、文件路径和镜像类型，并记录依据与到期日期。
+生产依赖审计、Caddy 检查和鉴权 smoke 仍是必需门禁。
 
 两个镜像变体都必须挂载 `/data`。升级旧 workstation 部署时，首次启动请保留原有的
 `/home/node` 卷或直接挂载的 `/home/node/.local/share/deepseek-harness`，同时新增
