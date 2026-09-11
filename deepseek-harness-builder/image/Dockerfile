@@ -181,6 +181,7 @@ COPY scripts/patch-dsh-directory-picker.mjs /tmp/patch-dsh-directory-picker.mjs
 COPY scripts/patch-dsh-authenticated-settings.mjs /tmp/patch-dsh-authenticated-settings.mjs
 COPY scripts/patch-dsh-cli-runtime-dependency.mjs /tmp/patch-dsh-cli-runtime-dependency.mjs
 COPY scripts/patch-dsh-runtime-package.mjs /tmp/patch-dsh-runtime-package.mjs
+COPY scripts/install-dsh-runtime.mjs /tmp/install-dsh-runtime.mjs
 
 RUN corepack enable \
     && corepack prepare "pnpm@${PNPM_VERSION}" --activate \
@@ -203,7 +204,7 @@ RUN corepack enable \
         && npm_execpath="$(command -v pnpm)" DSH_CLIENT_COMMIT_HASH="${DSH_SOURCE_COMMIT}" CI=true pnpm exec tsx scripts/release/pack.ts --family vendor --out /tmp/dsh-pack/vendor \
         && cd /opt/dsh \
         && npm init --yes >/dev/null \
-        && npm install --ignore-scripts --include=optional --no-audit --no-fund --package-lock=false \
+        && node /tmp/install-dsh-runtime.mjs \
             /tmp/dsh-pack/dsh/*.tgz /tmp/dsh-pack/vendor/*.tgz \
         && node /opt/dsh/node_modules/@deepseek-ai/dsh-subprocess-local/scripts/ensure-spawn-helper.mjs \
         && if find node_modules -type d -path '*/fs-ext' -print -quit | grep -q .; then \
@@ -233,6 +234,7 @@ RUN corepack enable \
         /tmp/patch-dsh-authenticated-settings.mjs \
         /tmp/patch-dsh-cli-runtime-dependency.mjs \
         /tmp/patch-dsh-runtime-package.mjs \
+        /tmp/install-dsh-runtime.mjs \
         /tmp/dsh-source.tar.gz \
     && rm -rf /tmp/dsh-source /tmp/dsh-pack \
     && /opt/dsh/node_modules/.bin/dsh --version | grep -Fx "${resolved_dsh_version}" \

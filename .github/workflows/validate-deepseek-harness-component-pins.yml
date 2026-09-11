@@ -47,6 +47,9 @@ jobs:
       - name: Run component-update checker regression tests
         run: python3 deepseek-harness-builder/scripts/test-component-updates.py
 
+      - name: Verify source runtime dependency installation
+        run: node --test deepseek-harness-builder/scripts/test-install-dsh-runtime.mjs
+
       - name: Run image security policy regression tests
         run: python3 scripts/test-evaluate-trivy-policy.py
 
