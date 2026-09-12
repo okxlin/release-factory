@@ -61,7 +61,23 @@ The local helper uses the checked-in source release and all locked component arg
 
 To rebuild the same application version with refreshed system packages, add `--refresh-system-packages` to either local build command above. No Dockerfile edit is needed to invalidate those APT stages.
 
-For the checked-in source release, Docker verifies the immutable GitHub archive, installs the upstream lockfile, builds the official client and Web UI, packs the DSH and vendor workspaces, and installs those local tarballs into a flat npm runtime tree. Install scripts stay disabled until the subprocess helper and reviewed native rebuilds are run explicitly: `koffi`/`node-pty` are rebuilt for every source release, while the legacy `fs-ext` path is used only when that dependency is present; releases providing `@deepseek-ai/node-addon-system` also undergo a real flock probe. The source path audits the actual npm tree with npm's production audit; the published-npm compatibility path continues to use the repository's frozen `pnpm-lock.yaml` and its pnpm audit fallback. This keeps upstream source resolution reproducible without making the source-release Dockerfile depend on a stale repository lockfile, while allowing source-only upstream releases to run through the same patch and smoke contracts.
+For the checked-in source release, Docker verifies the immutable GitHub archive, installs the upstream lockfile, builds the official client and Web UI, and packs the DSH and vendor workspaces. The runtime installer follows `@deepseek-ai/dsh` dependencies, optional dependencies, and required peers through the packed manifests, then installs only the selected local tarballs into a flat npm tree. Development dependencies and optional peers alone do not pull in extra plugins. Selected workspace packages keep their locally built bytes, including source patches, even before npm publication. External dependencies and platform-specific optional packages are resolved by npm. Install scripts stay disabled until the subprocess helper and reviewed native rebuilds are run explicitly: `koffi`/`node-pty` are rebuilt for every source release, while the legacy `fs-ext` path is used only when that dependency is present; releases providing `@deepseek-ai/node-addon-system` also undergo a real flock probe. The source path audits the actual npm tree with npm's production audit; the published-npm compatibility path continues to use the repository's frozen `pnpm-lock.yaml` and its pnpm audit fallback. Source-release external npm dependencies are not frozen by the upstream pnpm build lockfile.
+
+### Optional Codex and Claude Code subagents
+
+Both image variants include the default CLI runtime. DSH 0.1.5's Codex and Claude Code subagent plugins are optional Profile additions, so their large native runtimes are not preinstalled. The lightweight `dsh-hooks-codex` and `dsh-hooks-claude-code` packages remain because the CLI requires them. The Codex subagent uses `@openai/codex` (the CLI); the Claude Code subagent uses `@anthropic-ai/claude-agent-sdk` and its native payload.
+
+Install either plugin into the container's `web` Profile as the application user, using the same version as the running DSH:
+
+```bash
+docker exec --user node <container> sh -c \
+  'dsh plugin --profile web add --save-exact "@deepseek-ai/dsh-subagent-codex@$(dsh --version)"'
+
+docker exec --user node <container> sh -c \
+  'dsh plugin --profile web add --save-exact "@deepseek-ai/dsh-subagent-claude-code@$(dsh --version)"'
+```
+
+The image supplies pnpm for these commands. Profile packages live under `/data/dsh/profiles/web` and persist with `/data`. A source-only release needs its matching plugin packages published to npm before these registry commands can work; `dsh plugin` also accepts locally built plugin tarballs. Installation adds the Profile bundle; enable the corresponding Agent Preset tool row and configure the provider as described in the upstream [Codex](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.5-rc.2/packages/subagent/subagent-codex/README.md) and [Claude Code](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.1.5-rc.2/packages/subagent/subagent-claude-code/README.md) guides. Their default tool rows are disabled, and model credentials are still required for delegation.
 
 The source path's final npm installation still resolves dependency ranges at build time; it is not a frozen production dependency closure across separate builds. Publishing the tested artifact prevents a second resolution during publication, but does not solve that cross-build limitation. The upstream build uses its own `packageManager` selection, which can differ from the pnpm version provided by the image.
 
@@ -388,7 +404,7 @@ is no longer needed.
 
 ## Resource use
 
-The source release's authenticated amd64 smoke tests currently settle below about `540 MiB` and around `20-22` PIDs after startup warm-up; recent `0.1.5-rc.1` runs reached `409.1 MiB` in PR verification and `537.1 MiB` in the release workflow. The workstation toolchains are dormant, so they do not materially raise idle memory, but they do raise disk use; source builds are larger than the historical npm-only image because the upstream CLI and vendor workspaces are built locally. Debian and upstream rebuilds can move those figures.
+The source release's authenticated amd64 smoke tests currently settle below about `540 MiB` and around `20-22` PIDs after startup warm-up; recent `0.1.5-rc.1` runs reached `409.1 MiB` in PR verification and `537.1 MiB` in the release workflow. The workstation toolchains are dormant, so they do not materially raise idle memory, but they do raise disk use. Debian and upstream rebuilds can move those figures.
 
 The CI ceiling is `768 MiB` and `64` PIDs for the source-release idle flow. The smoke test waits for three consecutive samples after initialization before applying that ceiling. This is not a workload limit: terminals, repositories, language servers, compilers, and model tools can require substantially more memory.
 

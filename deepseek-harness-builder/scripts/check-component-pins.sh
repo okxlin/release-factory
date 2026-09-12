@@ -421,6 +421,9 @@ require_literal \
     'npm_execpath="$(command -v pnpm)" DSH_CLIENT_COMMIT_HASH="${DSH_SOURCE_COMMIT}" CI=true pnpm exec tsx scripts/release/pack.ts --family vendor --out /tmp/dsh-pack/vendor' \
     'the DeepSeek Harness vendor release pack invocation with pnpm lifecycle metadata'
 require_literal \
+    'node /tmp/install-dsh-runtime.mjs' \
+    'the DeepSeek Harness local runtime dependency closure installer'
+require_literal \
     'chmod 0755 /opt/pnpm/bin/pnpm.mjs /opt/pnpm/bin/pnpx.mjs' \
     'the executable pnpm entrypoints after bundle extraction'
 require_literal \

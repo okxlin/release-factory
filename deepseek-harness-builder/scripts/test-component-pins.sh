@@ -153,6 +153,11 @@ cp -- "${source_dockerfile}" "${missing_vendor_pack_lifecycle}"
 sed -i 's#npm_execpath="$(command -v pnpm)" DSH_CLIENT_COMMIT_HASH="${DSH_SOURCE_COMMIT}" CI=true pnpm exec tsx scripts/release/pack.ts --family vendor#DSH_CLIENT_COMMIT_HASH="${DSH_SOURCE_COMMIT}" CI=true pnpm exec tsx scripts/release/pack.ts --family vendor#' "${missing_vendor_pack_lifecycle}"
 expect_failure 'missing-vendor-pack-lifecycle' "${missing_vendor_pack_lifecycle}" 'the DeepSeek Harness vendor release pack invocation with pnpm lifecycle metadata'
 
+missing_runtime_closure="${tmp_dir}/missing-runtime-closure.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_runtime_closure}"
+sed -i 's#node /tmp/install-dsh-runtime.mjs#npm install --ignore-scripts#' "${missing_runtime_closure}"
+expect_failure 'missing-runtime-closure' "${missing_runtime_closure}" 'the DeepSeek Harness local runtime dependency closure installer'
+
 missing_fs_ext_guard="${tmp_dir}/missing-fs-ext-guard.Dockerfile"
 cp -- "${source_dockerfile}" "${missing_fs_ext_guard}"
 sed -i "/if find node_modules -type d -path '\*\/fs-ext' -print -quit | grep -q .; then/d" "${missing_fs_ext_guard}"
