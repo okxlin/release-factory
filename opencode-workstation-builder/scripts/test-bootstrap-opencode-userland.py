@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -22,6 +23,9 @@ class BootstrapTests(unittest.TestCase):
         self.npm_log = self.root / "npm.log"
         self.stub = self.root / "tools"
         self.stub.mkdir()
+        node = shutil.which("node")
+        self.assertIsNotNone(node, "Node.js is required by the bootstrap script")
+        (self.stub / "node").symlink_to(node)
         npm = self.stub / "npm"
         npm.write_text('#!/bin/sh\nprintf "%s\\n" "$@" >> "$NPM_TEST_LOG"\n[ "$1" = pkg ] && exit 0\nexit 73\n')
         npm.chmod(0o755)

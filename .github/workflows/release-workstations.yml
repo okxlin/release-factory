@@ -75,6 +75,10 @@ jobs:
           assert platforms and len(platforms) == len(set(platforms)) and set(platforms) <= runners.keys()
           print('matrix=' + json.dumps({'include': [{'arch': p.split('/')[1], 'runner': runners[p]} for p in platforms]}))
           PY
+      - uses: actions/setup-node@v7
+        if: inputs.variant == 'opencode'
+        with:
+          node-version: '24'
       - name: Verify contracts and publication regressions
         env:
           VARIANT: ${{ inputs.variant }}
