@@ -5,6 +5,7 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=paseo-password.sh
 source /usr/local/lib/codex-workstation/paseo-password.sh
+configure_workstation_passwords
 
 status=0
 
@@ -74,6 +75,11 @@ version_check "rustc" rustc --version
 version_check "bun" bun --version
 version_check "deno" deno --version
 version_check "java" java -version
+if [[ -n "${JAVA_HOME:-}" && -x "${JAVA_HOME}/bin/java" ]]; then
+    version_check "JAVA_HOME java" "${JAVA_HOME}/bin/java" -version
+else
+    fail "JAVA_HOME must point to the installed JDK"
+fi
 version_check "maven" mvn --version
 version_check "docker" docker --version
 version_check "actionlint" actionlint --version
@@ -104,10 +110,7 @@ else
     fail "Paseo health not responding on port ${PASEO_PORT}"
 fi
 
-paseo_password="${PASEO_PASSWORD:-${PASSWORD:-change-me}}"
-if [[ -z "${paseo_password//[[:space:]]/}" ]]; then
-    paseo_password="change-me"
-fi
+paseo_password="${PASEO_PASSWORD}"
 if paseo_password_is_websocket_token "${paseo_password}"; then
     pass "Paseo password is browser WebSocket-token-safe"
 else

@@ -19,13 +19,22 @@
 
 - 默认发布 `linux/amd64,linux/arm64`
 - 默认镜像仓库名：`ghcr.io/<owner>/opencode-workstation`
-- workflow 只保留手动触发
+- workflow 支持手动构建、每周安全刷新，以及按路径触发的 PR 验证
 - 默认 tag：`latest`
 - 可选附带 `latest` 别名
-- workflow 会先构建并加载 `linux/amd64` 本地测试镜像，跑过容器 smoke test 后才登录 GHCR 并推送目标平台镜像
+- `amd64`、`arm64` 分别在原生 runner 构建一次，验证默认插件、服务鉴权及 HOME 持久化后扫描；发布复用同一个镜像摘要，再合并平台 manifest
 - workflow 输入会先校验 tag、平台列表和镜像仓库名；BuildKit cache 使用 GitHub Actions cache 的 `mode=min`，减少缓存空间压力
 - Tooling: git, gh, ripgrep, fd, jq, yq, shellcheck, shfmt, actionlint, comment-checker, Docker CLI, Go 1.27.0, Rust, Bun 1.4.0, pnpm, yarn
 - 默认保留 oh-my-opencode 与可选的 Dynamic Context Pruning（DCP）支持，不再预装 `opencode-gpt-unlocked`
+
+镜像内置 `image/opencode-runtime/package-lock.json` 固定的 OpenCode 基线，首次启动无需联网下载主程序。
+默认 DCP 版本也记录在该目录的 `package.json`，仍在用户目录安装；已有 OpenCode 安装会保留，
+可用 `OPENCODE_NPM_PACKAGE` 和 `OPENCODE_FORCE_INSTALL=1` 主动切换版本。
+TypeScript 由 npm 安装，避免 Debian 的 `node-typescript` 再引入一套旧 Node 运行时。
+
+CI 分别扫描镜像和默认启动后安装的用户目录。OpenCode 是编译后的二进制，Trivy 无法完整识别内部
+JavaScript 依赖；上游公告核对及覆盖限制见 [基线说明](image/opencode-runtime/UPSTREAM.md)。
+用户自行升级的主程序和插件不等同于该次镜像发布所验证的版本。
 
 ## 运行时权限模型
 
@@ -189,7 +198,7 @@ OpenCode 本身还会读取项目内或兼容目录中的：
 
 ## PR reviewer 该看什么
 
-- `build-opencode-workstation.yml`：是否只保留手动触发、tag / 平台输入规则是否干净
+- `build-opencode-workstation.yml` 与 `release-workstations.yml`：原生双架构验证、tag / 平台规则及发布摘要绑定
 - `image/Dockerfile`：是否仍然以独立镜像上下文承载运行时依赖
 - `image/scripts/entrypoint.sh`、`image/scripts/bootstrap-opencode-userland.sh`、`image/scripts/install-oh-my-opencode.sh`：是否继续保证官方 HOME 路径上的持久化语义及废弃配置迁移
 - `image/scripts/update_opencode_config.py`：是否继续保留用户覆盖层、插件去重合并和废弃条目清理语义

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "workstation": {"max_fixable_critical": 0, "max_fixable_high": null}
+  },
+  "protected_paths": [
+    "usr/local/bin/node",
+    "opt/opencode/",
+    "home/opencode/.config/opencode/",
+    "home/opencode/.cache/opencode/",
+    "home/opencode/.local/share/opencode/"
+  ],
+  "protected_os_packages": ["nodejs"],
+  "exceptions": []
+}

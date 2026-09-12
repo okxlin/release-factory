@@ -27,6 +27,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 ENV PATH=/opt/bun/bin:/usr/local/go/bin:/home/${USERNAME}/.cargo/bin:/home/${USERNAME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
+ARG SECURITY_REFRESH=manual
 RUN apt-get update \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
@@ -45,7 +46,6 @@ RUN apt-get update \
         gnupg \
         jq \
         make \
-        node-typescript \
         openssh-client \
         pkg-config \
         procps \
@@ -108,6 +108,7 @@ RUN apt-get update \
     && corepack enable \
     && corepack prepare pnpm@latest --activate \
     && corepack prepare yarn@stable --activate \
+    && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
 
 RUN if getent group "${USER_GID}" >/dev/null; then \
@@ -137,7 +138,8 @@ RUN if getent group "${USER_GID}" >/dev/null; then \
     && chown -R "${USER_UID}:${USER_GID}" "/home/${USERNAME}"
 
 RUN curl -fsSL https://bun.sh/install | bash -s -- bun-v${BUN_VERSION} \
-    && bun --version
+    && bun --version \
+    && chown -R "${USER_UID}:${USER_GID}" /opt/bun
 
 ENV BUN_VERSION=${BUN_VERSION}
 
@@ -177,7 +179,8 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
     && rm -rf /usr/local/go \
     && tar -C /usr/local -xzf "/tmp/${go_asset}" \
     && rm "/tmp/${go_asset}" \
-    && echo 'export PATH=/usr/local/go/bin:$PATH' >> /etc/profile.d/go.sh
+    && echo 'export PATH=/usr/local/go/bin:$PATH' >> /etc/profile.d/go.sh \
+    && chown -R "${USER_UID}:${USER_GID}" /usr/local/go
 
 ARG RUST_VERSION=stable
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh \
@@ -187,7 +190,22 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-ini
     && echo "export PATH=/home/${USERNAME}/.cargo/bin:\$PATH" >> /etc/profile.d/rust.sh
 
 RUN npm install -g typescript@5 \
-    && tsc --version
+    && tsc --version \
+    && npm cache clean --force
+
+# Ship a locked, scanned baseline. User-installed versions remain in persistent HOME.
+COPY opencode-runtime/ /opt/opencode/
+RUN cd /opt/opencode \
+    && npm ci --omit=dev --ignore-scripts --no-fund \
+    && case "$(dpkg --print-architecture)" in \
+         amd64) package=opencode-linux-x64-baseline ;; \
+         arm64) package=opencode-linux-arm64 ;; \
+         *) echo 'unsupported OpenCode architecture' >&2; exit 1 ;; \
+       esac \
+    && mkdir -p bin \
+    && ln -s "../node_modules/${package}/bin/opencode" bin/opencode \
+    && test "$(bin/opencode --version)" = "$(node -p 'require("./package.json").version')" \
+    && npm cache clean --force
 
 WORKDIR /app
 
@@ -212,7 +230,7 @@ RUN mkdir -p \
       /home/${USERNAME}/.local/bin \
       /home/${USERNAME}/.npm \
       /home/${USERNAME}/.rustup \
-    && chown -R ${USER_UID}:${USER_GID} /app /workspace /cache /opt/bun /usr/local/go /home/${USERNAME} \
+    && chown -R ${USER_UID}:${USER_GID} /app /workspace /cache /home/${USERNAME} \
     && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} \
     && chmod 0440 /etc/sudoers.d/${USERNAME}
 

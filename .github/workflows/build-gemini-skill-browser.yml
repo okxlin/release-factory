@@ -1,144 +1,56 @@
-name: Build Gemini Skill Browser Image
+name: Build Gemini Skill Browser Image (kasm)
 
 on:
   workflow_dispatch:
     inputs:
       browser_base_tag:
-        description: "Browser base image tag for kasmweb/edge (for example: 1.18.0)"
-        required: true
-        default: "1.18.0"
-      image_tag:
-        description: "Optional published image tag; leave empty to follow browser_base_tag + -kasm"
-        required: false
+        description: "Optional base tag; empty follows the maintained component channel"
         default: ""
+        type: string
+      image_tag:
+        description: "Optional published tag; empty follows the resolved browser tag"
+        default: ""
+        type: string
       gemini_skill_ref:
-        description: "gemini-skill git ref to build"
-        required: true
-        default: "main"
+        description: "Optional source ref; empty uses the tested commit in components.json"
+        default: ""
+        type: string
       push_latest:
-        description: "Also publish latest-kasm tag manually"
-        required: true
+        description: "Also publish latest-kasm"
         default: false
         type: boolean
+  schedule:
+    - cron: '29 4 * * 0'
+  pull_request:
+    paths:
+      - 'gemini-skill-browser-builder/**'
+      - 'gemini-skill-browser-builder/configs/**'
+      - 'gemini-skill-browser-builder/image/runtime/**'
+      - 'gemini-skill-browser-builder/scripts/**'
+      - '.github/workflows/build-gemini-skill-browser.yml'
+      - '.github/workflows/release-gemini-browser.yml'
+      - 'scripts/smoke-gemini-browser.py'
+      - 'scripts/trivy-image-gate.sh'
+      - 'scripts/evaluate-trivy-policy.py'
+      - 'scripts/test-evaluate-trivy-policy.py'
+      - 'scripts/publish-tested-image.py'
+      - 'scripts/test-publish-tested-image.py'
+
+permissions:
+  contents: read
+  packages: write
 
 concurrency:
-  group: build-gemini-skill-browser-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  IMAGE_REPO: gemini-skill-browser
-  DEFAULT_PLATFORM: linux/amd64
-  TEST_IMAGE: gemini-skill-browser:kasm-ci-test
+  group: build-gemini-kasm-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Normalize repository owner
-        id: owner
-        run: |
-          LOWER_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          echo "lower_owner=$LOWER_OWNER" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Resolve build parameters
-        id: params
-        run: |
-          chmod +x gemini-skill-browser-builder/scripts/*.sh
-          bash gemini-skill-browser-builder/scripts/resolve-build-params.sh \
-            --image-repo "${IMAGE_REPO}" \
-            --default-platform "${DEFAULT_PLATFORM}" \
-            --browser-base-tag "${{ github.event.inputs.browser_base_tag }}" \
-            --image-tag "${{ github.event.inputs.image_tag }}" \
-            --gemini-skill-ref "${{ github.event.inputs.gemini_skill_ref || 'main' }}" \
-            --push-latest "${{ github.event.inputs.push_latest == true && 'true' || 'false' }}" \
-            --latest-tag "latest-kasm" \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}
-          tags: ${{ steps.params.outputs.tags }}
-          labels: |
-            org.opencontainers.image.title=Gemini Skill Browser
-            org.opencontainers.image.description=Single-container kasmweb/edge based browser image for Gemini Skill
-            org.opencontainers.image.vendor=${{ github.repository_owner }}
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.base.name=kasmweb/edge:${{ steps.params.outputs.browser_base_tag }}
-
-      - name: Build local image
-        uses: docker/build-push-action@v7
-        with:
-          context: ./gemini-skill-browser-builder/image
-          file: ./gemini-skill-browser-builder/image/Dockerfile
-          platforms: linux/amd64
-          load: true
-          build-args: |
-            BASE_IMAGE_TAG=${{ steps.params.outputs.browser_base_tag }}
-            GEMINI_SKILL_REF=${{ steps.params.outputs.gemini_skill_ref }}
-          tags: ${{ env.TEST_IMAGE }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=gemini-skill-browser-kasm
-          cache-to: type=gha,mode=min,scope=gemini-skill-browser-kasm
-
-      - name: Run Trivy vulnerability gate
-        env:
-          TRIVY_MAX_FIXABLE_CRITICAL: "0"
-          TRIVY_MAX_FIXABLE_HIGH: "30"
-        run: |
-          set -euo pipefail
-          chmod +x scripts/trivy-image-gate.sh
-          scripts/trivy-image-gate.sh \
-            --image "${TEST_IMAGE}" \
-            --output "${RUNNER_TEMP}/gemini-skill-browser-kasm.trivy.json" \
-            --max-fixable-critical "${TRIVY_MAX_FIXABLE_CRITICAL}" \
-            --max-fixable-high "${TRIVY_MAX_FIXABLE_HIGH}"
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v7
-        with:
-          context: ./gemini-skill-browser-builder/image
-          file: ./gemini-skill-browser-builder/image/Dockerfile
-          platforms: ${{ steps.params.outputs.platforms }}
-          push: true
-          build-args: |
-            BASE_IMAGE_TAG=${{ steps.params.outputs.browser_base_tag }}
-            GEMINI_SKILL_REF=${{ steps.params.outputs.gemini_skill_ref }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=gemini-skill-browser-kasm
-          cache-to: type=gha,mode=min,scope=gemini-skill-browser-kasm
-
-      - name: Emit build summary
-        run: |
-          {
-            echo "## Gemini Skill Browser image build"
-            echo ""
-            echo "- Image: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}"
-            echo "- Browser base tag: ${{ steps.params.outputs.browser_base_tag }}"
-            echo "- Published image tag: ${{ steps.params.outputs.image_tag }}"
-            echo "- Tags: ${{ steps.meta.outputs.tags }}"
-            echo "- Platforms: ${{ steps.params.outputs.platforms }}"
-            echo "- GEMINI_SKILL_REF: ${{ steps.params.outputs.gemini_skill_ref }}"
-          } >> "$GITHUB_STEP_SUMMARY"
+  release:
+    uses: ./.github/workflows/release-gemini-browser.yml
+    with:
+      variant: kasm
+      browser_base_tag: ${{ inputs.browser_base_tag || '' }}
+      image_tag: ${{ inputs.image_tag || '' }}
+      gemini_skill_ref: ${{ inputs.gemini_skill_ref || '' }}
+      push_latest: ${{ github.event_name == 'schedule' || inputs.push_latest == true }}
+      publish: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}

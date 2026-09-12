@@ -25,6 +25,7 @@ codex-claude-workstation-builder/
         ├── healthcheck.sh          # Docker HEALTHCHECK script
         ├── doctor.sh               # Full diagnostic
         └── smoke-test.sh           # Quick smoke test
+```
 
 Build-time code (`configs/`, `scripts/`) stays outside the image. Runtime code (`image/scripts/`) gets baked into the container.
 
@@ -35,6 +36,12 @@ docker build -t codex-claude-workstation image/
 ```
 
 The Docker context is `image/`. The Dockerfile expects all COPY paths relative to this directory.
+
+PRs and weekly refreshes build `amd64` and `arm64` on native runners. Each image
+is tested and scanned once, including `$JAVA_HOME/bin/java`, service login and
+HOME persistence. Publication verifies and combines those exact tested image
+digests. code-server extensions are stored once in the image seed directory and
+copied into persistent HOME when needed; installer caches are removed during installation.
 
 Build-time versions can be overridden with `--build-arg`:
 
@@ -89,8 +96,8 @@ docker run -d \
   --hostname workstation \
   --security-opt seccomp=unconfined \
   --security-opt apparmor=unconfined \
-  -e PASSWORD=change-me \
-  -e PASEO_PASSWORD="$(openssl rand -hex 24)" \
+  -e PASSWORD="${PASSWORD:?Generate and save a unique PASSWORD first}" \
+  -e PASEO_PASSWORD="${PASEO_PASSWORD:-${PASSWORD}}" \
   -e ROOT_PASSWORD=codex2024 \
   -v "$PWD/workspace:/workspace" \
   -v codex-home:/home/dev \
@@ -98,6 +105,7 @@ docker run -d \
 ```
 
 Run as `dev` user by default. Use `su - root` + `ROOT_PASSWORD` for root.
+Startup rejects a missing, blank, or `change-me` network password before starting services. Generate and save a unique password with `openssl rand -hex 24`; a valid existing `PASSWORD` remains the fallback when `PASEO_PASSWORD` is unset or blank. code-server reads the password from the environment, so it is not written into its YAML configuration.
 When `/var/run/docker.sock` is mounted, startup adds `dev` to the socket GID so `docker` works without switching users.
 Mount the Docker socket only when needed:
 

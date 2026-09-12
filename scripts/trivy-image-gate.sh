@@ -5,6 +5,7 @@ usage() {
   cat <<'EOF'
 Usage: trivy-image-gate.sh --image IMAGE [--output PATH] [--max-fixable-critical N] [--max-fixable-high N]
        trivy-image-gate.sh --image IMAGE --policy FILE --profile NAME [--output PATH]
+       trivy-image-gate.sh --filesystem DIR --policy FILE --profile NAME [--output PATH]
 
 Scans a container image with Trivy and fails when fixable HIGH/CRITICAL
 vulnerabilities exceed the configured thresholds. Findings within the
@@ -16,6 +17,7 @@ EOF
 }
 
 image=""
+filesystem=""
 output=""
 policy=""
 profile=""
@@ -29,6 +31,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --image)
       image="${2:-}"
+      shift 2
+      ;;
+    --filesystem)
+      filesystem="${2:-}"
       shift 2
       ;;
     --output)
@@ -65,10 +71,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "${image}" ]]; then
-  echo "ERROR: --image is required" >&2
+if [[ -z "${image}${filesystem}" || ( -n "${image}" && -n "${filesystem}" ) ]]; then
+  echo "ERROR: select exactly one of --image or --filesystem" >&2
   usage >&2
   exit 2
+fi
+
+scan_kind=image
+scan_target="${image}"
+if [[ -n "${filesystem}" ]]; then
+  [[ -d "${filesystem}" ]] || { echo 'ERROR: filesystem scan target must be a directory' >&2; exit 2; }
+  scan_kind=fs
+  scan_target="$(realpath -e -- "${filesystem}")"
 fi
 
 scan_policy_args=()
@@ -88,14 +102,14 @@ if [[ ! "${max_fixable_critical}" =~ ^[0-9]+$ || ! "${max_fixable_high}" =~ ^[0-
 fi
 
 if [[ -z "${output}" ]]; then
-  safe_name="${image//[^A-Za-z0-9_.-]/_}"
+  safe_name="${scan_target//[^A-Za-z0-9_.-]/_}"
   output="/tmp/trivy-${safe_name}.json"
 fi
 
 mkdir -p "$(dirname "${output}")"
 
 if command -v trivy >/dev/null 2>&1; then
-  trivy image \
+  trivy "${scan_kind}" \
     --format json \
     --output "${output}" \
     --severity "${severity}" \
@@ -103,26 +117,33 @@ if command -v trivy >/dev/null 2>&1; then
     --skip-version-check \
     --timeout "${timeout}" \
     "${scan_policy_args[@]}" \
-    "${image}"
+    "${scan_target}"
 else
   trivy_image="${TRIVY_DOCKER_IMAGE:-aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969}"
   cache_dir="${TRIVY_CACHE_DIR:-/tmp/trivy-cache}"
   mkdir -p "${cache_dir}"
+  if [[ "${scan_kind}" == fs ]]; then
+    scan_mounts=(-v "${scan_target}:/scan:ro")
+    container_target=/scan
+  else
+    scan_mounts=(-v /var/run/docker.sock:/var/run/docker.sock)
+    container_target="${image}"
+  fi
   docker run --rm \
-    -v /var/run/docker.sock:/var/run/docker.sock \
+    "${scan_mounts[@]}" \
     -v "${cache_dir}:/root/.cache/" \
-    "${trivy_image}" image \
+    "${trivy_image}" "${scan_kind}" \
       --format json \
       --severity "${severity}" \
       --scanners vuln \
       --skip-version-check \
       --timeout "${timeout}" \
       "${scan_policy_args[@]}" \
-      "${image}" > "${output}"
+      "${container_target}" > "${output}"
 fi
 
 if [[ -n "${policy}" ]]; then
-  echo "Trivy gate for ${image}; report: ${output}"
+  echo "Trivy gate for ${scan_target}; report: ${output}"
   script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
   exec python3 "${script_dir}/evaluate-trivy-policy.py" \
     --report "${output}" --policy "${policy}" --profile "${profile}"
@@ -159,7 +180,7 @@ PY
 gate_status=$?
 set -e
 
-echo "Trivy gate for ${image}: ${summary}"
+echo "Trivy gate for ${scan_target}: ${summary}"
 echo "Trivy report: ${output}"
 
 python3 - "${output}" <<'PY'
