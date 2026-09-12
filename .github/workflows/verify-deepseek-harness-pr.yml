@@ -56,9 +56,11 @@ jobs:
         with:
           variant: runtime
           arch: ${{ matrix.arch }}
+          refresh-system-packages: "true"
 
       - name: Verify native workstation image
         uses: ./.github/actions/verify-deepseek-harness
         with:
           variant: workstation
           arch: ${{ matrix.arch }}
+          refresh-system-packages: "true"
