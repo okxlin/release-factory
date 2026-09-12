@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "workstation": {"max_fixable_critical": 0, "max_fixable_high": null}
+  },
+  "protected_paths": [
+    "usr/lib/code-server/",
+    "opt/paseo/",
+    "usr/local/bin/mihomo",
+    "usr/local/bin/sing-box",
+    "usr/local/bin/xray"
+  ],
+  "protected_os_packages": ["nodejs"],
+  "exceptions": []
+}

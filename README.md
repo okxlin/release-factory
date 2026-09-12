@@ -17,7 +17,7 @@ Release Factory 集中维护 1Panel 离线安装包、AI 开发工作站、浏�
 | Gemini Skill Browser（Kasm） | `ghcr.io/okxlin/gemini-skill-browser` | `linux/amd64` | [说明](gemini-skill-browser-builder/README.md) · [Workflow](.github/workflows/build-gemini-skill-browser.yml) |
 | Gemini Skill Browser（LinuxServer） | 与 Kasm 共用镜像仓库，使用 `-linuxserver` 标签 | `linux/amd64` | [说明](gemini-skill-browser-linuxserver-builder/README.md) · [Workflow](.github/workflows/build-gemini-skill-browser-linuxserver.yml) |
 | OpenCode Workstation | `ghcr.io/okxlin/opencode-workstation` | `linux/amd64`、`linux/arm64` | [说明](opencode-workstation-builder/README.md) · [Workflow](.github/workflows/build-opencode-workstation.yml) |
-| OpenClaw Sandbox | `ghcr.io/okxlin/openclaw-sandbox` | GitHub Actions runner 默认架构 | [Workflow](.github/workflows/openclaw-upstream-docker.yml) · [加固脚本](scripts/apply-openclaw-runtime-hardening.sh) |
+| OpenClaw Sandbox | `ghcr.io/okxlin/openclaw-sandbox` | `linux/amd64` | [说明](openclaw-builder/README.md) · [Workflow](.github/workflows/openclaw-upstream-docker.yml) · [加固脚本](scripts/apply-openclaw-runtime-hardening.sh) |
 
 根 README 是导航入口。具体镜像的启动参数、鉴权、持久化、工具链、升级和权限边界，以项目目录中的 README、Compose 文件和工作流为准。
 
@@ -61,8 +61,8 @@ gh workflow run build-deepseek-harness.yml \
 | Codex Claude Workstation | UTC 日期 `YYYYMMDD` | `latest` |
 | DeepSeek Harness Runtime | 解析到的 `@deepseek-ai/dsh` 版本 `<DSH_VERSION>` | `latest` |
 | DeepSeek Harness Workstation | `<DSH_VERSION>-workstation` | `workstation` |
-| Gemini Skill Browser（Kasm） | `<browser_base_tag>-kasm` | `latest-kasm`，仅显式启用时发布 |
-| Gemini Skill Browser（LinuxServer） | `<browser_base_tag>-linuxserver` | `latest-linuxserver`，仅显式启用时发布 |
+| Gemini Skill Browser（Kasm） | `<browser_base_tag>-kasm` | `latest-kasm`，周更新维护，手动构建可选 |
+| Gemini Skill Browser（LinuxServer） | `<browser_base_tag>-linuxserver` | `latest-linuxserver`，周更新维护，手动构建可选 |
 | OpenCode Workstation | 手动指定标签或 `latest` | 可显式附带 `latest` |
 | OpenClaw Sandbox | `<upstream_release>-sandbox` | `latest` |
 

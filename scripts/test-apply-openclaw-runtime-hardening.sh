@@ -52,7 +52,11 @@ run_case() {
   test "$(grep -Fc -- '/app/node_modules/@vitest' "${dockerfile}")" -eq 1
   test "$(grep -Fc -- '/app/node_modules/vitest' "${dockerfile}")" -eq 1
   test "$(grep -Fc -- 'AS openclaw-runtime-docker-tools' "${dockerfile}")" -eq 1
-  test "$(grep -Fc -- 'COPY --from=openclaw-runtime-docker-tools' "${dockerfile}")" -eq 1
+  test "$(grep -Fc -- 'ARG SECURITY_REFRESH=manual' "${dockerfile}")" -eq 1
+  test "$(grep -Fc -- 'RUN --mount=type=bind,from=openclaw-runtime-docker-tools' "${dockerfile}")" -eq 1
+  if grep -Fq -- 'COPY --from=openclaw-runtime-docker-tools' "${dockerfile}"; then
+    fail 'temporary Docker tool binaries would be retained in an image layer'
+  fi
   test "$(grep -Fc -- "npm install --global \"npm@\${OPENCLAW_NPM_VERSION}\"" "${dockerfile}")" -eq 1
 
   before="$(sha256sum "${dockerfile}" | cut -d ' ' -f1)"

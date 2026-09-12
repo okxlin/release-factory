@@ -4,7 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKERFILE="$(cd "${SCRIPT_DIR}/../image" && pwd)/Dockerfile"
-WORKFLOW="$(cd "${SCRIPT_DIR}/../../.github/workflows" && pwd)/build-codex-claude-workstation.yml"
+WORKFLOW="$(cd "${SCRIPT_DIR}/../../.github/workflows" && pwd)/release-workstations.yml"
+CALLER="$(dirname "${WORKFLOW}")/build-codex-claude-workstation.yml"
 RESOLVER="${SCRIPT_DIR}/resolve-proxy-core-versions.py"
 POLICY="$(cd "${SCRIPT_DIR}/../configs" && pwd)/proxy-core-update-policy.json"
 
@@ -58,6 +59,7 @@ require_pattern '^ARG XRAY_SOURCE_SHA256='
 require_pattern '^ARG PROXY_X_CRYPTO_VERSION='
 require_pattern '^ARG PROXY_X_NET_VERSION='
 require_pattern '^ARG PROXY_X_TEXT_VERSION='
+require_pattern '^ARG PROXY_X_MOD_VERSION='
 require_pattern '^ARG PROXY_GRPC_VERSION='
 
 [ -f "${RESOLVER}" ] || fail "resolver is missing: ${RESOLVER}"
@@ -65,7 +67,9 @@ require_pattern '^ARG PROXY_GRPC_VERSION='
 require_workflow_text 'id: proxy'
 require_workflow_text 'test-resolve-proxy-core-versions.py'
 require_workflow_text 'resolve-proxy-core-versions.py'
-require_workflow_occurrences 'steps.proxy.outputs.build_args' 2
+grep -Fq 'uses: ./.github/workflows/release-workstations.yml' "${CALLER}" || fail 'Codex must call the shared native build workflow'
+require_workflow_occurrences 'steps.proxy.outputs.build_args' 1
+require_workflow_occurrences 'needs.prepare.outputs.build_args' 1
 
 require_text 'https://github.com/MetaCubeX/mihomo/archive/${mihomo_source_ref}.tar.gz'
 require_text 'https://github.com/SagerNet/sing-box/archive/${sing_box_source_ref}.tar.gz'
@@ -74,6 +78,7 @@ require_text 'go mod tidy'
 require_text 'golang.org/x/crypto@v${PROXY_X_CRYPTO_VERSION}'
 require_text 'golang.org/x/net@v${PROXY_X_NET_VERSION}'
 require_text 'golang.org/x/text@v${PROXY_X_TEXT_VERSION}'
+require_text 'golang.org/x/mod@v${PROXY_X_MOD_VERSION}'
 require_text 'google.golang.org/grpc@v${PROXY_GRPC_VERSION}'
 require_text 'go version -m "/usr/local/bin/${binary}"'
 require_text 'Mihomo Meta ${mihomo_version}'

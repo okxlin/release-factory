@@ -38,6 +38,10 @@
       "version_arg": "PROXY_X_TEXT_VERSION"
     },
     {
+      "module": "golang.org/x/mod",
+      "version_arg": "PROXY_X_MOD_VERSION"
+    },
+    {
       "module": "google.golang.org/grpc",
       "version_arg": "PROXY_GRPC_VERSION"
     }

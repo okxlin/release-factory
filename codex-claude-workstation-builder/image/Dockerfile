@@ -4,7 +4,7 @@ FROM ubuntu:24.04
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-ARG TARGETARCH=amd64
+ARG TARGETARCH
 ARG DEBIAN_FRONTEND=noninteractive
 ARG NODE_MAJOR=24
 ARG NPM_VERSION=12.0.2
@@ -30,7 +30,8 @@ ARG XRAY_SOURCE_SHA256=45de3ead5186fea442b04c662c554a1ffd1d7bd9093a83410f2edabe7
 ARG PROXY_X_CRYPTO_VERSION=0.55.0
 ARG PROXY_X_NET_VERSION=0.58.0
 ARG PROXY_X_TEXT_VERSION=0.41.0
-ARG PROXY_GRPC_VERSION=1.83.1
+ARG PROXY_X_MOD_VERSION=0.41.0
+ARG PROXY_GRPC_VERSION=1.83.2
 ARG PNPM_VERSION=latest
 ARG YARN_VERSION=stable
 ARG RUFF_VERSION=latest
@@ -39,6 +40,7 @@ ARG MYPY_VERSION=latest
 ARG CODE_SERVER_EXTENSIONS="anthropic.claude-code openai.chatgpt ms-python.python charliermarsh.ruff redhat.vscode-yaml tamasfe.even-better-toml editorconfig.editorconfig esbenp.prettier-vscode dbaeumer.vscode-eslint ms-azuretools.vscode-docker ms-ceintl.vscode-language-pack-zh-hans"
 
 # ── Locale ──
+ARG SECURITY_REFRESH=manual
 RUN apt-get update && apt-get install -y locales \
     && locale-gen zh_CN.UTF-8 \
     && update-locale LANG=zh_CN.UTF-8 \
@@ -274,6 +276,7 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
             -require="golang.org/x/crypto@v${PROXY_X_CRYPTO_VERSION}" \
             -require="golang.org/x/net@v${PROXY_X_NET_VERSION}" \
             -require="golang.org/x/text@v${PROXY_X_TEXT_VERSION}" \
+            -require="golang.org/x/mod@v${PROXY_X_MOD_VERSION}" \
             -require="google.golang.org/grpc@v${PROXY_GRPC_VERSION}" \
         && go mod tidy \
         && go build -tags with_gvisor -trimpath \
@@ -286,6 +289,7 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
             -require="golang.org/x/crypto@v${PROXY_X_CRYPTO_VERSION}" \
             -require="golang.org/x/net@v${PROXY_X_NET_VERSION}" \
             -require="golang.org/x/text@v${PROXY_X_TEXT_VERSION}" \
+            -require="golang.org/x/mod@v${PROXY_X_MOD_VERSION}" \
             -require="google.golang.org/grpc@v${PROXY_GRPC_VERSION}" \
         && go mod tidy \
         && go build -trimpath -tags "${sing_box_tags}" \
@@ -296,6 +300,7 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
             -require="golang.org/x/crypto@v${PROXY_X_CRYPTO_VERSION}" \
             -require="golang.org/x/net@v${PROXY_X_NET_VERSION}" \
             -require="golang.org/x/text@v${PROXY_X_TEXT_VERSION}" \
+            -require="golang.org/x/mod@v${PROXY_X_MOD_VERSION}" \
             -require="google.golang.org/grpc@v${PROXY_GRPC_VERSION}" \
         && go mod tidy \
         && go build -trimpath -buildvcs=false -ldflags '-s -w -buildid=' \
@@ -312,6 +317,7 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
     && for binary in sing-box xray; do \
         go version -m "/usr/local/bin/${binary}" | grep -Fq $'\tdep\tgoogle.golang.org/grpc\tv'"${PROXY_GRPC_VERSION}" || { echo "${binary} has an unexpected grpc version" >&2; exit 1; }; \
     done \
+    && go version -m /usr/local/bin/sing-box | grep -Fq $'\tdep\tgolang.org/x/mod\tv'"${PROXY_X_MOD_VERSION}" \
     && mihomo_output="$(/usr/local/bin/mihomo -v)" \
     && grep -Fq "Mihomo Meta ${mihomo_version}" <<<"${mihomo_output}" \
     && sing_box_output="$(/usr/local/bin/sing-box version)" \
@@ -320,7 +326,8 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
     && grep -Fq "Xray ${xray_version}" <<<"${xray_output}" \
     && rm -rf /tmp/proxy-build
 # ── code-server ──
-RUN curl -fsSL https://code-server.dev/install.sh | sh
+RUN curl -fsSL https://code-server.dev/install.sh | sh \
+    && rm -rf /root/.cache/code-server
 
 # Keep code-server's bundled tar within its declared ^7.5.9 range while
 # upstream release artifacts catch up with security fixes.
@@ -389,12 +396,11 @@ RUN useradd -m -s /bin/bash -u 1001 dev \
     && chmod 0440 /etc/sudoers.d/dev
 
 # ── Preinstall code-server extensions ──
-RUN for extension in ${CODE_SERVER_EXTENSIONS}; do \
-        sudo -u dev code-server --install-extension "${extension}"; \
+RUN install -d -o dev -g dev /opt/code-server/extensions \
+    && for extension in ${CODE_SERVER_EXTENSIONS}; do \
+        sudo -u dev code-server --extensions-dir /opt/code-server/extensions --install-extension "${extension}"; \
     done \
-    && mkdir -p /opt/code-server/extensions \
-    && cp -a /home/dev/.local/share/code-server/extensions/. /opt/code-server/extensions/ \
-    && chown -R dev:dev /opt/code-server
+    && rm -rf /home/dev/.local/share/code-server/CachedExtensionVSIXs
 # ── Supervisord config ──
 COPY config/supervisord/supervisord.conf /etc/supervisor/supervisord.conf
 COPY config/supervisord/conf.d/ /etc/supervisor/conf.d/

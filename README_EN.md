@@ -17,7 +17,7 @@ Release Factory maintains build and publication pipelines for 1Panel offline pac
 | Gemini Skill Browser (Kasm) | `ghcr.io/okxlin/gemini-skill-browser` | `linux/amd64` | [Documentation](gemini-skill-browser-builder/README.md) · [Workflow](.github/workflows/build-gemini-skill-browser.yml) |
 | Gemini Skill Browser (LinuxServer) | Shares the Kasm repository and uses `-linuxserver` tags | `linux/amd64` | [Documentation](gemini-skill-browser-linuxserver-builder/README.md) · [Workflow](.github/workflows/build-gemini-skill-browser-linuxserver.yml) |
 | OpenCode Workstation | `ghcr.io/okxlin/opencode-workstation` | `linux/amd64`, `linux/arm64` | [Documentation](opencode-workstation-builder/README.md) · [Workflow](.github/workflows/build-opencode-workstation.yml) |
-| OpenClaw Sandbox | `ghcr.io/okxlin/openclaw-sandbox` | GitHub Actions runner default | [Workflow](.github/workflows/openclaw-upstream-docker.yml) · [Hardening script](scripts/apply-openclaw-runtime-hardening.sh) |
+| OpenClaw Sandbox | `ghcr.io/okxlin/openclaw-sandbox` | `linux/amd64` | [Documentation](openclaw-builder/README.md) · [Workflow](.github/workflows/openclaw-upstream-docker.yml) · [Hardening script](scripts/apply-openclaw-runtime-hardening.sh) |
 
 The root README is a navigation map. Project READMEs, Compose files, and workflows are authoritative for image startup, authentication, persistence, toolchains, upgrades, and permission boundaries.
 
@@ -61,8 +61,8 @@ The example omits DeepSeek Harness `dsh_version` and `image_tag`, so the workflo
 | Codex Claude Workstation | UTC date `YYYYMMDD` | `latest` |
 | DeepSeek Harness Runtime | Resolved `@deepseek-ai/dsh` version `<DSH_VERSION>` | `latest` |
 | DeepSeek Harness Workstation | `<DSH_VERSION>-workstation` | `workstation` |
-| Gemini Skill Browser (Kasm) | `<browser_base_tag>-kasm` | `latest-kasm`, published only when explicitly enabled |
-| Gemini Skill Browser (LinuxServer) | `<browser_base_tag>-linuxserver` | `latest-linuxserver`, published only when explicitly enabled |
+| Gemini Skill Browser (Kasm) | `<browser_base_tag>-kasm` | `latest-kasm`, maintained weekly and optional for manual builds |
+| Gemini Skill Browser (LinuxServer) | `<browser_base_tag>-linuxserver` | `latest-linuxserver`, maintained weekly and optional for manual builds |
 | OpenCode Workstation | A manually supplied tag or `latest` | Can explicitly add `latest` |
 | OpenClaw Sandbox | `<upstream_release>-sandbox` | `latest` |
 

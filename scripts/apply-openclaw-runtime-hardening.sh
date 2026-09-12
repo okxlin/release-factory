@@ -23,12 +23,18 @@ fi
 
 source_dir="${1:-openclaw-src}"
 dockerfile="${source_dir}/Dockerfile"
-npm_version="${OPENCLAW_NPM_VERSION:-11.18.0}"
-docker_toolchain_image="${OPENCLAW_DOCKER_TOOLCHAIN_IMAGE:-docker.io/library/golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514}"
-docker_cli_source_ref="${OPENCLAW_DOCKER_CLI_SOURCE_REF:-a7dcaa6fdb6ed04aacbfdc76357fdae01605609e}"
-docker_cli_version="${OPENCLAW_DOCKER_CLI_VERSION:-29.7.2}"
-docker_compose_source_ref="${OPENCLAW_DOCKER_COMPOSE_SOURCE_REF:-870908cc8f07f5e90acdf5d34dd1b96a4fe51d16}"
-docker_compose_version="${OPENCLAW_DOCKER_COMPOSE_VERSION:-5.5.0}"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+component_file="${script_dir}/../openclaw-builder/configs/components.json"
+component_default() {
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["build_args"][sys.argv[2]])' "${component_file}" "$1"
+}
+npm_version="${OPENCLAW_NPM_VERSION:-$(component_default OPENCLAW_NPM_VERSION)}"
+docker_toolchain_image="${OPENCLAW_DOCKER_TOOLCHAIN_IMAGE:-$(component_default OPENCLAW_DOCKER_TOOLCHAIN_IMAGE)}"
+docker_cli_source_ref="${OPENCLAW_DOCKER_CLI_SOURCE_REF:-$(component_default OPENCLAW_DOCKER_CLI_SOURCE_REF)}"
+docker_cli_version="${OPENCLAW_DOCKER_CLI_VERSION:-$(component_default OPENCLAW_DOCKER_CLI_VERSION)}"
+docker_compose_source_ref="${OPENCLAW_DOCKER_COMPOSE_SOURCE_REF:-$(component_default OPENCLAW_DOCKER_COMPOSE_SOURCE_REF)}"
+docker_compose_version="${OPENCLAW_DOCKER_COMPOSE_VERSION:-$(component_default OPENCLAW_DOCKER_COMPOSE_VERSION)}"
+docker_grpc_version="${OPENCLAW_DOCKER_GRPC_VERSION:-$(component_default OPENCLAW_DOCKER_GRPC_VERSION)}"
 
 if [[ -z "${source_dir}" || ! -d "${source_dir}" ]]; then
   echo "ERROR: OpenClaw source directory not found: ${source_dir}" >&2
@@ -62,7 +68,7 @@ for source_ref in "${docker_cli_source_ref}" "${docker_compose_source_ref}"; do
   fi
 done
 
-for tool_version in "${docker_cli_version}" "${docker_compose_version}"; do
+for tool_version in "${docker_cli_version}" "${docker_compose_version}" "${docker_grpc_version}"; do
   if [[ ! "${tool_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "ERROR: Docker tool versions must be stable semver values: ${tool_version}" >&2
     exit 1
@@ -85,6 +91,7 @@ awk \
   -v docker_cli_version="${docker_cli_version}" \
   -v docker_compose_source_ref="${docker_compose_source_ref}" \
   -v docker_compose_version="${docker_compose_version}" \
+  -v docker_grpc_version="${docker_grpc_version}" \
  '
 function normalize_line(value) {
   sub(/^[[:space:]]+/, "", value)
@@ -118,6 +125,7 @@ function emit_docker_toolchain_stage() {
   print "ARG OPENCLAW_DOCKER_CLI_VERSION=\"" docker_cli_version "\""
   print "ARG OPENCLAW_DOCKER_COMPOSE_SOURCE_REF=\"" docker_compose_source_ref "\""
   print "ARG OPENCLAW_DOCKER_COMPOSE_VERSION=\"" docker_compose_version "\""
+  print "ARG OPENCLAW_DOCKER_GRPC_VERSION=\"" docker_grpc_version "\""
   print ""
   print "# Build the Docker tools with a patched Go toolchain instead of shipping stale upstream packages."
   print "FROM ${OPENCLAW_DOCKER_TOOLCHAIN_IMAGE} AS openclaw-runtime-docker-tools"
@@ -126,6 +134,7 @@ function emit_docker_toolchain_stage() {
   print "ARG OPENCLAW_DOCKER_CLI_VERSION"
   print "ARG OPENCLAW_DOCKER_COMPOSE_SOURCE_REF"
   print "ARG OPENCLAW_DOCKER_COMPOSE_VERSION"
+  print "ARG OPENCLAW_DOCKER_GRPC_VERSION"
   print "ARG TARGETOS"
   print "ARG TARGETARCH"
   print "ENV GOTOOLCHAIN=local"
@@ -162,7 +171,7 @@ function emit_docker_toolchain_stage() {
   print "    test -n \"${cli_binary}\" && \\"
   print "    rm -f /out/docker && install -m 0755 \"${cli_binary}\" /out/docker && \\"
   print "    cd /go/src/github.com/docker/compose && \\"
-  print "    go mod edit -require=golang.org/x/crypto@v0.55.0 -require=golang.org/x/mod@v0.40.0 && \\"
+  print "    go mod edit -require=golang.org/x/crypto@v0.55.0 -require=golang.org/x/mod@v0.40.0 -require=google.golang.org/grpc@v${OPENCLAW_DOCKER_GRPC_VERSION} && \\"
   print "    CGO_ENABLED=0 GOOS=\"${TARGETOS}\" GOARCH=\"${TARGETARCH}\" \\"
   print "      go build -mod=mod -trimpath -tags e2e \\"
   print "      -ldflags \"-w -X github.com/docker/compose/v5/internal.Version=v${OPENCLAW_DOCKER_COMPOSE_VERSION}\" \\"
@@ -185,8 +194,9 @@ function emit_docker_toolchain_stage() {
 }
 
 function emit_docker_toolchain_overlay(indent) {
-  print indent "COPY --from=openclaw-runtime-docker-tools /out/ /tmp/openclaw-runtime-docker-tools/"
-  print indent "RUN set -eux; \\"
+  print indent "# Read build outputs without retaining temporary binaries in a COPY layer."
+  print indent "RUN --mount=type=bind,from=openclaw-runtime-docker-tools,source=/out,target=/tmp/openclaw-runtime-docker-tools \\"
+  print indent "    set -eux; \\"
   print indent "    if [ -f /tmp/openclaw-runtime-docker-tools/enabled ]; then \\"
   print indent "      if dpkg-query -W -f=\"\\${Status}\" docker-ce-cli 2>/dev/null | grep -q \"install ok installed\" || \\"
   print indent "         dpkg-query -W -f=\"\\${Status}\" docker-compose-plugin 2>/dev/null | grep -q \"install ok installed\"; then \\"
@@ -195,8 +205,7 @@ function emit_docker_toolchain_overlay(indent) {
   print indent "      install -d -m 0755 /usr/libexec/docker/cli-plugins && \\"
   print indent "      install -m 0755 /tmp/openclaw-runtime-docker-tools/docker /usr/bin/docker && \\"
   print indent "      install -m 0755 /tmp/openclaw-runtime-docker-tools/docker-compose /usr/libexec/docker/cli-plugins/docker-compose; \\"
-  print indent "    fi && \\"
-  print indent "    rm -rf /tmp/openclaw-runtime-docker-tools"
+  print indent "    fi"
   print ""
 }
 
@@ -234,6 +243,10 @@ function emit_docker_toolchain_overlay(indent) {
     }
   }
 
+  if (in_runtime && $0 ~ /^ARG[[:space:]]+SECURITY_REFRESH=/) {
+    security_refresh_count++
+  }
+
   if (in_runtime) {
     if ($0 ~ /^ARG[[:space:]]+OPENCLAW_NPM_VERSION([=[:space:]]|$)/) {
       npm_arg_count++
@@ -253,8 +266,11 @@ function emit_docker_toolchain_overlay(indent) {
   if ($0 ~ /^FROM[[:space:]]+\$\{OPENCLAW_DOCKER_TOOLCHAIN_IMAGE\}[[:space:]]+AS[[:space:]]+openclaw-runtime-docker-tools[[:space:]]*$/) {
     docker_toolchain_stage_count++
   }
-  if ($0 ~ /^COPY[[:space:]]+--from=openclaw-runtime-docker-tools[[:space:]]+\/out\/[[:space:]]+\/tmp\/openclaw-runtime-docker-tools\/[[:space:]]*$/) {
-    docker_toolchain_copy_count++
+  if ($0 ~ /^RUN[[:space:]]+--mount=type=bind,from=openclaw-runtime-docker-tools,source=\/out,target=\/tmp\/openclaw-runtime-docker-tools[[:space:]]/) {
+    docker_toolchain_install_count++
+  }
+  if ($0 ~ /^RUN[[:space:]]+--mount=type=bind,source=\.release-factory-runtime,/) {
+    vendored_patch_count++
   }
 }
 
@@ -277,10 +293,10 @@ END {
   if (docker_toolchain_overlay_anchor_count != 1) {
     fail("expected exactly one OpenClaw runtime binary anchor")
   }
-  if (docker_toolchain_stage_count > 1 || docker_toolchain_copy_count > 1) {
+  if (docker_toolchain_stage_count > 1 || docker_toolchain_install_count > 1) {
     fail("OpenClaw Docker toolchain hardening is duplicated")
   }
-  if (docker_toolchain_stage_count != docker_toolchain_copy_count) {
+  if (docker_toolchain_stage_count != docker_toolchain_install_count) {
     fail("OpenClaw Docker toolchain hardening is only partially present")
   }
   if (from_count == 0) {
@@ -335,16 +351,51 @@ END {
       }
     }
 
-    if (in_runtime && docker_toolchain_copy_count == 0 && line ~ /^RUN[[:space:]]+ln[[:space:]]+-sf[[:space:]]+\/app\/openclaw\.mjs([[:space:]]|$)/) {
+    if (in_runtime && docker_toolchain_install_count == 0 && line ~ /^RUN[[:space:]]+ln[[:space:]]+-sf[[:space:]]+\/app\/openclaw\.mjs([[:space:]]|$)/) {
       emit_docker_toolchain_overlay("")
+    }
+    if (in_runtime && vendored_patch_count == 0 && line ~ /^RUN[[:space:]]+ln[[:space:]]+-sf[[:space:]]+\/app\/openclaw\.mjs([[:space:]]|$)/) {
+      print "RUN --mount=type=bind,source=.release-factory-runtime,target=/tmp/release-factory-runtime \\"
+      print "    node /tmp/release-factory-runtime/patch-vendored-deps.mjs"
+      print ""
+    }
+    if (in_runtime && line ~ /^RUN npm install --global npm@latest/) {
+      print "ARG OPENCLAW_NPM_VERSION=" npm_version
+      sub(/npm@latest/, "\"npm@${OPENCLAW_NPM_VERSION}\"", line)
     }
 
     print line
+    if (line ~ /^FROM[[:space:]]+base-runtime([[:space:]]+AS[[:space:]]+[A-Za-z0-9_.-]+)?[[:space:]]*$/ && security_refresh_count == 0) {
+      print "# A release refresh invalidates runtime package layers without rebuilding the compiler stages."
+      print "ARG SECURITY_REFRESH=manual"
+    }
   }
 }
 ' "${dockerfile}" > "${tmp_file}"
 
 chmod --reference="${dockerfile}" "${tmp_file}"
+
+python3 - "${source_dir}" "${script_dir}/../openclaw-builder" <<'PY'
+import os
+from pathlib import Path
+import sys
+source = Path(sys.argv[1]).resolve(strict=True)
+inputs = Path(sys.argv[2]).resolve(strict=True)
+target = source / '.release-factory-runtime'
+if target.is_symlink() or (target.exists() and not target.is_dir()):
+    raise SystemExit('invalid generated OpenClaw runtime directory')
+target.mkdir(exist_ok=True)
+for name, original in [('components.json', inputs / 'configs/components.json'),
+                       ('patch-vendored-deps.mjs', inputs / 'image/patch-vendored-deps.mjs')]:
+    destination = target / name
+    if destination.is_symlink():
+        raise SystemExit('generated runtime input cannot be a symlink')
+    temporary = target / (name + '.tmp')
+    with temporary.open('xb') as output:
+        output.write(original.read_bytes())
+    os.replace(temporary, destination)
+print(f'Prepared generated runtime inputs: {inputs} -> {target} (2 files)')
+PY
 
 if cmp -s "${tmp_file}" "${dockerfile}"; then
   echo "OpenClaw runtime hardening already satisfied for ${source_dir}"

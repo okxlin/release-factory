@@ -4,6 +4,7 @@ set -euo pipefail
 : "${DCP_INSTALL:=1}"
 : "${DCP_GLOBAL:=1}"
 : "${OPENCODE_CONFIG_DIR:=$HOME/.config/opencode}"
+: "${OPENCODE_BASELINE_DIR:=/opt/opencode}"
 
 log() {
   printf '[plugins] %s\n' "$*"
@@ -22,14 +23,15 @@ ensure_config_dir() {
 
 install_dcp() {
   [[ "${DCP_INSTALL}" == "1" ]] || return 0
+  : "${DCP_PACKAGE:=$(node -p 'require(process.argv[1]).config.dcpPackage' "${OPENCODE_BASELINE_DIR}/package.json")}"
   ensure_config_dir
   log 'installing Dynamic Context Pruning plugin'
   if [[ "${DCP_GLOBAL}" == "1" ]]; then
-    opencode plugin @tarquinen/opencode-dcp@latest --global || true
+    opencode plugin "${DCP_PACKAGE}" --global
   else
-    opencode plugin @tarquinen/opencode-dcp@latest || true
+    opencode plugin "${DCP_PACKAGE}"
   fi
-  python3 /app/scripts/update_opencode_config.py plugin @tarquinen/opencode-dcp@latest
+  python3 /app/scripts/update_opencode_config.py plugin "${DCP_PACKAGE}"
   if [[ -n "${DCP_CONFIG_B64:-}" ]]; then
     log 'writing DCP config from DCP_CONFIG_B64'
     printf '%s' "$DCP_CONFIG_B64" | base64 -d > "$OPENCODE_CONFIG_DIR/dcp.jsonc"

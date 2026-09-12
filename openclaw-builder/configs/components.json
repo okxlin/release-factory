@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "max_build_age_days": 7,
+  "build_args": {
+    "OPENCLAW_NODE_BOOKWORM_IMAGE": "docker.io/library/node:24-bookworm",
+    "OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE": "docker.io/library/node:24-bookworm-slim",
+    "OPENCLAW_NPM_VERSION": "11.18.0",
+    "OPENCLAW_DOCKER_TOOLCHAIN_IMAGE": "docker.io/library/golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514",
+    "OPENCLAW_DOCKER_CLI_SOURCE_REF": "a7dcaa6fdb6ed04aacbfdc76357fdae01605609e",
+    "OPENCLAW_DOCKER_CLI_VERSION": "29.7.2",
+    "OPENCLAW_DOCKER_COMPOSE_SOURCE_REF": "870908cc8f07f5e90acdf5d34dd1b96a4fe51d16",
+    "OPENCLAW_DOCKER_COMPOSE_VERSION": "5.5.0",
+    "OPENCLAW_DOCKER_GRPC_VERSION": "1.83.2"
+  },
+  "adm_zip": {
+    "version": "0.6.0",
+    "url": "https://registry.npmjs.org/adm-zip/-/adm-zip-0.6.0.tgz",
+    "sha512": "5e57abc8c85bba4b1d2ada1f9d667d4a4fb80944db9ace0c6ff114df6499c13a00c99e51815a2cfe48bc9fecabd0b5873862ae6a46d74eeb983472d08e175d82"
+  },
+  "test_daemon_image": "docker.io/library/docker:29-dind@sha256:5efed980cba3fc126cf54e21a5a6ff8849d05b6e0623d6e7612f48e9cd6cd17e",
+  "test_sandbox_image": "docker.io/library/busybox:1.37@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0"
+}

@@ -372,10 +372,11 @@ else
     status=1
 fi
 
-paseo_password="${PASEO_PASSWORD:-${PASSWORD:-change-me}}"
-if [[ -z "${paseo_password//[[:space:]]/}" ]]; then
-    paseo_password="change-me"
+if ! configure_workstation_passwords; then
+    warn "network credentials are not configured"
+    status=1
 fi
+paseo_password="${PASEO_PASSWORD:-}"
 if paseo_password_is_websocket_token "${paseo_password}"; then
     check "Paseo password WebSocket token format: valid"
     if paseo_password_has_recommended_length "${paseo_password}"; then

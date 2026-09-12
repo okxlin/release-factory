@@ -10,7 +10,8 @@
 
 - `configs/architectures.sh`：维护当前允许发布的平台
 - `scripts/resolve-build-params.sh`：把 workflow 输入收敛成最终镜像 tag、base tag 和 build args
-- `image/`：独立镜像构建上下文
+- `configs/components.json`：两种浏览器共用的来源、维护通道和安全补丁版本
+- `image/`：运行文件；Docker 构建上下文为仓库根目录
   - `Dockerfile`
   - `.env.example`
   - `scripts/`
@@ -20,12 +21,28 @@
 
 - 当前只发布 `linux/amd64`
 - 默认镜像仓库名：`ghcr.io/<owner>/gemini-skill-browser`
-- workflow 只保留手动触发
-- 构建时手动输入浏览器底座 tag
-- 发布镜像 tag 默认跟随浏览器底座 tag 并追加 `-kasm`；仅在显式要求时才附带 `latest-kasm` 别名
+- workflow 支持手动构建、每周刷新和按路径触发的 PR 验证
+- 底座默认跟随 `components.json` 的 Kasm 周更新通道；手动输入仍可覆盖 tag
+- 发布 tag 为 `<底座 tag>-kasm`；周更新维护 `latest-kasm`，手动构建可选择是否更新该别名
+- 解析器先固定底座和 Node 24 镜像 digest、应用提交；两种浏览器复用受控 npm 锁文件
+- Kasm 桌面和 daemon 以 `kasm-user` 运行；发布前验证桌面、CDP、截图和 Cookie 持久化
+
+## 本地构建
+
+在仓库根目录执行：
+
+```bash
+python3 gemini-skill-browser-builder/scripts/resolve-browser-inputs.py --variant kasm --output /tmp/gemini-kasm-inputs.json
+docker build -f gemini-skill-browser-builder/image/Dockerfile \
+  --build-arg BASE_IMAGE="$(jq -r .base_image /tmp/gemini-kasm-inputs.json)" \
+  --build-arg NODE_IMAGE="$(jq -r .node_image /tmp/gemini-kasm-inputs.json)" \
+  --build-arg GEMINI_SKILL_REF="$(jq -r .gemini_skill_ref /tmp/gemini-kasm-inputs.json)" \
+  -t gemini-kasm:local .
+python3 scripts/smoke-gemini-browser.py gemini-kasm:local kasm
+```
 
 ## PR reviewer 该看什么
 
-- `build-gemini-skill-browser.yml`：是否只保留手动触发、tag 规则是否干净
+- `build-gemini-skill-browser.yml` 与 `release-gemini-browser.yml`：固定输入、PR 门禁、发布摘要绑定
 - `image/Dockerfile`：底座是否固定为 `kasmweb/edge`
 - `image/scripts/bootstrap.sh` + `image/supervisor/gemini-skill.conf`：是否确保 Kasm 与 daemon 共存启动

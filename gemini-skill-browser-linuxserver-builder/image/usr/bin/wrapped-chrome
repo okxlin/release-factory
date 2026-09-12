@@ -2,11 +2,13 @@
 
 BIN=/usr/bin/google-chrome
 
-if pgrep chrome > /dev/null; then
-  rm -f "$HOME/.config/google-chrome/Singleton"*
+wayland_args=()
+if [[ "${PIXELFLUX_WAYLAND:-false}" == "true" ]]; then
+  wayland_args=(--ozone-platform=wayland)
 fi
 
-${BIN} \
+exec "${BIN}" \
+  "${wayland_args[@]}" \
   --no-first-run \
   --no-sandbox \
   --password-store=basic \
@@ -16,4 +18,4 @@ ${BIN} \
   --remote-debugging-address=0.0.0.0 \
   --remote-debugging-port="${BROWSER_DEBUG_PORT:-9222}" \
   --user-data-dir="${BROWSER_USER_DATA_DIR:-$HOME/.config/google-chrome}" \
-  "$@" > /dev/null 2>&1
+  "$@"

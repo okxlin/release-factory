@@ -131,7 +131,8 @@ class ProxyCoreResolverTests(unittest.TestCase):
             [item["name"] for item in policy["github_releases"]],
             ["mihomo", "sing-box", "Xray"],
         )
-        self.assertEqual(len(policy["go_modules"]), 4)
+        self.assertEqual(len(policy["go_modules"]), 5)
+        self.assertIn({"module": "golang.org/x/mod", "version_arg": "PROXY_X_MOD_VERSION"}, policy["go_modules"])
 
 
 if __name__ == "__main__":

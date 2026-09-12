@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "source_repository": "WJZ-P/gemini-skill",
+  "source_ref": "cde1835067660ad6748393127e56af4e683bfbe7",
+  "node_image": "docker.io/library/node:24-bookworm-slim",
+  "variants": {
+    "kasm": {
+      "repository": "docker.io/kasmweb/edge",
+      "tag": "1.19.0-rolling-weekly"
+    },
+    "linuxserver": {
+      "repository": "docker.io/linuxserver/chrome",
+      "release_repository": "linuxserver/docker-chrome",
+      "nginx": {
+        "minimum_version": "1.30.4",
+        "url": "https://nginx.org/packages/debian/pool/nginx/n/nginx/nginx_1.30.4-1~trixie_amd64.deb",
+        "sha256": "f675ec625809a495bb9e6c6319599305cd6a99f147a9009a93a839e508ccfc26",
+        "source_url": "https://nginx.org/download/nginx-1.30.4.tar.gz",
+        "source_sha256": "4261dc90e9e47c1c4041276e9aaa3d48ebe2e664f728e14fa95ae6c67d57a08b",
+        "fancyindex_version": "0.6.0",
+        "fancyindex_url": "https://codeload.github.com/aperezdc/ngx-fancyindex/tar.gz/70311f239ec1e88ff79c669d126d08532ddb8554",
+        "fancyindex_sha256": "25e820923e7cbe6a020b796137f77fd73391d4681d259a5a93a8feb01c5db89e"
+      }
+    }
+  }
+}

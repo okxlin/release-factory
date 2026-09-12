@@ -79,6 +79,20 @@ class PolicyTests(unittest.TestCase):
         data["Results"][0]["Type"] = "node-pkg"
         self.assertEqual(self.evaluate(data).returncode, 1)
 
+    def test_protected_os_services_do_not_match_development_tools(self):
+        self.policy["protected_os_packages"] = ["nginx", "google-chrome-stable"]
+        data = report(fixed="", PkgName="nginx")
+        self.assertEqual(self.evaluate(data).returncode, 0)
+        data["Results"][0].update(Class="os-pkgs", Type="debian", Target="Debian 13")
+        self.assertEqual(self.evaluate(data).returncode, 1)
+        data["Results"][0]["Vulnerabilities"][0]["PkgName"] = "other-tool"
+        self.assertEqual(self.evaluate(data).returncode, 0)
+
+    def test_protected_os_packages_require_exact_names(self):
+        for package in ("", "nginx*", " ../nginx"):
+            self.policy["protected_os_packages"] = [package]
+            self.assertEqual(self.evaluate(report()).returncode, 2)
+
     def test_exact_exception_is_visible(self):
         self.policy["exceptions"] = [self.exception]
         result = self.evaluate(report("CRITICAL"))
@@ -124,7 +138,7 @@ class PolicyTests(unittest.TestCase):
         data["Results"][0]["Type"] = "node-pkg"
         self.assertEqual(self.evaluate(data).returncode, 2)
 
-    def run_gate(self, data, arguments=(), scanner_status=0):
+    def run_gate(self, data, arguments=(), scanner_status=0, filesystem=False):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
             (base / "input.json").write_text(json.dumps(data))
@@ -138,8 +152,11 @@ class PolicyTests(unittest.TestCase):
                 f"sys.exit({scanner_status})\n"
             )
             scanner.chmod(0o700)
+            target = base / "userland"
+            target.mkdir()
+            selector = ["--filesystem", str(target)] if filesystem else ["--image", "fixture:test"]
             result = subprocess.run(
-                ["bash", str(ROOT / "scripts/trivy-image-gate.sh"), "--image", "fixture:test",
+                ["bash", str(ROOT / "scripts/trivy-image-gate.sh"), *selector,
                  "--output", str(base / "scan.json"), *arguments],
                 env={**os.environ, "PATH": f"{base}:{os.environ['PATH']}", "TRIVY_SEVERITY": "LOW"},
                 capture_output=True, text=True, check=False,
@@ -164,6 +181,15 @@ class PolicyTests(unittest.TestCase):
     def test_scanner_failure_cannot_pass_the_gate(self):
         result, _ = self.run_gate(report(), ["--policy", str(POLICY), "--profile", "workstation"], 7)
         self.assertEqual(result.returncode, 7, result.stderr)
+
+    def test_userland_scan_uses_the_same_policy(self):
+        for path, expected in (("usr/local/bin/tool", 0), ("opt/dsh/node_modules/a/package.json", 1)):
+            with self.subTest(path=path):
+                result, argv = self.run_gate(report(path=path), ["--policy", str(POLICY), "--profile", "workstation"], filesystem=True)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                self.assertEqual(argv[0], "fs")
+                self.assertTrue(argv[-1].endswith("/userland"))
+                self.assertIn("--ignore-unfixed=false", argv)
 
 
 if __name__ == "__main__":

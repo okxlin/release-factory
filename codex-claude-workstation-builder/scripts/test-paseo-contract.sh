@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Credential cases intentionally isolate environment changes in subshells.
+# shellcheck disable=SC2030,SC2031
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,6 +47,28 @@ require_absent_file "${IMAGE_DIR}/config/supervisord/conf.d/paseo-nginx.conf"
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=../image/scripts/paseo-password.sh
 source "${IMAGE_DIR}/scripts/paseo-password.sh"
+
+# Reject missing/example network credentials before the entrypoint starts services.
+for value in '' '   ' 'change-me'; do
+  if (export PASSWORD="${value}"; unset PASEO_PASSWORD; configure_workstation_passwords) 2>/dev/null; then
+    fail 'missing or example code-server password was accepted'
+  fi
+done
+(
+  export PASSWORD='legacy-password-with-@-symbols'
+  unset PASEO_PASSWORD
+  configure_workstation_passwords
+  [ "${PASEO_PASSWORD}" = "${PASSWORD}" ] || fail 'legacy password fallback changed'
+  export PASEO_PASSWORD='   '
+  configure_workstation_passwords
+  [ "${PASEO_PASSWORD}" = "${PASSWORD}" ] || fail 'blank Paseo password must inherit the valid legacy password'
+  export PASEO_PASSWORD='separate-safe-password-123'
+  configure_workstation_passwords
+  [ "${PASEO_PASSWORD}" = 'separate-safe-password-123' ] || fail 'explicit Paseo password changed'
+)
+if (export PASSWORD='valid-workstation-password' PASEO_PASSWORD='change-me'; configure_workstation_passwords) 2>/dev/null; then
+  fail 'explicit example Paseo password was accepted'
+fi
 
 for value in \
   'safe-Password_123.~' \
@@ -133,7 +157,7 @@ require_text "${IMAGE_DIR}/config/supervisord/conf.d/paseo.conf" '--hostnames pa
 
 # This is an exact source-code contract, not an expression to expand here.
 # shellcheck disable=SC2016
-require_text "${IMAGE_DIR}/scripts/entrypoint.sh" 'PASEO_PASSWORD="${PASEO_PASSWORD:-${PASSWORD:-change-me}}"'
+require_text "${IMAGE_DIR}/scripts/entrypoint.sh" 'configure_workstation_passwords'
 require_text "${IMAGE_DIR}/scripts/entrypoint.sh" 'PASEO_VOICE_MODE_ENABLED=false'
 require_text "${IMAGE_DIR}/scripts/entrypoint.sh" 'PASEO_DICTATION_ENABLED=false'
 require_text "${IMAGE_DIR}/scripts/entrypoint.sh" 'PASEO_LOCAL_SPEECH_AUTO_DOWNLOAD=false'

@@ -4,206 +4,160 @@ on:
   schedule:
     - cron: '0 2 * * *'
   workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: Rebuild even when source, components and security refresh are unchanged
+        default: false
+        type: boolean
+  pull_request:
+    paths:
+      - 'openclaw-builder/**'
+      - 'scripts/*openclaw*'
+      - 'scripts/trivy-image-gate.sh'
+      - 'scripts/evaluate-trivy-policy.py'
+      - 'scripts/test-evaluate-trivy-policy.py'
+      - 'scripts/publish-tested-image.py'
+      - 'scripts/test-publish-tested-image.py'
+      - '.github/workflows/openclaw-upstream-docker.yml'
+
+permissions:
+  contents: read
 
 concurrency:
-  group: build-and-push-openclaw-sandbox-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  IMAGE_REPO: openclaw-sandbox
-  TEST_IMAGE: openclaw-sandbox:ci-test
-  OPENCLAW_NODE_BOOKWORM_IMAGE: docker.io/library/node:24-bookworm@sha256:5711a0d445a1af54af9589066c646df387d1831a608226f4cd694fc59e745059
-  OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE: docker.io/library/node:24-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
-  OPENCLAW_NODE_BOOKWORM_SLIM_DIGEST: sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
-  OPENCLAW_NPM_VERSION: "11.18.0"
-  # Docker's Debian packages can lag a Go security point release. Build the
-  # sandbox CLI and Compose plugin with a pinned patched toolchain and source.
-  OPENCLAW_DOCKER_TOOLCHAIN_IMAGE: docker.io/library/golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514
-  OPENCLAW_DOCKER_CLI_SOURCE_REF: a7dcaa6fdb6ed04aacbfdc76357fdae01605609e
-  OPENCLAW_DOCKER_CLI_VERSION: "29.7.2"
-  OPENCLAW_DOCKER_COMPOSE_SOURCE_REF: 870908cc8f07f5e90acdf5d34dd1b96a4fe51d16
-  OPENCLAW_DOCKER_COMPOSE_VERSION: "5.5.0"
+  group: build-openclaw-sandbox-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  check-and-build:
-    runs-on: ubuntu-latest
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      skip: ${{ steps.inputs.outputs.skip }}
+      upstream_sha: ${{ steps.inputs.outputs.upstream_sha }}
+      image_tag: ${{ steps.inputs.outputs.image_tag }}
+      build_args: ${{ steps.inputs.outputs.build_args }}
+      recipe_digest: ${{ steps.inputs.outputs.recipe_digest }}
+      created: ${{ steps.inputs.outputs.created }}
+      repository: ${{ steps.inputs.outputs.repository }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v4
+      - name: Validate registry freshness, policy and publication contracts
+        run: |
+          python3 scripts/test-resolve-openclaw-inputs.py
+          bash scripts/test-apply-openclaw-runtime-hardening.sh
+          python3 scripts/test-evaluate-trivy-policy.py
+          python3 scripts/test-publish-tested-image.py
+      - name: Resolve immutable sources and security refresh
+        id: inputs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          FORCE_REBUILD: ${{ github.event_name == 'pull_request' || inputs.force_rebuild }}
+        run: |
+          set -euo pipefail
+          owner="${OWNER,,}"
+          [[ "$owner" =~ ^[a-z0-9][a-z0-9-]*$ ]]
+          repository="ghcr.io/$owner/openclaw-sandbox"
+          args=()
+          if [[ "$FORCE_REBUILD" == true ]]; then args+=(--force); fi
+          python3 scripts/resolve-openclaw-inputs.py --repository "$repository" "${args[@]}" \
+            --output "$RUNNER_TEMP/openclaw-inputs.json" --github-output "$GITHUB_OUTPUT"
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+      - name: Save resolved build inputs
+        uses: actions/upload-artifact@v7
+        with:
+          name: openclaw-inputs-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/openclaw-inputs.json
+          if-no-files-found: error
+          retention-days: 7
+
+  verify:
+    needs: prepare
+    if: needs.prepare.outputs.skip == 'false'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     permissions:
       contents: read
       packages: write
-
     steps:
-      - name: Normalize repository owner
-        id: owner
-        run: |
-          LOWER_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          echo "lower_owner=$LOWER_OWNER" >> "$GITHUB_OUTPUT"
-
-      - name: Get latest OpenClaw release tag
-        id: get_release
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          RELEASE_JSON="$(mktemp)"
-          trap 'rm -f "$RELEASE_JSON"' EXIT
-
-          curl --fail --show-error --silent --location \
-            --retry 4 \
-            --retry-all-errors \
-            --retry-delay 2 \
-            --retry-max-time 60 \
-            --connect-timeout 10 \
-            --max-time 30 \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            -o "$RELEASE_JSON" \
-            https://api.github.com/repos/openclaw/openclaw/releases/latest
-
-          if ! LATEST_TAG="$(jq -er '.tag_name | select(type == "string" and length > 0)' "$RELEASE_JSON")"; then
-            echo "::error::OpenClaw latest release response did not contain a valid tag_name"
-            exit 1
-          fi
-
-          if [[ ! "$LATEST_TAG" =~ ^v?[0-9][A-Za-z0-9._-]{0,127}$ ]]; then
-            echo "::error::OpenClaw release tag failed validation"
-            exit 1
-          fi
-
-          echo "tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Check if image already exists in GHCR
-        id: check_exists
-        run: |
-          LOWER_OWNER="${{ steps.owner.outputs.lower_owner }}"
-          TARGET_TAG="${{ steps.get_release.outputs.tag }}-sandbox"
-          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -u "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
-            "https://ghcr.io/v2/${LOWER_OWNER}/${{ env.IMAGE_REPO }}/manifests/$TARGET_TAG")
-          if [ "$STATUS_CODE" -eq 200 ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          elif [ "$STATUS_CODE" -eq 404 ]; then
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "Unexpected GHCR response code: $STATUS_CODE. Continuing with build." >&2
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Checkout release-factory repository
-        if: steps.check_exists.outputs.skip == 'false'
-        uses: actions/checkout@v7
-
-      - name: Validate OpenClaw runtime hardening transformer
-        if: steps.check_exists.outputs.skip == 'false'
-        run: bash scripts/test-apply-openclaw-runtime-hardening.sh
-
-      - name: Checkout OpenClaw Official Repository
-        if: steps.check_exists.outputs.skip == 'false'
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Checkout the resolved upstream commit
         uses: actions/checkout@v7
         with:
           repository: openclaw/openclaw
-          ref: ${{ steps.get_release.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.upstream_sha }}
           path: openclaw-src
-
-      - name: Apply OpenClaw runtime hardening
-        if: steps.check_exists.outputs.skip == 'false'
+          persist-credentials: false
+      - name: Apply reviewed runtime hardening
+        env:
+          UPSTREAM_SHA: ${{ needs.prepare.outputs.upstream_sha }}
         run: |
-          set -euo pipefail
-          chmod +x scripts/apply-openclaw-runtime-hardening.sh
-          scripts/apply-openclaw-runtime-hardening.sh openclaw-src
-
-      - name: Set up QEMU
-        if: steps.check_exists.outputs.skip == 'false'
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        if: steps.check_exists.outputs.skip == 'false'
-        uses: docker/setup-buildx-action@v4
-
-      - name: Extract metadata for Docker
-        if: steps.check_exists.outputs.skip == 'false'
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ env.IMAGE_REPO }}
-          tags: |
-            type=raw,value=latest
-            type=raw,value=${{ steps.get_release.outputs.tag }}-sandbox
-
-      - name: Build local image
-        if: steps.check_exists.outputs.skip == 'false'
+          test "$(git -C openclaw-src rev-parse HEAD)" = "$UPSTREAM_SHA"
+          bash scripts/apply-openclaw-runtime-hardening.sh openclaw-src
+      - uses: docker/setup-buildx-action@v4
+      - name: Build the native candidate once
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: ./openclaw-src
-          build-args: |
-            OPENCLAW_INSTALL_DOCKER_CLI=1
-            OPENCLAW_IMAGE_APT_PACKAGES=libgnutls30
-            OPENCLAW_PREFER_PNPM=1
-            OPENCLAW_NODE_BOOKWORM_IMAGE=${{ env.OPENCLAW_NODE_BOOKWORM_IMAGE }}
-            OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE=${{ env.OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE }}
-            OPENCLAW_NODE_BOOKWORM_SLIM_DIGEST=${{ env.OPENCLAW_NODE_BOOKWORM_SLIM_DIGEST }}
-            OPENCLAW_NPM_VERSION=${{ env.OPENCLAW_NPM_VERSION }}
-            OPENCLAW_DOCKER_TOOLCHAIN_IMAGE=${{ env.OPENCLAW_DOCKER_TOOLCHAIN_IMAGE }}
-            OPENCLAW_DOCKER_CLI_SOURCE_REF=${{ env.OPENCLAW_DOCKER_CLI_SOURCE_REF }}
-            OPENCLAW_DOCKER_CLI_VERSION=${{ env.OPENCLAW_DOCKER_CLI_VERSION }}
-            OPENCLAW_DOCKER_COMPOSE_SOURCE_REF=${{ env.OPENCLAW_DOCKER_COMPOSE_SOURCE_REF }}
-            OPENCLAW_DOCKER_COMPOSE_VERSION=${{ env.OPENCLAW_DOCKER_COMPOSE_VERSION }}
+          platforms: linux/amd64
+          build-args: ${{ needs.prepare.outputs.build_args }}
           load: true
-          tags: ${{ env.TEST_IMAGE }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Verify bundled Docker tools
-        if: steps.check_exists.outputs.skip == 'false'
-        run: |
-          set -euo pipefail
-          docker run --rm --entrypoint /usr/bin/docker "${TEST_IMAGE}" --version
-          docker run --rm --entrypoint /usr/libexec/docker/cli-plugins/docker-compose "${TEST_IMAGE}" version --short
-
-      - name: Run Trivy vulnerability gate
-        if: steps.check_exists.outputs.skip == 'false'
+          provenance: false
+          tags: release-factory-test:openclaw-amd64
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            io.release-factory.upstream.revision=${{ needs.prepare.outputs.upstream_sha }}
+            io.release-factory.recipe=${{ needs.prepare.outputs.recipe_digest }}
+            io.release-factory.build.created=${{ needs.prepare.outputs.created }}
+          cache-from: type=gha,scope=openclaw-amd64
+          cache-to: type=gha,mode=min,scope=openclaw-amd64
+      - name: Verify gateway authentication and isolated sandbox lifecycle
         env:
-          TRIVY_MAX_FIXABLE_CRITICAL: "0"
-          TRIVY_MAX_FIXABLE_HIGH: "40"
+          IMAGE: ${{ steps.build.outputs.imageid }}
+        run: python3 scripts/smoke-openclaw.py "$IMAGE"
+      - name: Scan the tested runtime
+        env:
+          IMAGE: ${{ steps.build.outputs.imageid }}
         run: |
-          set -euo pipefail
-          chmod +x scripts/trivy-image-gate.sh
-          scripts/trivy-image-gate.sh \
-            --image "${TEST_IMAGE}" \
-            --output "${RUNNER_TEMP}/openclaw-sandbox.trivy.json" \
-            --max-fixable-critical "${TRIVY_MAX_FIXABLE_CRITICAL}" \
-            --max-fixable-high "${TRIVY_MAX_FIXABLE_HIGH}"
-
-      - name: Log in to GitHub Container Registry
-        if: steps.check_exists.outputs.skip == 'false'
+          bash scripts/trivy-image-gate.sh --image "$IMAGE" \
+            --policy openclaw-builder/configs/trivy-policy.json --profile sandbox \
+            --output "$RUNNER_TEMP/openclaw.trivy.json"
+      - name: Save security evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: openclaw-scan-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/openclaw.trivy.json
+          retention-days: 7
+      - name: Log in for release publication
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Docker image
-        if: steps.check_exists.outputs.skip == 'false'
-        uses: docker/build-push-action@v7
-        with:
-          context: ./openclaw-src
-          build-args: |
-            OPENCLAW_INSTALL_DOCKER_CLI=1
-            OPENCLAW_IMAGE_APT_PACKAGES=libgnutls30
-            OPENCLAW_PREFER_PNPM=1
-            OPENCLAW_NODE_BOOKWORM_IMAGE=${{ env.OPENCLAW_NODE_BOOKWORM_IMAGE }}
-            OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE=${{ env.OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE }}
-            OPENCLAW_NODE_BOOKWORM_SLIM_DIGEST=${{ env.OPENCLAW_NODE_BOOKWORM_SLIM_DIGEST }}
-            OPENCLAW_NPM_VERSION=${{ env.OPENCLAW_NPM_VERSION }}
-            OPENCLAW_DOCKER_TOOLCHAIN_IMAGE=${{ env.OPENCLAW_DOCKER_TOOLCHAIN_IMAGE }}
-            OPENCLAW_DOCKER_CLI_SOURCE_REF=${{ env.OPENCLAW_DOCKER_CLI_SOURCE_REF }}
-            OPENCLAW_DOCKER_CLI_VERSION=${{ env.OPENCLAW_DOCKER_CLI_VERSION }}
-            OPENCLAW_DOCKER_COMPOSE_SOURCE_REF=${{ env.OPENCLAW_DOCKER_COMPOSE_SOURCE_REF }}
-            OPENCLAW_DOCKER_COMPOSE_VERSION=${{ env.OPENCLAW_DOCKER_COMPOSE_VERSION }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Publish the verified image without rebuilding
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          IMAGE: ${{ steps.build.outputs.imageid }}
+          REPOSITORY: ${{ needs.prepare.outputs.repository }}
+          IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
+        run: |
+          python3 scripts/publish-tested-image.py stage --image "$IMAGE" --image-id "$IMAGE" \
+            --variant openclaw --platform linux/amd64 --repository "$REPOSITORY" \
+            --revision "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --receipt "$RUNNER_TEMP/tested-image/receipt.json"
+          python3 scripts/publish-tested-image.py publish --directory "$RUNNER_TEMP/tested-image" \
+            --variant openclaw --repository "$REPOSITORY" --platforms linux/amd64 \
+            --revision "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --image-tag "$IMAGE_TAG" --latest-tag latest

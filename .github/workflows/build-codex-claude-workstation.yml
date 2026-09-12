@@ -4,307 +4,45 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Published image tag; leave empty to use UTC date tag YYYYMMDD"
-        required: false
+        description: "Published image tag; leave empty for the default release tag"
         default: ""
+        type: string
       platforms:
         description: "Comma-separated target platforms"
-        required: true
-        default: "linux/amd64,linux/arm64"
+        default: linux/amd64,linux/arm64
+        type: string
       push_latest:
-        description: "Also publish latest tag"
-        required: true
+        description: "Also publish latest"
         default: true
         type: boolean
   schedule:
-    # Weekly refresh: Sunday 03:17 UTC. Keeps AI tooling fresh without daily churn.
     - cron: "17 3 * * 0"
+  pull_request:
+    paths:
+      - 'codex-claude-workstation-builder/**'
+      - '.github/workflows/build-codex-claude-workstation.yml'
+      - '.github/workflows/release-workstations.yml'
+      - 'scripts/smoke-codex-workstation.py'
+      - 'scripts/trivy-image-gate.sh'
+      - 'scripts/evaluate-trivy-policy.py'
+      - 'scripts/test-evaluate-trivy-policy.py'
+      - 'scripts/publish-tested-image.py'
+      - 'scripts/test-publish-tested-image.py'
+
+permissions:
+  contents: read
+  packages: write
 
 concurrency:
-  group: build-codex-claude-workstation-${{ github.ref || github.run_id }}
-  cancel-in-progress: true
-
-env:
-  IMAGE_REPO: codex-claude-workstation
-  TEST_IMAGE: codex-claude-workstation:ci-test
+  group: build-codex-workstation-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - name: Normalize repository owner
-        id: owner
-        env:
-          REPOSITORY_OWNER: ${{ github.repository_owner }}
-        run: |
-          set -euo pipefail
-          lower_owner="$(printf '%s' "${REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          if [[ ! "${lower_owner}" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
-            echo "ERROR: Invalid repository owner: ${REPOSITORY_OWNER}" >&2
-            exit 1
-          fi
-          echo "lower_owner=${lower_owner}" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Run proxy core resolver regression tests
-        run: |
-          set -euo pipefail
-          python3 codex-claude-workstation-builder/scripts/test-resolve-proxy-core-versions.py
-
-      - name: Resolve latest proxy core build inputs
-        id: proxy
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          python3 codex-claude-workstation-builder/scripts/resolve-proxy-core-versions.py \
-            --github-output "$GITHUB_OUTPUT" \
-            --summary "$GITHUB_STEP_SUMMARY"
-
-      - name: Resolve release policy
-        id: release
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
-          INPUT_PUSH_LATEST: ${{ inputs.push_latest }}
-        run: |
-          set -euo pipefail
-          date_tag="$(date -u +%Y%m%d)"
-
-          if [ "${EVENT_NAME}" = "schedule" ]; then
-            image_tag="${date_tag}"
-            push_latest="true"
-          else
-            image_tag="${INPUT_IMAGE_TAG:-${date_tag}}"
-            image_tag="${image_tag#refs/tags/}"
-            image_tag="${image_tag#v}"
-            push_latest="${INPUT_PUSH_LATEST:-true}"
-          fi
-
-          if [[ ! "${image_tag}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-            echo "ERROR: Invalid image tag: ${image_tag}" >&2
-            exit 1
-          fi
-
-          case "${push_latest}" in
-            true|false) ;;
-            *)
-              echo "ERROR: push_latest must be true or false, got: ${push_latest}" >&2
-              exit 1
-              ;;
-          esac
-
-          {
-            echo "date_tag=${date_tag}"
-            echo "image_tag=${image_tag}"
-            echo "push_latest=${push_latest}"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Resolve build parameters
-        id: params
-        env:
-          INPUT_PLATFORMS: ${{ inputs.platforms || 'linux/amd64,linux/arm64' }}
-          RELEASE_IMAGE_TAG: ${{ steps.release.outputs.image_tag }}
-          RELEASE_PUSH_LATEST: ${{ steps.release.outputs.push_latest }}
-        run: |
-          chmod +x codex-claude-workstation-builder/scripts/*.sh
-          bash codex-claude-workstation-builder/scripts/resolve-build-params.sh \
-            --image-repo "${IMAGE_REPO}" \
-            --platforms "${INPUT_PLATFORMS}" \
-            --image-tag "${RELEASE_IMAGE_TAG}" \
-            --push-latest "${RELEASE_PUSH_LATEST}" \
-            --latest-tag "latest" \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Validate Paseo supply-chain and runtime contract
-        run: |
-          set -euo pipefail
-          bash codex-claude-workstation-builder/scripts/test-paseo-contract.sh
-
-      - name: Validate proxy core source-build contract
-        run: |
-          set -euo pipefail
-          bash codex-claude-workstation-builder/scripts/test-proxy-core-contract.sh
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}
-          tags: ${{ steps.params.outputs.tags }}
-          labels: |
-            org.opencontainers.image.title=Codex Claude Workstation
-            org.opencontainers.image.description=Browser-accessible AI workstation with Codex CLI, Claude Code, code-server, and a hardened Paseo mobile web endpoint.
-            org.opencontainers.image.vendor=${{ github.repository_owner }}
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-
-      - name: Build local image
-        uses: docker/build-push-action@v7
-        with:
-          context: ./codex-claude-workstation-builder/image
-          file: ./codex-claude-workstation-builder/image/Dockerfile
-          platforms: linux/amd64
-          load: true
-          build-args: |
-            ${{ steps.proxy.outputs.build_args }}
-          tags: ${{ env.TEST_IMAGE }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=codex-claude-workstation
-          cache-to: type=gha,mode=min,scope=codex-claude-workstation
-
-      - name: Free build cache before smoke tests
-        run: |
-          set -euo pipefail
-          docker system df || true
-          df -h / /tmp || true
-          docker buildx prune --all --force || true
-          docker system df || true
-          df -h / /tmp || true
-
-      - name: Run container smoke tests
-        env:
-          CI_CONTAINER: codex-workstation-ci-${{ github.run_id }}
-          RUN_ID: ${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          workspace_dir="$(mktemp -d "/tmp/codex-workstation-ci-${RUN_ID}-workspace.XXXXXX")"
-          home_dir="$(mktemp -d "/tmp/codex-workstation-ci-${RUN_ID}-home.XXXXXX")"
-          {
-            echo "CI_CONTAINER=${CI_CONTAINER}"
-            echo "CI_WORKSPACE_DIR=${workspace_dir}"
-            echo "CI_HOME_DIR=${home_dir}"
-          } >> "$GITHUB_ENV"
-
-          docker run -d \
-            --name "${CI_CONTAINER}" \
-            --hostname workstation \
-            --security-opt seccomp=unconfined \
-            --security-opt apparmor=unconfined \
-            -e PASSWORD=ci-password \
-            -e ROOT_PASSWORD=ci-root-password \
-            -e FIX_WORKSPACE_OWNERSHIP_RECURSIVE=true \
-            -e CODEX_SANDBOX_STRICT=false \
-            -v "${workspace_dir}:/workspace" \
-            -v "${home_dir}:/home/dev" \
-            "${TEST_IMAGE}" || {
-              docker system df || true
-              df -h / /tmp || true
-              docker image inspect "${TEST_IMAGE}" || true
-              exit 1
-            }
-
-          healthy="false"
-          for _ in $(seq 1 30); do
-            if docker exec "${CI_CONTAINER}" healthcheck.sh >/tmp/codex-healthcheck.log 2>&1; then
-              healthy="true"
-              break
-            fi
-            sleep 2
-          done
-
-          if [ "${healthy}" != "true" ]; then
-            cat /tmp/codex-healthcheck.log || true
-            docker logs "${CI_CONTAINER}" || true
-            exit 1
-          fi
-
-          docker exec "${CI_CONTAINER}" doctor.sh
-          docker exec "${CI_CONTAINER}" smoke-test.sh
-
-      - name: Clean smoke test resources
-        if: always()
-        run: |
-          set -euo pipefail
-
-          remove_temp_dir() {
-            local dir="$1"
-            if [[ ! -d "${dir}" ]]; then
-              return 0
-            fi
-
-            sudo chown -R "$(id -u):$(id -g)" "${dir}" 2>/dev/null || true
-            rm -rf "${dir}" || sudo rm -rf "${dir}"
-          }
-
-          docker rm -f "${CI_CONTAINER:-codex-workstation-ci-${{ github.run_id }}}" >/dev/null 2>&1 || true
-          for dir in "${CI_WORKSPACE_DIR:-}" "${CI_HOME_DIR:-}"; do
-            case "${dir}" in
-              /tmp/codex-workstation-ci-*-workspace.*|/tmp/codex-workstation-ci-*-home.*)
-                remove_temp_dir "${dir}"
-                ;;
-              "")
-                ;;
-              *)
-                echo "WARN: refusing to remove unexpected temp dir: ${dir}" >&2
-                ;;
-            esac
-          done
-
-      - name: Run Trivy vulnerability gate
-        env:
-          TRIVY_MAX_FIXABLE_CRITICAL: "0"
-          TRIVY_MAX_FIXABLE_HIGH: "150"
-        run: |
-          set -euo pipefail
-          chmod +x scripts/trivy-image-gate.sh
-          scripts/trivy-image-gate.sh \
-            --image "${TEST_IMAGE}" \
-            --output "${RUNNER_TEMP}/codex-claude-workstation.trivy.json" \
-            --max-fixable-critical "${TRIVY_MAX_FIXABLE_CRITICAL}" \
-            --max-fixable-high "${TRIVY_MAX_FIXABLE_HIGH}"
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v7
-        with:
-          context: ./codex-claude-workstation-builder/image
-          file: ./codex-claude-workstation-builder/image/Dockerfile
-          platforms: ${{ steps.params.outputs.platforms }}
-          push: true
-          build-args: |
-            ${{ steps.proxy.outputs.build_args }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=codex-claude-workstation
-          cache-to: type=gha,mode=min,scope=codex-claude-workstation
-
-      - name: Emit build summary
-        env:
-          IMAGE_NAME: ghcr.io/${{ steps.owner.outputs.lower_owner }}/${{ steps.params.outputs.image_repo }}
-          DATE_TAG: ${{ steps.release.outputs.date_tag }}
-          IMAGE_TAG: ${{ steps.params.outputs.image_tag }}
-          META_TAGS: ${{ steps.meta.outputs.tags }}
-          PARAM_PLATFORMS: ${{ steps.params.outputs.platforms }}
-        run: |
-          {
-            echo "## Codex Claude Workstation image build"
-            echo ""
-            echo "- Image: ${IMAGE_NAME}"
-            echo "- Date tag: ${DATE_TAG}"
-            echo "- Published image tag: ${IMAGE_TAG}"
-            echo "- Tags:"
-            while IFS= read -r tag; do
-              [ -n "${tag}" ] && echo "  - ${tag}"
-            done <<< "${META_TAGS}"
-            echo "- Platforms: ${PARAM_PLATFORMS}"
-            echo "- Smoke tests: linux/amd64 image required before multi-platform push"
-            echo "- Cache policy: gha mode=min"
-          } >> "$GITHUB_STEP_SUMMARY"
+  release:
+    uses: ./.github/workflows/release-workstations.yml
+    with:
+      variant: codex
+      image_tag: ${{ inputs.image_tag || '' }}
+      platforms: ${{ inputs.platforms || 'linux/amd64,linux/arm64' }}
+      push_latest: ${{ github.event_name == 'schedule' || inputs.push_latest == true }}
+      publish: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}

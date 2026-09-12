@@ -1,11 +1,15 @@
-ARG BASE_IMAGE_TAG=1.18.0
-FROM kasmweb/edge:${BASE_IMAGE_TAG}
+# syntax=docker/dockerfile:1
+ARG BASE_IMAGE
+ARG NODE_IMAGE
+FROM ${NODE_IMAGE} AS node-runtime
+FROM ${BASE_IMAGE}
 
 USER root
 
-ARG GEMINI_SKILL_REPO=https://github.com/WJZ-P/gemini-skill.git
-ARG GEMINI_SKILL_REF=main
-ARG NODE_MAJOR=20
+ARG GEMINI_SKILL_REF
+
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 
 ENV DEBIAN_FRONTEND=noninteractive \
     GEMINI_SKILL_HOME=/opt/gemini-skill \
@@ -17,26 +21,28 @@ ENV DEBIAN_FRONTEND=noninteractive \
     DAEMON_PORT=40225 \
     DAEMON_TTL_MS=1800000
 
+ARG SECURITY_REFRESH=manual
 RUN apt-get update \
     && for package in microsoft-edge-stable locales; do apt-mark hold "$package" 2>/dev/null || true; done \
     && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends curl ca-certificates git dumb-init \
-    && curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
+    && ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && node --version \
     && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --depth=1 --branch ${GEMINI_SKILL_REF} ${GEMINI_SKILL_REPO} ${GEMINI_SKILL_HOME} \
-    && cd ${GEMINI_SKILL_HOME} \
-    && npm install --omit=dev \
-    && npm cache clean --force
+RUN --mount=type=bind,source=gemini-skill-browser-builder/image/runtime,target=/tmp/runtime \
+    bash /tmp/runtime/install.sh 1000:1000
 
-COPY supervisor/gemini-skill.conf /etc/supervisor/conf.d/gemini-skill.conf
-COPY scripts/bootstrap.sh /usr/local/bin/gemini-skill-bootstrap.sh
-COPY scripts/healthcheck.sh /usr/local/bin/gemini-skill-healthcheck.sh
+COPY gemini-skill-browser-builder/image/supervisor/gemini-skill.conf /etc/supervisor/conf.d/gemini-skill.conf
+COPY gemini-skill-browser-builder/image/scripts/bootstrap.sh /usr/local/bin/gemini-skill-bootstrap.sh
+COPY gemini-skill-browser-builder/image/scripts/healthcheck.sh /usr/local/bin/gemini-skill-healthcheck.sh
 
 RUN chmod +x /usr/local/bin/gemini-skill-bootstrap.sh /usr/local/bin/gemini-skill-healthcheck.sh \
     && mkdir -p /data/output /data/browser-profile \
-    && chown -R 1000:1000 /data ${GEMINI_SKILL_HOME}
+    && chown -R 1000:1000 /data
+
+LABEL io.release-factory.gemini.revision=${GEMINI_SKILL_REF}
 
 EXPOSE 6901 40225 40821
 
