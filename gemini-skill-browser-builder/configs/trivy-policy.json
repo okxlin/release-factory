@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "browser": {"max_fixable_critical": 0, "max_fixable_high": null}
+  },
+  "protected_paths": [
+    "opt/gemini-skill/",
+    "usr/local/bin/node",
+    "opt/google/chrome/",
+    "opt/microsoft/msedge/"
+  ],
+  "protected_os_packages": ["google-chrome-stable", "microsoft-edge-stable", "chromium", "chromium-common", "kasmvncserver", "nginx", "nginx-common", "nginx-core"],
+  "exceptions": []
+}

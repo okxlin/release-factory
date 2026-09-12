@@ -7,13 +7,7 @@ if id kasm-user >/dev/null 2>&1; then
   chown -R kasm-user:kasm-user "${OUTPUT_DIR:-/data/output}" "${BROWSER_USER_DATA_DIR:-/data/browser-profile}" || true
 fi
 
-if command -v supervisord >/dev/null 2>&1; then
-  /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
-fi
-
-if [ -x /dockerstartup/vnc_startup.sh ]; then
-  exec /dockerstartup/vnc_startup.sh
-fi
-
-echo "No known Kasm startup entrypoint found." >&2
-exit 1
+# Initialize the upstream user profile before either service can launch a browser.
+runuser -u kasm-user -- /dockerstartup/kasm_default_profile.sh /bin/true
+/usr/bin/supervisord -c /etc/supervisor/supervisord.conf
+exec runuser -u kasm-user -- /dockerstartup/vnc_startup.sh --wait

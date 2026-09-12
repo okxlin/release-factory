@@ -5,6 +5,7 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=paseo-password.sh
 source /usr/local/lib/codex-workstation/paseo-password.sh
+configure_workstation_passwords
 
 WORKSTATION_HOME="/home/dev"
 CODEX_USER="dev"
@@ -135,17 +136,6 @@ fi
 echo "root:${ROOT_PASSWORD:-codex2024}" | sudo chpasswd
 
 # ── 1.6. Paseo 安全运行时 ──
-# Existing installations may not have PASEO_PASSWORD yet. In that case keep
-# upgrades usable by inheriting the already-known code-server password.
-PASEO_PASSWORD="${PASEO_PASSWORD:-${PASSWORD:-change-me}}"
-if [[ -z "${PASEO_PASSWORD//[[:space:]]/}" ]]; then
-    echo "WARN: empty PASEO_PASSWORD; falling back to PASSWORD/default." >&2
-    PASEO_PASSWORD="${PASSWORD:-change-me}"
-fi
-if [[ -z "${PASEO_PASSWORD//[[:space:]]/}" ]]; then
-    PASEO_PASSWORD=change-me
-fi
-export PASEO_PASSWORD
 export PASEO_HOME="${WORKSTATION_HOME}/.paseo"
 export PASEO_LISTEN="0.0.0.0:${PASEO_PORT}"
 export PASEO_HOSTNAMES=paseo.internal
@@ -164,16 +154,12 @@ elif ! paseo_password_has_recommended_length "${PASEO_PASSWORD}"; then
     echo "WARN: use a unique Paseo password of at least 20 characters before public access." >&2
 fi
 
-if [ "${PASEO_PASSWORD}" = "change-me" ]; then
-    echo "WARN: Paseo is using the example password; set PASEO_PASSWORD before public access." >&2
-fi
-
 # ── 2. 写入 code-server 配置（中文界面） ──
-CODE_SERVER_PASSWORD="${PASSWORD:-change-me}"
+# code-server reads PASSWORD from its environment; keep secrets out of YAML.
+# https://github.com/coder/code-server/blob/main/src/node/cli.ts
 cat > "${WORKSTATION_HOME}/.config/code-server/config.yaml" <<EOF
 bind-addr: 0.0.0.0:${CODE_SERVER_PORT}
 auth: password
-password: ${CODE_SERVER_PASSWORD}
 cert: false
 locale: zh-cn
 EOF

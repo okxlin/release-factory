@@ -1,0 +1,226 @@
+name: Verify and release workstation images
+
+on:
+  workflow_call:
+    inputs:
+      variant:
+        required: true
+        type: string
+      image_tag:
+        default: ""
+        type: string
+      platforms:
+        default: linux/amd64,linux/arm64
+        type: string
+      push_latest:
+        default: true
+        type: boolean
+      publish:
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      builder: ${{ steps.params.outputs.builder }}
+      repository: ${{ steps.params.outputs.repository }}
+      matrix: ${{ steps.params.outputs.matrix }}
+      platforms: ${{ steps.params.outputs.platforms }}
+      image_tag: ${{ steps.params.outputs.image_tag }}
+      latest_tag: ${{ steps.params.outputs.release_latest }}
+      build_args: ${{ steps.proxy.outputs.build_args }}
+      security_refresh: ${{ steps.params.outputs.security_refresh }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Validate release and native platform inputs
+        id: params
+        env:
+          VARIANT: ${{ inputs.variant }}
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
+          INPUT_PLATFORMS: ${{ inputs.platforms }}
+          PUSH_LATEST: ${{ inputs.push_latest }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          case "$VARIANT" in
+            codex) builder=codex-claude-workstation-builder; tag="${INPUT_IMAGE_TAG:-$(date -u +%Y%m%d)}" ;;
+            opencode) builder=opencode-workstation-builder; tag="${INPUT_IMAGE_TAG:-latest}" ;;
+            *) echo 'ERROR: unsupported workstation' >&2; exit 1 ;;
+          esac
+          owner="${OWNER,,}"
+          [[ "$owner" =~ ^[a-z0-9][a-z0-9-]*$ ]]
+          bash "$builder/scripts/resolve-build-params.sh" \
+            --platforms "$INPUT_PLATFORMS" --image-tag "$tag" \
+            --push-latest "$PUSH_LATEST" --github-output "$GITHUB_OUTPUT"
+          {
+            echo "builder=$builder"
+            echo "repository=ghcr.io/$owner/${builder%-builder}"
+            echo "security_refresh=$(date -u +%G-%V)"
+            if [[ "$PUSH_LATEST" == true ]]; then echo 'release_latest=latest'; fi
+          } >> "$GITHUB_OUTPUT"
+          python3 - "$INPUT_PLATFORMS" >> "$GITHUB_OUTPUT" <<'PY'
+          import json, sys
+          runners = {'linux/amd64': 'ubuntu-24.04', 'linux/arm64': 'ubuntu-24.04-arm'}
+          platforms = sys.argv[1].split(',')
+          assert platforms and len(platforms) == len(set(platforms)) and set(platforms) <= runners.keys()
+          print('matrix=' + json.dumps({'include': [{'arch': p.split('/')[1], 'runner': runners[p]} for p in platforms]}))
+          PY
+      - name: Verify contracts and publication regressions
+        env:
+          VARIANT: ${{ inputs.variant }}
+        run: |
+          python3 scripts/test-publish-tested-image.py
+          python3 scripts/test-evaluate-trivy-policy.py
+          if [[ "$VARIANT" == codex ]]; then
+            bash codex-claude-workstation-builder/scripts/test-paseo-contract.sh
+            bash codex-claude-workstation-builder/scripts/test-proxy-core-contract.sh
+            python3 codex-claude-workstation-builder/scripts/test-resolve-proxy-core-versions.py
+          else
+            python3 opencode-workstation-builder/scripts/test-bootstrap-opencode-userland.py
+          fi
+      - name: Resolve proxy sources once for both architectures
+        if: inputs.variant == 'codex'
+        id: proxy
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 codex-claude-workstation-builder/scripts/resolve-proxy-core-versions.py \
+            --github-output "$GITHUB_OUTPUT" --summary "$GITHUB_STEP_SUMMARY"
+
+  verify:
+    needs: prepare
+    name: Verify ${{ inputs.variant }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Require the native runner architecture
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: test "$(dpkg --print-architecture)" = "$ARCH"
+      - uses: docker/setup-buildx-action@v4
+      - name: Build the native image once
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ./${{ needs.prepare.outputs.builder }}/image
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          pull: true
+          provenance: false
+          tags: release-factory-test:${{ inputs.variant }}-${{ matrix.arch }}
+          build-args: |
+            SECURITY_REFRESH=${{ needs.prepare.outputs.security_refresh }}
+            ${{ needs.prepare.outputs.build_args }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=${{ inputs.variant }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=min,scope=${{ inputs.variant }}-${{ matrix.arch }}
+      - name: Exercise authentication, default runtime and persistent storage
+        env:
+          IMAGE: ${{ steps.build.outputs.imageid }}
+          VARIANT: ${{ inputs.variant }}
+        run: |
+          set -euo pipefail
+          if [[ "$VARIANT" == codex ]]; then
+            python3 scripts/smoke-codex-workstation.py "$IMAGE"
+          else
+            python3 scripts/smoke-opencode-workstation.py "$IMAGE" \
+              --userland-report "$RUNNER_TEMP/opencode-userland.trivy.json"
+          fi
+      - name: Scan the tested image with its service policy
+        env:
+          IMAGE: ${{ steps.build.outputs.imageid }}
+          BUILDER: ${{ needs.prepare.outputs.builder }}
+        run: |
+          bash scripts/trivy-image-gate.sh --image "$IMAGE" \
+            --policy "$BUILDER/configs/trivy-policy.json" --profile workstation \
+            --output "$RUNNER_TEMP/image.trivy.json"
+      - name: Save scan evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: scans-${{ inputs.variant }}-${{ matrix.arch }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/*.trivy.json
+          retention-days: 7
+      - name: Log in for release staging
+        if: inputs.publish && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Stage the tested config digest without rebuilding
+        if: inputs.publish && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          IMAGE: ${{ steps.build.outputs.imageid }}
+          VARIANT: ${{ inputs.variant }}
+          REPOSITORY: ${{ needs.prepare.outputs.repository }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          python3 scripts/publish-tested-image.py stage --image "$IMAGE" --image-id "$IMAGE" \
+            --variant "$VARIANT" --platform "linux/$ARCH" --repository "$REPOSITORY" \
+            --revision "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --receipt "$RUNNER_TEMP/tested-image/receipt.json"
+      - name: Save publication receipt
+        if: inputs.publish && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tested-${{ inputs.variant }}-${{ matrix.arch }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/tested-image/receipt.json
+          if-no-files-found: error
+          retention-days: 2
+
+  publish:
+    needs: [prepare, verify]
+    if: inputs.publish && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v4
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: tested-${{ inputs.variant }}-*-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/tested-images
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Combine only the successfully tested platform manifests
+        env:
+          VARIANT: ${{ inputs.variant }}
+          REPOSITORY: ${{ needs.prepare.outputs.repository }}
+          PLATFORMS: ${{ needs.prepare.outputs.platforms }}
+          IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
+          LATEST_TAG: ${{ needs.prepare.outputs.latest_tag }}
+        run: |
+          python3 scripts/publish-tested-image.py publish --directory "$RUNNER_TEMP/tested-images" \
+            --variant "$VARIANT" --repository "$REPOSITORY" --platforms "$PLATFORMS" \
+            --revision "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --image-tag "$IMAGE_TAG" --latest-tag "$LATEST_TAG"

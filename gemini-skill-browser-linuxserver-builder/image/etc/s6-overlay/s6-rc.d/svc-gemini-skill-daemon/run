@@ -2,7 +2,16 @@
 set -euo pipefail
 
 mkdir -p "${OUTPUT_DIR:-/output}" "${XDG_RUNTIME_DIR:-/config/.XDG}" "${BROWSER_USER_DATA_DIR:-/config/browser-profile}" "${BROWSER_USER_DATA_DIR:-/config/browser-profile}/Default"
-chown -R abc:abc "${OUTPUT_DIR:-/output}" "${XDG_RUNTIME_DIR:-/config/.XDG}" "${BROWSER_USER_DATA_DIR:-/config/browser-profile}" /opt/gemini-skill || true
+chown -R abc:abc "${OUTPUT_DIR:-/output}" "${XDG_RUNTIME_DIR:-/config/.XDG}" "${BROWSER_USER_DATA_DIR:-/config/browser-profile}" || true
 chmod -R u+rwX,g+rwX "${OUTPUT_DIR:-/output}" "${XDG_RUNTIME_DIR:-/config/.XDG}" "${BROWSER_USER_DATA_DIR:-/config/browser-profile}" || true
 
-exec s6-setuidgid abc /usr/bin/node /opt/gemini-skill/src/daemon/server.js
+# The desktop autostarts Chrome with this profile. Wait for its CDP endpoint so
+# an early acquire request cannot start a second browser against the same lock.
+for _ in {1..60}; do
+  if curl -fsS --max-time 1 "http://127.0.0.1:${BROWSER_DEBUG_PORT:-9222}/json/version" >/dev/null; then
+    break
+  fi
+  sleep 0.5
+done
+
+exec s6-setuidgid abc /usr/local/bin/node /opt/gemini-skill/src/daemon/server.js

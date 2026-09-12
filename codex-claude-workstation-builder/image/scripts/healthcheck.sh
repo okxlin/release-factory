@@ -7,6 +7,7 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=paseo-password.sh
 source /usr/local/lib/codex-workstation/paseo-password.sh
+configure_workstation_passwords
 
 CODE_SERVER_PORT="${CODE_SERVER_PORT:-8080}"
 PASEO_PORT="${PASEO_PORT:-6767}"
@@ -27,10 +28,7 @@ if [ "$(http_code -H 'Host: paseo.internal' "http://127.0.0.1:${PASEO_PORT}/api/
     exit 1
 fi
 
-paseo_password="${PASEO_PASSWORD:-${PASSWORD:-change-me}}"
-if [[ -z "${paseo_password//[[:space:]]/}" ]]; then
-    paseo_password="change-me"
-fi
+paseo_password="${PASEO_PASSWORD}"
 if ! paseo_password_is_websocket_token "${paseo_password}"; then
     echo "Paseo password is not browser WebSocket-token-safe; set a separate PASEO_PASSWORD" >&2
     exit 1

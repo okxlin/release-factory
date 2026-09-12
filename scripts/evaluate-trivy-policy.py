@@ -7,6 +7,7 @@ import datetime
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import sys
 
 
@@ -24,9 +25,9 @@ def path_key(value):
 
 def load_policy(path, profile):
     policy = json.loads(path.read_text(encoding="utf-8"))
-    require(isinstance(policy, dict) and set(policy) == {
-        "schema_version", "profiles", "protected_paths", "exceptions",
-    }, "invalid policy fields")
+    required = {"schema_version", "profiles", "protected_paths", "exceptions"}
+    require(isinstance(policy, dict) and required <= set(policy) <= required | {"protected_os_packages"},
+            "invalid policy fields")
     require(policy["schema_version"] == 1, "unsupported policy schema")
     require(isinstance(policy["profiles"], dict) and profile in policy["profiles"], "unknown profile")
     thresholds = policy["profiles"][profile]
@@ -38,6 +39,11 @@ def load_policy(path, profile):
     require(isinstance(policy["protected_paths"], list) and policy["protected_paths"], "missing protected paths")
     for value in policy["protected_paths"]:
         require(path_key(value) not in {"", "."}, "invalid protected path")
+    packages = policy.get("protected_os_packages", [])
+    require(isinstance(packages, list), "protected OS packages must be a list")
+    for package in packages:
+        require(isinstance(package, str) and re.fullmatch(r"[a-z0-9][a-z0-9+._-]*", package),
+                "protected OS packages must be exact package names")
     require(isinstance(policy["exceptions"], list), "exceptions must be a list")
     for exception in policy["exceptions"]:
         require(isinstance(exception, dict) and set(exception) == {
@@ -90,7 +96,7 @@ def evaluate(data, policy, thresholds, profile):
         protected = any(
             path == path_key(root) or (root.endswith("/") and path.startswith(path_key(root) + "/"))
             for root in policy["protected_paths"]
-        )
+        ) or (result.get("Class") == "os-pkgs" and vuln["PkgName"] in policy.get("protected_os_packages", []))
         exception = next((entry for entry in policy["exceptions"] if
             profile in entry["profiles"] and
             (entry["id"], entry["package"], entry["installed_version"], path_key(entry["path"]), entry["type"]) ==

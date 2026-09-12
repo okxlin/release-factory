@@ -60,6 +60,33 @@ When the host does not provide `trivy`, the gate uses the pinned
 container image. Set `TRIVY_DOCKER_IMAGE` when bumping
 Trivy intentionally.
 
+## Workstation, browser and OpenClaw policies
+
+Codex Claude, OpenCode, both Gemini browser variants and OpenClaw use the same
+policy evaluator, with per-builder `configs/trivy-policy.json` files. All block
+fixable CRITICAL findings. Ordinary toolchain HIGH findings remain in reports;
+protected service paths and exact OS service package names block HIGH/CRITICAL
+even without a published fix. OS package protection matches only `os-pkgs`
+results, not an unrelated language package with the same name.
+
+Codex protects code-server, Paseo and the three proxy binaries. Browser policy
+protects the application, browser packages and Nginx. OpenCode protects the
+bundled baseline and installed userland; OpenClaw protects its application.
+There are no broad count allowances for fixable browser CRITICAL findings.
+
+OpenCode CI additionally scans a snapshot of the default installed DCP plugin
+and userland with `--filesystem`. This does not cover later user upgrades or
+fully enumerate libraries compiled into its executable. The baseline notice
+records the upstream advisory review and absence of a release SBOM. A zero
+userland finding count is not a complete binary dependency audit.
+
+All five release flows build once, test/scan the recorded image ID, verify that
+the staged registry manifest has the same config digest, and publish only the
+validated platform receipts. PR jobs do not publish. Workstations use native
+amd64 and arm64 runners; browsers and OpenClaw remain amd64. Weekly package
+cache refreshes and OpenClaw's seven-day maximum build age keep unchanged
+application releases eligible for base-image security maintenance.
+
 ## DeepSeek Harness Caddy gate
 
 Both DeepSeek Harness workflows additionally run
