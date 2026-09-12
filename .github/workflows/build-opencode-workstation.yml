@@ -44,5 +44,5 @@ jobs:
       variant: opencode
       image_tag: ${{ inputs.image_tag || '' }}
       platforms: ${{ inputs.platforms || 'linux/amd64,linux/arm64' }}
-      push_latest: ${{ github.event_name == 'schedule' || inputs.push_latest }}
+      push_latest: ${{ github.event_name == 'schedule' || inputs.push_latest == true }}
       publish: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}

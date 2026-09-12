@@ -52,5 +52,5 @@ jobs:
       browser_base_tag: ${{ inputs.browser_base_tag || '' }}
       image_tag: ${{ inputs.image_tag || '' }}
       gemini_skill_ref: ${{ inputs.gemini_skill_ref || '' }}
-      push_latest: ${{ github.event_name == 'schedule' || inputs.push_latest }}
+      push_latest: ${{ github.event_name == 'schedule' || inputs.push_latest == true }}
       publish: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
