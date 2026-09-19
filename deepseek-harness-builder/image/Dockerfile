@@ -247,6 +247,10 @@ RUN corepack enable \
         \) \
         -type f -print -quit | grep -q .
 
+COPY scripts/patch-dsh-telemetry.mjs /tmp/patch-dsh-telemetry.mjs
+RUN node /tmp/patch-dsh-telemetry.mjs /opt/dsh \
+    && rm -f /tmp/patch-dsh-telemetry.mjs
+
 FROM ${NODE_IMAGE} AS pnpm-bundle
 
 ARG PNPM_ARCHIVE_SHA256

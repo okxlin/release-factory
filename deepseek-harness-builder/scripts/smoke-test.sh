@@ -340,6 +340,37 @@ process.stdout.write('[smoke] PASS: authenticated settings compatibility patch i
 NODE
 }
 
+assert_telemetry_opt_out() {
+    docker exec --user node -i "${container_name}" node --input-type=module - <<'NODE'
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+
+assert.equal(process.env.DSH_TELEMETRY_DISABLED, '1', 'image telemetry opt-out default');
+const runtimeRequire = createRequire('/opt/dsh/package.json');
+const cliRequire = createRequire(runtimeRequire.resolve('@deepseek-ai/dsh/package.json'));
+const basePath = cliRequire.resolve('@deepseek-ai/dsh-base/package.json');
+const baseRequire = createRequire(basePath);
+const base = baseRequire(basePath);
+for (const name of ['@deepseek-ai/dsh-session-log-deepseek', '@deepseek-ai/dsh-plugin-package-inventory-deepseek']) {
+  if (!Object.hasOwn(base.dependencies ?? {}, name)) continue;
+  const { apply, Config } = await import(pathToFileURL(baseRequire.resolve(name)));
+  for (const disabled of ['1', '0', 'false', '']) {
+    process.env.DSH_TELEMETRY_DISABLED = disabled;
+    let registrations = 0;
+    const context = {
+      baseUrl: pathToFileURL(basePath).href,
+      get() { return undefined; },
+      deepseekLlmApiExtensions: { register() { registrations++; } },
+    };
+    apply(context, Config({ enabled: true }));
+    assert.equal(registrations, disabled ? 0 : 1, `${name}: opt-out=${JSON.stringify(disabled)}`);
+  }
+}
+process.stdout.write('[smoke] PASS: telemetry opt-out blocks session-log and package-inventory upload registration\n');
+NODE
+}
+
 run_http_contract() {
     docker exec \
         -e SMOKE_PROFILE="${PROFILE}" \
@@ -1250,6 +1281,7 @@ pass "container became healthy"
 check_runtime_versions
 assert_directory_picker_workspace_default
 assert_authenticated_settings_patch
+assert_telemetry_opt_out
 run_process_contract
 run_http_contract
 check_auth_file_permissions
