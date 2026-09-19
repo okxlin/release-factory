@@ -19,6 +19,30 @@ def docker(*args, check=True, timeout=180, **kwargs):
     return result
 
 
+def inner_docker(daemon, *args, check=True, timeout=180, **kwargs):
+    return docker("exec", daemon, "docker", "-H", "unix:///docker/docker.sock", *args,
+                  check=check, timeout=timeout, **kwargs)
+
+
+def load_image_into_daemon(daemon, image):
+    with subprocess.Popen(["docker", "save", image], stdout=subprocess.PIPE) as saved:
+        loaded = subprocess.run(
+            ["docker", "exec", "-i", daemon, "docker", "-H", "unix:///docker/docker.sock", "load"],
+            stdin=saved.stdout,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+        saved.stdout.close()
+        saved_status = saved.wait(timeout=30)
+        if saved_status or loaded.returncode:
+            details = (loaded.stdout + loaded.stderr).strip()
+            raise RuntimeError(
+                f"could not load image {image} into the isolated daemon "
+                f"(save_exit={saved_status}, load_exit={loaded.returncode}): {details}"
+            )
+
+
 SANDBOX_PROBE = r"""
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -73,18 +97,20 @@ def main(image):
     daemon, gateway = owner + "-daemon", owner + "-gateway"
     volumes = [owner + suffix for suffix in ("-socket", "-data", "-workspace", "-state")]
     sandbox_tag = "release-factory-test/sandbox:" + owner
+    gateway_tag = "release-factory-test/gateway:" + owner
     token = secrets.token_hex(24)
     try:
         for volume in volumes:
             docker("volume", "create", "--label", f"io.release-factory.test={owner}", volume)
-        # The gateway never receives the host Docker socket. This daemon has no
-        # network or host directory mounts and owns only the four test volumes.
+        # The gateway and its sandboxes run inside this isolated daemon. It
+        # receives only the daemon socket and its four test bind roots, never
+        # the host Docker socket or a host directory outside those roots.
         docker("run", "-d", "--name", daemon, "--network", "none", "--privileged",
                "--label", f"io.release-factory.test={owner}", "--entrypoint", "dockerd",
                "-v", volumes[0] + ":/docker", "-v", volumes[1] + ":/var/lib/docker",
                "-v", volumes[2] + ":/workspace", "-v", volumes[3] + ":/home/node/.openclaw", daemon_image,
                "--host=unix:///docker/docker.sock", "--bridge=none", "--iptables=false",
-               "--ip6tables=false", "--ip-forward=false", "--storage-driver=vfs")
+               "--ip6tables=false", "--ip-forward=false", "--storage-driver=overlay2")
         for _ in range(60):
             if docker("exec", daemon, "docker", "-H", "unix:///docker/docker.sock", "info", check=False).returncode == 0:
                 break
@@ -93,57 +119,60 @@ def main(image):
             raise RuntimeError("isolated Docker daemon did not become ready")
         docker("exec", daemon, "sh", "-c", "chown 1000:1000 /docker/docker.sock /workspace /home/node/.openclaw; chmod 660 /docker/docker.sock")
         docker("image", "tag", sandbox_image, sandbox_tag)
-        with subprocess.Popen(["docker", "save", sandbox_tag], stdout=subprocess.PIPE) as saved:
-            loaded = subprocess.run(["docker", "exec", "-i", daemon, "docker", "-H", "unix:///docker/docker.sock", "load"],
-                                    stdin=saved.stdout, capture_output=True, text=True, timeout=120)
-            saved.stdout.close()
-            if saved.wait(timeout=30) or loaded.returncode:
-                raise RuntimeError("could not load the sandbox fixture into the isolated daemon")
-        docker("run", "-d", "--name", gateway, "--network", "none", "--label", f"io.release-factory.test={owner}",
+        docker("image", "tag", image, gateway_tag)
+        load_image_into_daemon(daemon, sandbox_tag)
+        load_image_into_daemon(daemon, gateway_tag)
+        inner_docker(daemon, "run", "-d", "--name", gateway, "--network", "none",
+               "--label", f"io.release-factory.test={owner}",
                "-e", "OPENCLAW_GATEWAY_TOKEN=" + token, "-e", "DOCKER_HOST=unix:///docker/docker.sock",
-               "-e", "SMOKE_SANDBOX_IMAGE=" + sandbox_tag, "-v", volumes[0] + ":/docker",
-               "-v", volumes[2] + ":/workspace", "-v", volumes[3] + ":/home/node/.openclaw",
-               "--entrypoint", "node", image, "/app/openclaw.mjs",
+               "-e", "SMOKE_SANDBOX_IMAGE=" + sandbox_tag, "-v", "/docker:/docker",
+               "-v", "/workspace:/workspace", "-v", "/home/node/.openclaw:/home/node/.openclaw",
+               "--entrypoint", "node", gateway_tag, "/app/openclaw.mjs",
                "gateway", "run", "--allow-unconfigured", "--auth", "token", "--bind", "loopback")
         for _ in range(90):
-            probe = docker("exec", gateway, "node", "-e",
+            probe = inner_docker(daemon, "exec", gateway, "node", "-e",
                            "fetch('http://127.0.0.1:18789/healthz').then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))", check=False)
             if probe.returncode == 0:
                 break
-            if not json.loads(docker("inspect", gateway).stdout)[0]["State"]["Running"]:
+            if not json.loads(inner_docker(daemon, "inspect", gateway).stdout)[0]["State"]["Running"]:
                 raise RuntimeError("OpenClaw gateway exited during startup")
             time.sleep(2)
         else:
             raise RuntimeError("OpenClaw gateway did not become healthy")
-        rejected = docker("exec", gateway, "node", "/app/openclaw.mjs", "gateway", "health",
+        rejected = inner_docker(daemon, "exec", gateway, "node", "/app/openclaw.mjs", "gateway", "health",
                           "--url", "ws://127.0.0.1:18789", "--token", "invalid-test-token", check=False)
         assert rejected.returncode and any(s in (rejected.stdout + rejected.stderr).lower()
                                            for s in ("unauthorized", "token mismatch", "token_mismatch")), "gateway must reject invalid auth"
-        healthy = docker("exec", gateway, "node", "/app/openclaw.mjs", "gateway", "health", "--json")
+        healthy = inner_docker(daemon, "exec", gateway, "node", "/app/openclaw.mjs", "gateway", "health", "--json")
         assert '"ok": true' in healthy.stdout, "authenticated deep health did not succeed"
         print("PASS: gateway liveness, invalid-token rejection and authenticated deep health", flush=True)
-        result = docker("exec", gateway, "node", "--input-type=module", "-e", SANDBOX_PROBE, timeout=300)
+        result = inner_docker(daemon, "exec", gateway, "node", "--input-type=module", "-e", SANDBOX_PROBE, timeout=300)
         print(result.stdout, end="", flush=True)
-        version = docker("exec", gateway, "docker", "compose", "version", "--short")
+        version = inner_docker(daemon, "exec", gateway, "docker", "compose", "version", "--short")
         assert version.stdout.strip(), "bundled Compose must execute"
     except BaseException:
-        for name in (gateway, daemon):
-            logs = docker("logs", "--tail", "40", name, check=False)
+        for name in (gateway,):
+            logs = inner_docker(daemon, "logs", "--tail", "40", name, check=False)
             print((logs.stdout + logs.stderr).replace(token, "[test token]")[-12000:], file=sys.stderr)
+        logs = docker("logs", "--tail", "40", daemon, check=False)
+        print((logs.stdout + logs.stderr).replace(token, "[test token]")[-12000:], file=sys.stderr)
         raise
     finally:
-        for name in (gateway, daemon):
-            label = docker("inspect", "--format", '{{index .Config.Labels "io.release-factory.test"}}', name, check=False)
-            if label.stdout.strip() == owner:
-                docker("rm", "-f", "-v", name)
+        daemon_label = docker("inspect", "--format", '{{index .Config.Labels "io.release-factory.test"}}', daemon, check=False)
+        if daemon_label.stdout.strip() == owner:
+            gateway_label = inner_docker(daemon, "inspect", "--format", '{{index .Config.Labels "io.release-factory.test"}}', gateway, check=False)
+            if gateway_label.stdout.strip() == owner:
+                inner_docker(daemon, "rm", "-f", "-v", gateway, check=False)
+            docker("rm", "-f", "-v", daemon)
         for volume in volumes:
             label = docker("volume", "inspect", "--format", '{{index .Labels "io.release-factory.test"}}', volume, check=False)
             if label.stdout.strip() == owner:
                 docker("volume", "rm", volume)
-        original = docker("image", "inspect", "--format", "{{.Id}}", sandbox_image, check=False)
-        tagged = docker("image", "inspect", "--format", "{{.Id}}", sandbox_tag, check=False)
-        if tagged.returncode == 0 and tagged.stdout == original.stdout:
-            docker("image", "rm", sandbox_tag)
+        for tag in (sandbox_tag, gateway_tag):
+            original = docker("image", "inspect", "--format", "{{.Id}}", sandbox_image if tag == sandbox_tag else image, check=False)
+            tagged = docker("image", "inspect", "--format", "{{.Id}}", tag, check=False)
+            if tagged.returncode == 0 and tagged.stdout == original.stdout:
+                docker("image", "rm", tag)
 
 
 if __name__ == "__main__":

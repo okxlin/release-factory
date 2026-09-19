@@ -15,6 +15,8 @@ Both workflows publish the same tags to `ghcr.io/okxlin/deepseek-harness` and to
 
 Scheduled runs and manual runs with an empty version select the highest non-draft `dsh-v*` source release from DeepSeek Harness GitHub Releases, verify its tag, commit, and source-archive SHA-256, then publish matching `<DSH_VERSION>` and `<DSH_VERSION>-workstation` tags. This supports upstream releases that are available from GitHub before they are published to npm. An explicit `dsh-v*` selects that source release; an npm version or dist-tag still selects a published package release. `image/dsh-source.json` remains the reproducible local/PR baseline, while future source releases no longer require a Dockerfile edit. Manual workflow runs can also override the published image tag. Use a floating tag for an AppStore `latest` channel and the matching version tag for a numbered AppStore version.
 
+The committed source baseline is [0.1.6-alpha.2](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.6-alpha.2). This prerelease renames PTC packages to `ptc-runtime` and the workflow executor to `workflow-ptc`; custom profiles using the old names need updating. DeepSeek now defaults to the Messages protocol. A manually configured old official API root should be removed or changed to `https://api.deepseek.com/anthropic`; custom provider URLs remain unchanged.
+
 Build versions, base-image digests, and source/tool checksums live in [`image/components.lock.json`](image/components.lock.json). Python packages have a hash-locked [`image/python-requirements.lock`](image/python-requirements.lock); the legacy npm path retains its own [package manifest](image/package.json) and [pnpm lock](image/pnpm-lock.yaml). [`image/dsh-source.json`](image/dsh-source.json) pins the source release to a commit archive and checksum. Local builds and CI use `scripts/component-inputs.py` to resolve the same build arguments; ordinary component updates do not require editing Dockerfile instructions. Source builds currently install locally packed runtime tarballs with npm, and the dependency audit checks that installed tree.
 
 Pull requests that affect DeepSeek Harness build inputs run a read-only component-pin contract check. It rejects floating base-image tags, malformed checksums, missing lock inputs, and source URLs that no longer match their versions. A separate PR workflow builds both variants on native `ubuntu-24.04` (amd64) and `ubuntu-24.04-arm` runners. Both architectures run the production dependency audit, full authentication and passthrough smoke, Caddy gate, and Trivy policy. Workstation also runs its compiler and host-kernel sandbox probes on both architectures. PR jobs do not receive registry credentials.
@@ -280,7 +282,7 @@ Copy `image/.env.example` to `RUNTIME_ENV_FILE` (default `image/.env`) and set a
 | `DSH_INTERNAL_PORT` | `3080` | DSH loopback port inside the container. |
 | `GOMEMLIMIT` | `128MiB` | Caddy Go runtime soft memory limit; does not cap DSH workload memory. |
 | `GOMAXPROCS` | `2` | Caddy Go runtime CPU limit. |
-| `DSH_TELEMETRY_DISABLED` | `1` | Disables DSH telemetry. |
+| `DSH_TELEMETRY_DISABLED` | `1` | Disables OTel telemetry and the 0.1.6 session-log/package-inventory request contributors. Any non-empty value opts out; an empty value restores upstream defaults. |
 
 ## Access by IP address
 

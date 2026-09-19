@@ -58,6 +58,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           OWNER: ${{ github.repository_owner }}
+          DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          RELEASE: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
           FORCE_REBUILD: ${{ github.event_name == 'pull_request' || inputs.force_rebuild }}
         run: |
           set -euo pipefail
@@ -65,6 +67,12 @@ jobs:
           [[ "$owner" =~ ^[a-z0-9][a-z0-9-]*$ ]]
           repository="ghcr.io/$owner/openclaw-sandbox"
           args=()
+          if [[ "$RELEASE" == true ]]; then
+            [[ "$DOCKERHUB_NAMESPACE" =~ ^[a-z0-9]+([._-][a-z0-9]+)*$ ]] \
+              || { echo 'ERROR: DOCKERHUB_USERNAME must be a lowercase Docker Hub namespace' >&2; exit 1; }
+            dockerhub_repository="docker.io/$DOCKERHUB_NAMESPACE/openclaw-sandbox"
+            args+=(--repository "$dockerhub_repository")
+          fi
           if [[ "$FORCE_REBUILD" == true ]]; then args+=(--force); fi
           python3 scripts/resolve-openclaw-inputs.py --repository "$repository" "${args[@]}" \
             --output "$RUNNER_TEMP/openclaw-inputs.json" --github-output "$GITHUB_OUTPUT"
@@ -139,25 +147,42 @@ jobs:
           name: openclaw-scan-${{ github.run_attempt }}
           path: ${{ runner.temp }}/openclaw.trivy.json
           retention-days: 7
-      - name: Log in for release publication
+      - name: Log in to GitHub Container Registry
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v4
+        with:
+          registry: docker.io
+          username: ${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Publish the verified image without rebuilding
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           IMAGE: ${{ steps.build.outputs.imageid }}
           REPOSITORY: ${{ needs.prepare.outputs.repository }}
+          DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
           IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
         run: |
-          python3 scripts/publish-tested-image.py stage --image "$IMAGE" --image-id "$IMAGE" \
-            --variant openclaw --platform linux/amd64 --repository "$REPOSITORY" \
-            --revision "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --receipt "$RUNNER_TEMP/tested-image/receipt.json"
-          python3 scripts/publish-tested-image.py publish --directory "$RUNNER_TEMP/tested-image" \
-            --variant openclaw --repository "$REPOSITORY" --platforms linux/amd64 \
-            --revision "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
-            --image-tag "$IMAGE_TAG" --latest-tag latest
+          set -euo pipefail
+          repositories=("$REPOSITORY" "docker.io/$DOCKERHUB_NAMESPACE/openclaw-sandbox")
+          for index in "${!repositories[@]}"; do
+            python3 scripts/publish-tested-image.py stage --image "$IMAGE" --image-id "$IMAGE" \
+              --variant openclaw --platform linux/amd64 --repository "${repositories[$index]}" \
+              --revision "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+              --receipt "$RUNNER_TEMP/tested-image-$index/receipt.json"
+          done
+          # Verify both version tags before advancing either floating tag.
+          for tag in "$IMAGE_TAG" latest; do
+            for index in "${!repositories[@]}"; do
+              python3 scripts/publish-tested-image.py publish --directory "$RUNNER_TEMP/tested-image-$index" \
+                --variant openclaw --repository "${repositories[$index]}" --platforms linux/amd64 \
+                --revision "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT" \
+                --image-tag "$tag"
+            done
+          done

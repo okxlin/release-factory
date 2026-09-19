@@ -339,6 +339,7 @@ def latest_compatible_module_version(
     client: SourceClient,
     module: str,
     builder_go_version: tuple[int, int, int],
+    max_version: str | None = None,
 ) -> str:
     escaped_module = urllib.parse.quote(module, safe="/")
     list_url = f"https://proxy.golang.org/{escaped_module}/@v/list"
@@ -351,7 +352,13 @@ def latest_compatible_module_version(
         {
             normalize_stable_version(version)
             for version in versions
-            if isinstance(version, str) and SEMVER_RE.fullmatch(version)
+            if isinstance(version, str)
+            and SEMVER_RE.fullmatch(version)
+            and (
+                max_version is None
+                or semver_key(normalize_stable_version(version))
+                <= semver_key(max_version)
+            )
         },
         key=semver_key,
         reverse=True,
@@ -420,12 +427,20 @@ def load_policy(policy_path: Path) -> dict[str, Any]:
             raise ResolveError("proxy module policy contains a non-object module")
         module_name = module.get("module")
         arg_name = module.get("version_arg")
+        max_version = module.get("max_version")
         if (
             not isinstance(module_name, str)
             or not MODULE_RE.fullmatch(module_name)
             or not isinstance(arg_name, str)
             or not ARG_NAME_RE.fullmatch(arg_name)
             or arg_name in used_args
+            or (
+                max_version is not None
+                and (
+                    not isinstance(max_version, str)
+                    or not SEMVER_RE.fullmatch(max_version)
+                )
+            )
         ):
             raise ResolveError(f"duplicate or invalid Go module build arg: {arg_name}")
         used_args.add(arg_name)
@@ -568,7 +583,10 @@ def resolve_inputs(
 
     for module in policy["go_modules"]:
         version = latest_compatible_module_version(
-            client, module["module"], builder_go_version
+            client,
+            module["module"],
+            builder_go_version,
+            module.get("max_version"),
         )
         values[module["version_arg"]] = version
         module_rows.append({"module": module["module"], "version": version})

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve immutable OpenClaw inputs and decide whether a GHCR build is fresh."""
+"""Resolve immutable OpenClaw inputs and check every registry's release tags."""
 import argparse
 import base64
 import datetime as dt
@@ -54,9 +54,13 @@ def github(path):
 
 class Registry:
     def __init__(self, repository):
-        if not re.fullmatch(r"ghcr\.io/[a-z0-9][a-z0-9-]*/openclaw-sandbox", repository):
+        if re.fullmatch(r"ghcr\.io/[a-z0-9][a-z0-9-]*/openclaw-sandbox", repository):
+            self.host, self.realm, self.service = "ghcr.io", "https://ghcr.io/token", "ghcr.io"
+        elif re.fullmatch(r"docker\.io/[a-z0-9]+(?:[._-][a-z0-9]+)*/openclaw-sandbox", repository):
+            self.host, self.realm, self.service = "registry-1.docker.io", "https://auth.docker.io/token", "registry.docker.io"
+        else:
             raise ValueError("unexpected OpenClaw registry repository")
-        self.repository = repository.removeprefix("ghcr.io/")
+        self.repository = repository.split("/", 1)[1]
         self.token = None
 
     def authorize(self, challenge):
@@ -64,16 +68,16 @@ class Registry:
         scheme, _, fields = challenge.partition(" ")
         values = urllib.request.parse_keqv_list(urllib.request.parse_http_list(fields))
         scope = "repository:" + self.repository + ":pull"
-        if (scheme.lower() != "bearer" or values.get("realm") != "https://ghcr.io/token"
-                or values.get("service") != "ghcr.io" or values.get("scope") != scope):
+        if (scheme.lower() != "bearer" or values.get("realm") != self.realm
+                or values.get("service") != self.service or values.get("scope") != scope):
             raise ValueError("unexpected registry authentication challenge")
         headers = {}
-        credential = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+        credential = (os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")) if self.host == "ghcr.io" else None
         if credential:
             actor = os.environ.get("GITHUB_ACTOR", self.repository.split("/")[0])
             headers["Authorization"] = "Basic " + base64.b64encode((actor + ":" + credential).encode()).decode()
-        query = urllib.parse.urlencode({"service": "ghcr.io", "scope": scope})
-        status, _, body = http("https://ghcr.io/token?" + query, headers)
+        query = urllib.parse.urlencode({"service": self.service, "scope": scope})
+        status, _, body = http(self.realm + "?" + query, headers)
         if status != 200:
             raise ValueError(f"registry token request failed: HTTP {status}")
         data = json.loads(body)
@@ -84,7 +88,7 @@ class Registry:
     def get(self, kind, reference, *, missing_ok=False):
         if kind not in ("manifests", "blobs") or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", reference):
             raise ValueError("invalid registry metadata reference")
-        url = f"https://ghcr.io/v2/{self.repository}/{kind}/{reference}"
+        url = f"https://{self.host}/v2/{self.repository}/{kind}/{reference}"
         headers = {"Accept": ACCEPT}
         if self.token:
             headers["Authorization"] = "Bearer " + self.token
@@ -96,11 +100,15 @@ class Registry:
         if kind == "blobs" and status in (302, 307):
             target = response_headers.get("location", "")
             parsed = urllib.parse.urlsplit(target)
-            if (parsed.scheme != "https" or not parsed.hostname
-                    or not parsed.hostname.endswith(".githubusercontent.com")
+            # Docker's pull CDN hosts: https://docs.docker.com/desktop/setup/allow-list/
+            allowed_host = (parsed.hostname or "").endswith(".githubusercontent.com") if self.host == "ghcr.io" else parsed.hostname in {
+                "production.cloudflare.docker.com", "production.cloudfront.docker.com",
+                "docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com",
+            }
+            if (parsed.scheme != "https" or not allowed_host
                     or parsed.username or parsed.password or parsed.port not in (None, 443)):
                 raise ValueError("unexpected registry blob redirect")
-            # GitHub's signed download URL must never receive the registry token.
+            # Signed download URLs must never receive a registry token.
             status, _, body = http(target, {})
         if status == 404 and missing_ok:
             return None
@@ -110,7 +118,7 @@ class Registry:
             raise ValueError("registry metadata digest mismatch")
         return json.loads(body)
 
-    def labels(self, tag):
+    def image(self, tag):
         manifest = self.get("manifests", tag, missing_ok=True)
         if manifest is None:
             return None
@@ -127,7 +135,7 @@ class Registry:
         config = self.get("blobs", config_digest)
         if config.get("os") != "linux" or config.get("architecture") != "amd64":
             raise ValueError("unexpected OpenClaw image platform")
-        return config.get("config", {}).get("Labels") or {}
+        return config_digest, config.get("config", {}).get("Labels") or {}
 
 
 def pin_image(reference):
@@ -157,13 +165,31 @@ def needs_build(labels, upstream_sha, recipe_digest, now, max_age_days):
     return False, "same immutable inputs and build is less than seven days old"
 
 
+def needs_publication(repositories, tag, upstream_sha, recipe_digest, now, max_age_days):
+    tested_config = None
+    for repository in repositories:
+        registry = Registry(repository)
+        for release_tag in (tag, "latest"):
+            image = registry.image(release_tag)
+            rebuild, reason = needs_build(None if image is None else image[1], upstream_sha, recipe_digest, now, max_age_days)
+            if rebuild:
+                return True, f"{repository}:{release_tag}: {reason}"
+            if tested_config is not None and tested_config != image[0]:
+                return True, "release tags or registry mirrors differ"
+            tested_config = image[0]
+    return False, "all registry tags reference the same fresh image"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repository", default="ghcr.io/okxlin/openclaw-sandbox")
+    parser.add_argument("--repository", action="append", help="Publication repository; repeat to check mirrors")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--github-output", type=Path)
     args = parser.parse_args()
+    repositories = args.repository or ["ghcr.io/okxlin/openclaw-sandbox"]
+    for repository in repositories:
+        Registry(repository)
     components = json.loads((ROOT / "openclaw-builder/configs/components.json").read_text())
     if components.get("schema_version") != 1 or components.get("max_build_age_days") != 7:
         raise ValueError("invalid OpenClaw component policy")
@@ -187,10 +213,11 @@ def main():
             recipe.update(str(path.relative_to(ROOT)).encode() + b"\0" + path.read_bytes() + b"\0")
     digest = "sha256:" + recipe.hexdigest()
     now = dt.datetime.now(dt.UTC)
-    labels = Registry(args.repository).labels(tag + "-sandbox")
-    rebuild, reason = needs_build(labels, upstream_sha, digest, now, components["max_build_age_days"])
     if args.force:
         rebuild, reason = True, "forced verification/rebuild"
+    else:
+        rebuild, reason = needs_publication(repositories, tag + "-sandbox", upstream_sha, digest, now,
+                                            components["max_build_age_days"])
     build_args.update(SECURITY_REFRESH=now.strftime("%G-%V"), OPENCLAW_INSTALL_DOCKER_CLI="1",
                       OPENCLAW_IMAGE_APT_PACKAGES="libgnutls30", OPENCLAW_PREFER_PNPM="1",
                       GIT_COMMIT=upstream_sha, OPENCLAW_DOCKER_BUILD_VERSION=tag.removeprefix("v"))

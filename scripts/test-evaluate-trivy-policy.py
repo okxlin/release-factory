@@ -79,6 +79,13 @@ class PolicyTests(unittest.TestCase):
         data["Results"][0]["Type"] = "node-pkg"
         self.assertEqual(self.evaluate(data).returncode, 1)
 
+    def test_node_findings_use_package_identity_when_trivy_omits_path(self):
+        data = report(path="Node.js", fixed="")
+        data["Results"][0]["Type"] = "node-pkg"
+        result = self.evaluate(data)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("node-pkg/example.org/tool", result.stdout)
+
     def test_protected_os_services_do_not_match_development_tools(self):
         self.policy["protected_os_packages"] = ["nginx", "google-chrome-stable"]
         data = report(fixed="", PkgName="nginx")
@@ -133,8 +140,9 @@ class PolicyTests(unittest.TestCase):
                 self.policy["exceptions"] = [{**self.exception, key: value}]
                 self.assertEqual(self.evaluate(report()).returncode, 2)
 
-    def test_unclassified_node_finding_fails_closed(self):
+    def test_invalid_node_package_identity_fails_closed(self):
         data = report(path="Node.js")
+        data["Results"][0]["Vulnerabilities"][0]["PkgName"] = "../escape"
         data["Results"][0]["Type"] = "node-pkg"
         self.assertEqual(self.evaluate(data).returncode, 2)
 

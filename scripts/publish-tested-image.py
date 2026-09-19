@@ -24,6 +24,13 @@ def require(value, message):
         raise ValueError(message)
 
 
+def validate_repository(variant, repository):
+    allowed = r"ghcr\.io/[a-z0-9][a-z0-9-]*/" + REPOSITORIES[variant]
+    if variant == "openclaw":
+        allowed += r"|docker\.io/[a-z0-9]+(?:[._-][a-z0-9]+)*/openclaw-sandbox"
+    require(re.fullmatch(allowed, repository), "unexpected publication repository")
+
+
 def docker(*args, capture=False):
     return subprocess.run(["docker", *map(str, args)], check=True,
                           timeout=1800, stdout=subprocess.PIPE if capture else None).stdout
@@ -142,8 +149,7 @@ def main():
     publishing.add_argument("--latest-tag", default="")
     publishing.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    require(re.fullmatch(r"ghcr\.io/[a-z0-9][a-z0-9-]*/" + REPOSITORIES[args.variant], args.repository),
-            "unexpected publication repository")
+    validate_repository(args.variant, args.repository)
     require(re.fullmatch(r"[a-f0-9]{40}", args.revision), "invalid workflow revision")
     for value in (args.run_id, args.run_attempt):
         require(re.fullmatch(r"[1-9][0-9]*", value), "invalid workflow run identity")

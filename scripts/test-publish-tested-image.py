@@ -2,8 +2,12 @@
 """Publication must reject untested, mixed-run or incomplete image sets."""
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
+import textwrap
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -14,6 +18,19 @@ SPEC.loader.exec_module(MODULE)
 
 
 class PublicationTests(unittest.TestCase):
+    def test_only_openclaw_can_publish_to_the_additional_docker_hub_destination(self):
+        for variant, name in MODULE.REPOSITORIES.items():
+            MODULE.validate_repository(variant, f"ghcr.io/okxlin/{name}")
+            if variant != "openclaw":
+                with self.subTest(variant=variant), self.assertRaises(ValueError):
+                    MODULE.validate_repository(variant, f"docker.io/okxlin/{name}")
+        MODULE.validate_repository("openclaw", "docker.io/okxlin/openclaw-sandbox")
+        for repository in ("docker.io/okxlin/other", "docker.io/okxlin/openclaw-sandbox:latest",
+                           "docker.io/UPPER/openclaw-sandbox", "evil.example/okxlin/openclaw-sandbox",
+                           "docker.io/okxlin/../openclaw-sandbox"):
+            with self.subTest(repository=repository), self.assertRaises(ValueError):
+                MODULE.validate_repository("openclaw", repository)
+
     def setUp(self):
         self.expected = {"variant": "opencode", "repository": "ghcr.io/okxlin/opencode-workstation",
                          "revision": "a" * 40, "run_id": "123", "run_attempt": "1"}
@@ -60,7 +77,8 @@ class PublicationTests(unittest.TestCase):
                 self.assertEqual(docker.call_count, 1)
 
     def test_missing_or_mixed_receipts_fail_before_remote_lookup(self):
-        for mutation in ({"run_id": "124"}, {"revision": "e" * 40}, {"run_attempt": "2"}, {"variant": "codex"}):
+        for mutation in ({"run_id": "124"}, {"revision": "e" * 40}, {"run_attempt": "2"}, {"variant": "codex"},
+                         {"repository": "docker.io/okxlin/openclaw-sandbox"}):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 self.write_receipt(root, {**self.receipt(), **mutation})
@@ -115,6 +133,46 @@ class PublicationTests(unittest.TestCase):
             with patch.object(MODULE, "remote_manifest", side_effect=[(self.manifest, self.digest), (index, "sha256:" + "f" * 64)]), patch.object(MODULE, "docker") as docker:
                 MODULE.publish(args, self.expected)
             self.assertIn(self.expected["repository"] + "@" + self.digest, docker.call_args.args)
+
+
+class OpenClawWorkflowTests(unittest.TestCase):
+    def test_dual_registry_shell_orders_version_tags_before_latest_and_stops_on_failure(self):
+        workflow = Path(__file__).resolve().parents[1] / ".github/workflows/openclaw-upstream-docker.yml"
+        step = workflow.read_text().split("      - name: Publish the verified image without rebuilding\n", 1)[1]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+        for fail_at in (0, 2, 4, 5):
+            with self.subTest(fail_at=fail_at), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                recorder = root / "python3"
+                recorder.write_text(f"#!{sys.executable}\n" + textwrap.dedent('''\
+                    import json, os, sys
+                    from pathlib import Path
+                    path = Path(os.environ["CALL_LOG"])
+                    calls = json.loads(path.read_text()) if path.exists() else []
+                    calls.append(sys.argv[1:])
+                    path.write_text(json.dumps(calls))
+                    sys.exit(1 if len(calls) == int(os.environ["FAIL_AT"]) else 0)
+                    '''))
+                recorder.chmod(0o755)
+                env = {**os.environ, "PATH": tmp + os.pathsep + os.environ["PATH"],
+                       "CALL_LOG": str(root / "calls.json"), "FAIL_AT": str(fail_at), "RUNNER_TEMP": tmp,
+                       "IMAGE": "sha256:" + "a" * 64, "GITHUB_SHA": "b" * 40,
+                       "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1", "IMAGE_TAG": "v1-sandbox",
+                       "REPOSITORY": "ghcr.io/okxlin/openclaw-sandbox", "DOCKERHUB_NAMESPACE": "okxlin"}
+                result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0 if fail_at == 0 else 1, result.stderr)
+                calls = json.loads((root / "calls.json").read_text())
+                self.assertEqual(len(calls), fail_at or 6)
+                expected = [(command, registry, tag) for command, tag in
+                            (("stage", None), ("publish", "v1-sandbox"), ("publish", "latest"))
+                            for registry in ("ghcr.io/okxlin/openclaw-sandbox", "docker.io/okxlin/openclaw-sandbox")]
+                for call, (command, registry, tag) in zip(calls, expected):
+                    self.assertEqual(call[1], command)
+                    self.assertEqual(call[call.index("--repository") + 1], registry)
+                    if tag:
+                        self.assertEqual(call[call.index("--image-tag") + 1], tag)
+                    else:
+                        self.assertEqual(call[call.index("--image-id") + 1], env["IMAGE"])
 
 
 if __name__ == "__main__":

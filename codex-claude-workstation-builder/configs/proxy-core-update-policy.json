@@ -43,7 +43,8 @@
     },
     {
       "module": "google.golang.org/grpc",
-      "version_arg": "PROXY_GRPC_VERSION"
+      "version_arg": "PROXY_GRPC_VERSION",
+      "max_version": "1.83.2"
     }
   ],
   "go_version_arg": "GO_VERSION"

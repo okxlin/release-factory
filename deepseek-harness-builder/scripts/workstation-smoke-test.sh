@@ -141,7 +141,7 @@ try {
     timeoutMs: 30_000,
   })
 
-  const wrap = ctx.sandbox.confine(['true'], {
+  const wrap = await ctx.sandbox.confine(['true'], {
     mode: 'workspace-write',
     workspaceRoot: workspace,
   })

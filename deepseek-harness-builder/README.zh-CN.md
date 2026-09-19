@@ -15,6 +15,8 @@
 
 定时任务以及留空版本的手动运行会从 DeepSeek Harness GitHub Releases 选择最高的非 draft `dsh-v*` 源码版本，校验对应 tag、commit 和源码归档 SHA-256 后构建，并发布匹配的 `<DSH_VERSION>` 和 `<DSH_VERSION>-workstation` 标签；因此上游源码版本可以在发布到 npm 之前进入镜像。手动显式传入 `dsh-v*` 可以选择指定的源码 release，传入已发布的 npm 版本或 dist-tag 时仍按请求的 npm selector 解析。`image/dsh-source.json` 保留可复现的本地/PR 基线，未来源码 release 不需要修改 Dockerfile。手动工作流也可覆盖发布标签。AppStore `latest` 通道使用浮动标签，编号 AppStore 版本使用匹配的版本标签。
 
+当前提交的源码基线是 [0.1.6-alpha.2](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.6-alpha.2)。此预发布版本将 PTC 包重命名为 `ptc-runtime`，将 workflow 执行器重命名为 `workflow-ptc`；使用旧名称的自定义 profile 需要更新。DeepSeek 现在默认使用 Messages 协议；手动配置的旧官方 API 根地址应删除或改为 `https://api.deepseek.com/anthropic`，自定义 provider URL 不受影响。
+
 构建版本、基础镜像 digest、源码和工具校验和集中保存在 [`image/components.lock.json`](image/components.lock.json)。Python 依赖使用独立的 [`image/python-requirements.lock`](image/python-requirements.lock)，旧版 npm 路径保留自己的 [package.json](image/package.json) 和 [pnpm-lock.yaml](image/pnpm-lock.yaml)。[`image/dsh-source.json`](image/dsh-source.json) 把源码归档绑定到确定的 commit 和 SHA-256。本地构建与 CI 都通过 `scripts/component-inputs.py` 解析参数，常规组件更新无需手改 Dockerfile 指令。源码构建当前仍由 npm 安装本地打包的 runtime tarball，依赖审计检查这棵实际安装树。
 
 影响 DeepSeek Harness 构建输入的 PR 会运行组件契约检查，拒绝浮动基础镜像标签、错误 checksum、缺失的锁定输入和不匹配的源码 URL。另一个 PR 工作流分别使用原生 `ubuntu-24.04`（amd64）与 `ubuntu-24.04-arm` runner 构建两个变体。两个架构都执行生产依赖审计、完整鉴权和 passthrough smoke、Caddy 检查及 Trivy 策略；Workstation 还会实际执行编译器和宿主内核沙箱探测。PR job 不接收 registry 凭据。
@@ -259,7 +261,7 @@ CADDY_TRUSTED_PROXIES=private_ranges
 | `DSH_INTERNAL_PORT` | `3080` | 容器内 DSH loopback 端口。 |
 | `GOMEMLIMIT` | `128MiB` | Caddy Go runtime 软内存限制；不限制 DSH 工作负载内存。 |
 | `GOMAXPROCS` | `2` | Caddy Go runtime CPU 限制。 |
-| `DSH_TELEMETRY_DISABLED` | `1` | 禁用 DSH telemetry。 |
+| `DSH_TELEMETRY_DISABLED` | `1` | 禁用 OTel 遥测及 0.1.6 新增的会话日志、插件清单上报。任意非空值均禁用；设为空值恢复上游默认行为。 |
 
 ## 通过 IP 地址访问
 
