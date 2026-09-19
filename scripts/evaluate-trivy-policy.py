@@ -23,6 +23,19 @@ def path_key(value):
     return str(PurePosixPath(value)).lstrip("/")
 
 
+def node_package_path(result, vulnerability):
+    package_path = vulnerability.get("PkgPath")
+    if package_path:
+        path = path_key(package_path)
+        require("/" in path and path.endswith("package.json"), "cannot classify Node.js package path")
+        return path
+    if result["Target"] == "Node.js":
+        # Trivy 0.74+ may report npm findings without a filesystem path. Keep
+        # the package identity addressable for scoped exceptions and policies.
+        return path_key(f"node-pkg/{vulnerability['PkgName']}")
+    raise ValueError("cannot classify Node.js package path")
+
+
 def load_policy(path, profile):
     policy = json.loads(path.read_text(encoding="utf-8"))
     required = {"schema_version", "profiles", "protected_paths", "exceptions"}
@@ -79,9 +92,10 @@ def findings(data):
             for field in ("VulnerabilityID", "PkgName", "InstalledVersion"):
                 require(isinstance(vuln.get(field), str) and vuln[field], f"missing {field}")
             require(isinstance(vuln.get("FixedVersion", ""), str), "invalid fixed version")
-            path = path_key(vuln.get("PkgPath") or result["Target"])
+            path = (node_package_path(result, vuln) if result["Type"] == "node-pkg"
+                    else path_key(vuln.get("PkgPath") or result["Target"]))
             if result["Type"] == "node-pkg":
-                require("/" in path and path.endswith("package.json"), "cannot classify Node.js package path")
+                require(path, "cannot classify Node.js package path")
             yield result, vuln, path
 
 
