@@ -104,6 +104,24 @@ class ProxyCoreResolverTests(unittest.TestCase):
             "0.55.0",
         )
 
+    def test_respects_security_maximum_for_go_modules(self):
+        list_url = "https://proxy.golang.org/google.golang.org/grpc/@v/list"
+        mod_84_url = "https://proxy.golang.org/google.golang.org/grpc/@v/v1.84.0.mod"
+        mod_83_url = "https://proxy.golang.org/google.golang.org/grpc/@v/v1.83.2.mod"
+        client = FakeClient(
+            text_responses={
+                list_url: "v1.83.2\nv1.84.0\n",
+                mod_84_url: "module google.golang.org/grpc\n\ngo 1.24.0\n",
+                mod_83_url: "module google.golang.org/grpc\n\ngo 1.24.0\n",
+            }
+        )
+        self.assertEqual(
+            RESOLVER.latest_compatible_module_version(
+                client, "google.golang.org/grpc", (1, 27, 0), "1.83.2"
+            ),
+            "1.83.2",
+        )
+
     def test_rendered_build_args_are_safe_and_complete(self):
         values = {
             "MIHOMO_VERSION": "1.2.3",
@@ -133,6 +151,8 @@ class ProxyCoreResolverTests(unittest.TestCase):
         )
         self.assertEqual(len(policy["go_modules"]), 5)
         self.assertIn({"module": "golang.org/x/mod", "version_arg": "PROXY_X_MOD_VERSION"}, policy["go_modules"])
+        grpc_policy = next(item for item in policy["go_modules"] if item["module"] == "google.golang.org/grpc")
+        self.assertEqual(grpc_policy["max_version"], "1.83.2")
 
 
 if __name__ == "__main__":

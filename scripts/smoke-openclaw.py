@@ -34,8 +34,13 @@ def load_image_into_daemon(daemon, image):
             timeout=600,
         )
         saved.stdout.close()
-        if saved.wait(timeout=30) or loaded.returncode:
-            raise RuntimeError(f"could not load image {image} into the isolated daemon")
+        saved_status = saved.wait(timeout=30)
+        if saved_status or loaded.returncode:
+            details = (loaded.stdout + loaded.stderr).strip()
+            raise RuntimeError(
+                f"could not load image {image} into the isolated daemon "
+                f"(save_exit={saved_status}, load_exit={loaded.returncode}): {details}"
+            )
 
 
 SANDBOX_PROBE = r"""
@@ -105,7 +110,7 @@ def main(image):
                "-v", volumes[0] + ":/docker", "-v", volumes[1] + ":/var/lib/docker",
                "-v", volumes[2] + ":/workspace", "-v", volumes[3] + ":/home/node/.openclaw", daemon_image,
                "--host=unix:///docker/docker.sock", "--bridge=none", "--iptables=false",
-               "--ip6tables=false", "--ip-forward=false", "--storage-driver=vfs")
+               "--ip6tables=false", "--ip-forward=false", "--storage-driver=overlay2")
         for _ in range(60):
             if docker("exec", daemon, "docker", "-H", "unix:///docker/docker.sock", "info", check=False).returncode == 0:
                 break
