@@ -17,6 +17,7 @@ on:
       - 'scripts/evaluate-trivy-policy.py'
       - 'scripts/test-evaluate-trivy-policy.py'
       - 'scripts/publish-tested-image.py'
+      - 'scripts/registry_image.py'
       - 'scripts/test-publish-tested-image.py'
       - '.github/workflows/openclaw-upstream-docker.yml'
 
@@ -168,6 +169,10 @@ jobs:
           REPOSITORY: ${{ needs.prepare.outputs.repository }}
           DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
           IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           set -euo pipefail
           repositories=("$REPOSITORY" "docker.io/$DOCKERHUB_NAMESPACE/openclaw-sandbox")

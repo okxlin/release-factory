@@ -133,6 +133,8 @@ jobs:
           REPOSITORY: ${{ steps.params.outputs.repository }}
           IMAGE_TAG: ${{ steps.params.outputs.image_tag }}
           LATEST_TAG: ${{ steps.params.outputs.release_latest }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
         run: |
           python3 scripts/publish-tested-image.py stage --image "$IMAGE" --image-id "$IMAGE" \
             --variant "$VARIANT" --platform linux/amd64 --repository "$REPOSITORY" \
