@@ -18,6 +18,9 @@ on:
       push_latest:
         default: true
         type: boolean
+      publish:
+        default: false
+        type: boolean
       refresh_system_packages:
         default: true
         type: boolean
@@ -160,6 +163,7 @@ jobs:
 
   publish:
     needs: [prepare, verify]
+    if: inputs.publish && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
