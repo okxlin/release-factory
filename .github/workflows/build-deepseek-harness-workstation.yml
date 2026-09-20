@@ -48,6 +48,7 @@ jobs:
       dsh_version: ${{ inputs.dsh_version || '' }}
       platforms: ${{ inputs.platforms || 'linux/amd64,linux/arm64' }}
       push_latest: ${{ github.event_name == 'schedule' || inputs.push_latest }}
+      publish: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
       refresh_system_packages: ${{ github.event_name == 'schedule' || inputs.refresh_system_packages }}
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
