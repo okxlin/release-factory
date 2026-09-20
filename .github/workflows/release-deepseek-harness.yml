@@ -226,6 +226,10 @@ jobs:
           IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
           LATEST_TAG: ${{ needs.prepare.outputs.latest_tag }}
           PUSH_LATEST: ${{ inputs.push_latest }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+          DOCKERHUB_USERNAME: ${{ env.DOCKERHUB_NAMESPACE }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           set -euo pipefail
           floating_args=()

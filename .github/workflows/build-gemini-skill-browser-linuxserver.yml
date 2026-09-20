@@ -34,6 +34,7 @@ on:
       - 'scripts/evaluate-trivy-policy.py'
       - 'scripts/test-evaluate-trivy-policy.py'
       - 'scripts/publish-tested-image.py'
+      - 'scripts/registry_image.py'
       - 'scripts/test-publish-tested-image.py'
 
 permissions:

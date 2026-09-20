@@ -11,6 +11,7 @@ on:
       - ".github/actions/verify-deepseek-harness/**"
       - "deepseek-harness-builder/**"
       - "scripts/trivy-image-gate.sh"
+      - "scripts/registry_image.py"
       - "scripts/evaluate-trivy-policy.py"
       - "scripts/test-evaluate-trivy-policy.py"
       - "SECURITY_SCAN.md"

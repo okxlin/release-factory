@@ -180,6 +180,8 @@ jobs:
           VARIANT: ${{ inputs.variant }}
           REPOSITORY: ${{ needs.prepare.outputs.repository }}
           ARCH: ${{ matrix.arch }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
         run: |
           python3 scripts/publish-tested-image.py stage --image "$IMAGE" --image-id "$IMAGE" \
             --variant "$VARIANT" --platform "linux/$ARCH" --repository "$REPOSITORY" \

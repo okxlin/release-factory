@@ -2,27 +2,33 @@
 """Export verified images and publish those exact images without rebuilding."""
 
 import argparse
-import gzip
 import hashlib
 import json
-from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
+from pathlib import Path
 
+LIBRARY = Path(__file__).resolve().parents[2] / "scripts"
+if str(LIBRARY) not in sys.path:
+    sys.path.insert(0, str(LIBRARY))
+from registry_image import (
+    DIGEST,
+    IMAGE_TYPES,
+    INDEX_TYPES,
+    RegistryClient,  # noqa: F401 - re-exported for the focused Registry V2 test
+    archive_metadata,
+    create_registry_client,
+    save_image,
+)
+from registry_image import (
+    prepare_platform_manifest as prepare_image_manifest,
+)
 
-DIGEST = re.compile(r"sha256:[a-f0-9]{64}")
 PLATFORMS = ("linux/amd64", "linux/arm64")
-IMAGE_TYPES = {
-    "application/vnd.oci.image.manifest.v1+json",
-    "application/vnd.docker.distribution.manifest.v2+json",
-}
-INDEX_TYPES = {
-    "application/vnd.oci.image.index.v1+json",
-    "application/vnd.docker.distribution.manifest.list.v2+json",
-}
 
 
 def require(condition, message):
@@ -80,23 +86,7 @@ def check_archive(directory, expected):
     require(sha256(archive) == receipt.get("archive_sha256"), f"archive checksum mismatch: {archive}")
 
     # Read metadata without extracting any archive paths into the host filesystem.
-    digest = receipt["image_id"].removeprefix("sha256:")
-    config_names = {f"{digest}.json", f"blobs/sha256/{digest}"}
-    metadata = {}
-    with tarfile.open(archive, "r|gz") as saved:
-        for member in saved:
-            if member.name not in config_names | {"manifest.json"}:
-                continue
-            require(member.isfile() and member.size <= 4 * 1024 * 1024,
-                    "invalid image archive metadata member")
-            require(member.name not in metadata, "duplicate image archive metadata")
-            metadata[member.name] = saved.extractfile(member).read()
-    manifest = json.loads(metadata.get("manifest.json", b"null"))
-    require(isinstance(manifest, list) and len(manifest) == 1, "archive must contain exactly one image")
-    config_name = manifest[0].get("Config")
-    require(config_name in config_names and config_name in metadata, "archive config does not match tested image ID")
-    config_bytes = metadata[config_name]
-    require(hashlib.sha256(config_bytes).hexdigest() == digest, "archive image config digest mismatch")
+    config_bytes, _ = archive_metadata(archive, receipt["image_id"])
     check_config(json.loads(config_bytes), receipt)
     return receipt
 
@@ -116,11 +106,7 @@ def export_image(options, expected):
           flush=True)
     archive = directory / "image.tar.gz"
     # Saving by config ID binds the archive to the tested image, even if a tag moves.
-    with archive.open("xb") as target:
-        with subprocess.Popen(["docker", "image", "save", options.image_id], stdout=subprocess.PIPE) as saved:
-            with gzip.GzipFile(filename="", mode="wb", fileobj=target, compresslevel=1, mtime=0) as zipped:
-                shutil.copyfileobj(saved.stdout, zipped)
-            require(saved.wait() == 0, "docker image save failed")
+    save_image(options.image_id, archive)
     receipt = {"schema_version": 1, **expected, "archive_sha256": sha256(archive)}
     (directory / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(receipt, indent=2))
@@ -130,6 +116,11 @@ def remote_manifest(reference):
     # Buildx --raw emits the original bytes without an added newline.
     raw = docker("buildx", "imagetools", "inspect", "--raw", reference, capture=True)
     return json.loads(raw), "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def prepare_platform_manifest(directory, receipt, destination):
+    """Convert one verified Docker-save archive into a digest-addressed manifest."""
+    return prepare_image_manifest(directory / "image.tar.gz", receipt["image_id"], destination)
 
 
 def check_index(reference, expected_digests):
@@ -172,34 +163,41 @@ def publish_images(options, expected):
         return
 
     # Validate every archive and loaded image before making the first registry write.
-    for directory, receipt in artifacts:
-        docker("image", "load", "--input", directory / "image.tar.gz")
-        inspect_image(receipt["image_id"], receipt)
+    with tempfile.TemporaryDirectory(prefix="deepseek-harness-manifests-") as staging:
+        prepared = []
+        for directory, receipt in artifacts:
+            prepared.append((receipt, prepare_platform_manifest(
+                directory, receipt, Path(staging) / receipt["platform"].split("/")[1])))
+        for directory, receipt in artifacts:
+            docker("image", "load", "--input", directory / "image.tar.gz")
+            inspect_image(receipt["image_id"], receipt)
 
-    staged = {}
-    for repository in options.repository:
-        staged[repository] = {}
-        for _, receipt in artifacts:
-            arch = receipt["platform"].split("/")[1]
-            reference = f"{repository}:ci-{expected['run_id']}-{options.run_attempt}-{expected['variant']}-{arch}"
-            docker("image", "tag", receipt["image_id"], reference)
-            docker("image", "push", reference)
-            manifest, digest = remote_manifest(reference)
-            require(manifest.get("schemaVersion") == 2 and manifest.get("mediaType") in IMAGE_TYPES
-                    and manifest.get("config", {}).get("digest") == receipt["image_id"],
-                    f"pushed image does not match tested image ID: {reference}")
-            staged[repository][receipt["platform"]] = digest
+        clients = {repository: create_registry_client(repository) for repository in options.repository}
+        staged = {}
+        for repository, client in clients.items():
+            staged[repository] = {}
+            for receipt, platform_manifest in prepared:
+                digest = client.publish_platform_manifest(platform_manifest)
+                require(digest == platform_manifest["digest"],
+                        f"registry returned an unexpected platform digest: {repository}")
+                reference = f"{repository}@{digest}"
+                manifest, remote_digest = remote_manifest(reference)
+                require(manifest.get("schemaVersion") == 2 and manifest.get("mediaType") in IMAGE_TYPES
+                        and manifest.get("config", {}).get("digest") == receipt["image_id"],
+                        f"published image does not match tested image ID: {reference}")
+                require(remote_digest == digest, f"published image digest changed: {reference}")
+                staged[repository][receipt["platform"]] = digest
 
-    # Both registries must have all images before updating release tags. Floating
-    # tags follow only after the version tag has been verified in both registries.
-    published = []
-    for tag in tags:
-        for repository, digests in staged.items():
-            reference = f"{repository}:{tag}"
-            docker("buildx", "imagetools", "create", "--prefer-index=true", "--tag", reference,
-                   *(f"{repository}@{digest}" for digest in digests.values()))
-            digest = check_index(reference, digests)
-            published.append(f"{reference} -> {digest}")
+        # Both registries must have all images before updating release tags. Floating
+        # tags follow only after the version tag has been verified in both registries.
+        published = []
+        for tag in tags:
+            for repository, digests in staged.items():
+                reference = f"{repository}:{tag}"
+                docker("buildx", "imagetools", "create", "--prefer-index=true", "--tag", reference,
+                       *(f"{repository}@{digest}" for digest in digests.values()))
+                digest = check_index(reference, digests)
+                published.append(f"{reference} -> {digest}")
     for item in published:
         print(item)
     if options.summary:
@@ -239,7 +237,8 @@ def main():
         else:
             publish_images(options, expected)
         return 0
-    except (OSError, ValueError, KeyError, TypeError, AttributeError, tarfile.TarError, subprocess.SubprocessError) as exc:
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, RuntimeError,
+            tarfile.TarError, subprocess.SubprocessError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
