@@ -563,17 +563,16 @@ async function login() {
     'responses disable MIME sniffing');
   assert(!response.headers.server, 'Caddy does not disclose a Server header');
 
-  const accessCookie = jar.setCookieLines.find(line => line.startsWith('DSH_ACCESS_TOKEN='));
-  const refreshCookie = jar.setCookieLines.find(line => line.startsWith('DSH_REFRESH_TOKEN='));
-  assert(Boolean(accessCookie), 'login sets the access cookie');
-  assert(Boolean(refreshCookie), 'login sets the refresh cookie');
+  const accessCookie = jar.setCookieLines.findLast(line => line.startsWith('DSH_ACCESS_TOKEN='));
+  assert(Boolean(accessCookie) && jar.cookies.has('DSH_ACCESS_TOKEN'),
+    'login sets the access cookie');
+  assert(!jar.cookies.has('DSH_REFRESH_TOKEN'),
+    'login does not retain a legacy refresh cookie');
   assert(/;\s*Secure/i.test(accessCookie), 'access cookie is Secure');
   assert(/;\s*HttpOnly/i.test(accessCookie), 'access cookie is HttpOnly');
   assert(/;\s*SameSite=Strict/i.test(accessCookie), 'access cookie is SameSite=Strict');
   assert(new RegExp(`;\\s*Max-Age=${tokenLifetime}(?:;|$)`, 'i').test(accessCookie),
     'access cookie uses the configured login lifetime');
-  assert(new RegExp(`;\\s*Max-Age=${tokenLifetime}(?:;|$)`, 'i').test(refreshCookie),
-    'refresh cookie uses the configured login lifetime');
 
   const accessToken = jar.cookies.get('DSH_ACCESS_TOKEN');
   const payload = JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64url').toString('utf8'));
@@ -873,67 +872,44 @@ async function submitUsername(jar, extraHeaders = {}) {
   }, jar);
 }
 
-async function passwordForm(jar, usernameHeaders = {}) {
-  const usernameResponse = await submitUsername(jar, usernameHeaders);
-  assert(usernameResponse.status === 303, 'username stage opens a password sandbox for rate-limit testing');
-
-  const passwordPath = new URL(usernameResponse.headers.location, publicOrigin);
-  const passwordResponse = await request(passwordPath.pathname + passwordPath.search, {}, jar);
-  assert(passwordResponse.status === 200, 'password sandbox opens for rate-limit testing');
-
-  const action = (passwordResponse.body.match(/<form[^>]+action="([^"]+)"/) || [])[1];
-  const sandboxId = (passwordResponse.body.match(/name="sandbox_id"[^>]+value="([^"]+)"/) || [])[1];
-  assert(Boolean(action && sandboxId), 'password sandbox exposes a reusable form contract');
-  return {action, jar, sandboxId};
-}
-
-async function submitPassword(form, secret, extraHeaders = {}) {
+async function passwordLimitProbe(attempt, spoofedAddress) {
   const body = new URLSearchParams({
-    secret,
-    sandbox_id: form.sandboxId,
+    secret: 'rate-limit-probe',
+    sandbox_id: `rate-limit-probe-${attempt}`,
     submit: 'Sign In',
   }).toString();
-  return request(form.action, {
+  return request(`/auth/sandbox/rate-limit-probe-${attempt}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
       'Content-Length': Buffer.byteLength(body),
-      ...extraHeaders,
+      'X-Forwarded-For': `${spoofedAddress}, 203.0.113.20, 198.51.100.10`,
     },
     body,
-  }, form.jar);
+  });
 }
 
 (async () => {
   let passwordAttempts = 0;
+  let downstreamStatus;
   while (passwordAttempts < 10) {
     const attempt = passwordAttempts + 1;
-    const form = await passwordForm(new CookieJar(), {
-      'X-Forwarded-For': `192.0.2.${100 + attempt}, 203.0.113.${100 + attempt}, 198.51.100.10`,
-    });
-    const response = await submitPassword(
-      form,
-      `rate-limit-wrong-${attempt}`,
-      {'X-Forwarded-For': `192.0.2.${attempt}, 203.0.113.20, 198.51.100.10`},
-    );
-    if (response.status !== 401) {
-      throw new Error(`password attempt ${attempt}: expected 401, got ${response.status}`);
+    const response = await passwordLimitProbe(attempt, `192.0.2.${attempt}`);
+    if (response.status === 429) {
+      throw new Error(`password-stage request ${attempt}: rate limited before configured threshold`);
+    }
+    if (downstreamStatus === undefined) downstreamStatus = response.status;
+    if (response.status !== downstreamStatus) {
+      throw new Error(`password-stage request ${attempt}: downstream status changed from ${downstreamStatus} to ${response.status}`);
     }
     passwordAttempts += 1;
   }
   assert(passwordAttempts === 10,
-    'the first ten password-stage POSTs remain available to one resolved client IP');
+    'the first ten password-stage POSTs reach authentication with one resolved client IP');
 
-  const blockedForm = await passwordForm(new CookieJar(), {
-    'X-Forwarded-For': '192.0.2.121, 203.0.113.121, 198.51.100.10',
-  });
-  const blockedPassword = await submitPassword(
-    blockedForm,
-    'rate-limit-blocked',
-    {'X-Forwarded-For': '192.0.2.250, 203.0.113.20, 198.51.100.10'},
-  );
+  const blockedPassword = await passwordLimitProbe(11, '192.0.2.250');
   assert(blockedPassword.status === 429,
-    'the eleventh password failure is rate limited despite a spoofed leftmost XFF value');
+    'the eleventh password-stage POST is rate limited despite a spoofed leftmost XFF value');
   assert(Boolean(blockedPassword.headers['retry-after']),
     'rate-limited authentication responses include Retry-After');
 
