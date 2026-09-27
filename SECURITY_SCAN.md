@@ -93,7 +93,7 @@ Both DeepSeek Harness workflows additionally run
 `deepseek-harness-builder/scripts/check-caddy-vulnerabilities.sh` with
 `govulncheck 1.7.0`. Its custom Caddy build:
 
-- patches go-authcrunch `1.1.41` to remove the unused GPG public-key parser;
+- patches go-authcrunch `1.3.6` to remove the unused GPG public-key parser;
 - applies Caddy upstream commit `b2693fb`'s two-line CEL compatibility fix to
   checksum-verified Caddy `2.11.4` source, then pins `cel-go` `0.32.0` for
   `GO-2026-6094`;
@@ -116,7 +116,7 @@ Source-mode govulncheck also exposes a version-range discrepancy in the Go
 database for historical caddy-security advisories. The Go records for
 `GO-2024-2549` and `GO-2024-2557` through `GO-2024-2565` contain no fixed event,
 while the corresponding GitHub advisories limit the vulnerable versions to
-`<=1.1.20`, `<=1.1.23`, or `<=1.0.42`. The image pins caddy-security `1.1.64`.
+`<=1.1.20`, `<=1.1.23`, or `<=1.0.42`. The image pins caddy-security `1.2.2`.
 Trivy evaluates the published package ranges and currently reports zero affected
 caddy-security findings. Examples:
 

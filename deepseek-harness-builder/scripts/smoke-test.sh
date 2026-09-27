@@ -1049,11 +1049,44 @@ for (const name of ['users.json', 'jwt-secret']) {
 NODE
 }
 
+component_version() {
+    docker exec "${container_name}" node -e '
+const value = require("/usr/share/deepseek-harness/components.lock.json").build_args[process.argv[1]]
+if (typeof value !== "string" || value.length === 0) process.exit(1)
+process.stdout.write(value)
+' "$1"
+}
+
 check_runtime_versions() {
     local image_arch
     local runtime_arch
     local expected_runtime_arch
     local command_name
+    local node_version
+    local pnpm_version
+    local npm_version
+    local go_version
+    local actionlint_version
+    local yq_version
+    local uv_version
+    local ruff_version
+    local docker_version
+    local docker_compose_version
+    local docker_buildx_version
+    local caddy_version
+
+    node_version="$(component_version NODE_VERSION)"
+    pnpm_version="$(component_version PNPM_VERSION)"
+    npm_version="$(component_version NPM_VERSION)"
+    go_version="$(component_version GO_VERSION)"
+    actionlint_version="$(component_version ACTIONLINT_VERSION)"
+    yq_version="$(component_version YQ_VERSION)"
+    uv_version="$(component_version UV_VERSION)"
+    ruff_version="$(component_version RUFF_VERSION)"
+    docker_version="$(component_version DOCKER_VERSION)"
+    docker_compose_version="$(component_version DOCKER_COMPOSE_VERSION)"
+    docker_buildx_version="$(component_version DOCKER_BUILDX_VERSION)"
+    caddy_version="$(component_version CADDY_VERSION)"
 
     image_arch="$(docker image inspect --format '{{.Architecture}}' "${IMAGE}")"
     case "${image_arch}" in
@@ -1080,12 +1113,12 @@ check_runtime_versions() {
         || fail "DeepSeek Harness version is not ${EXPECTED_DSH_VERSION}"
     pass "DeepSeek Harness version matches ${EXPECTED_DSH_VERSION}"
 
-    [[ "$(docker exec "${container_name}" node --version)" == "v24.21.0" ]] \
-        || fail "Node.js version is not pinned to v24.21.0"
+    [[ "$(docker exec "${container_name}" node --version)" == "v${node_version}" ]] \
+        || fail "Node.js version drifted from the component lock"
     pass "Node.js version is pinned"
 
-    [[ "$(docker exec "${container_name}" pnpm --version)" == "12.3.4" ]] \
-        || fail "pnpm version is not pinned to 12.3.4"
+    [[ "$(docker exec "${container_name}" pnpm --version)" == "${pnpm_version}" ]] \
+        || fail "pnpm version drifted from the component lock"
     pass "standalone pnpm version is pinned"
 
     if docker exec "${container_name}" sh -c 'command -v corepack >/dev/null 2>&1'; then
@@ -1115,34 +1148,34 @@ check_runtime_versions() {
         done
         pass "lightweight runtime omits npm and compiler toolchains"
     else
-        [[ "$(docker exec "${container_name}" npm --version)" == "11.19.1" ]] \
-            || fail "npm is not pinned to 11.19.1"
-        [[ "$(docker exec "${container_name}" npx --version)" == "11.19.1" ]] \
-            || fail "npx is not pinned to 11.19.1"
-        [[ "$(docker exec "${container_name}" go version)" == go\ version\ go1.27.1* ]] \
-            || fail "Go version is not pinned to 1.27.1"
+        [[ "$(docker exec "${container_name}" npm --version)" == "${npm_version}" ]] \
+            || fail "npm version drifted from the component lock"
+        [[ "$(docker exec "${container_name}" npx --version)" == "${npm_version}" ]] \
+            || fail "npx version drifted from the component lock"
+        [[ "$(docker exec "${container_name}" go version)" == "go version go${go_version}"* ]] \
+            || fail "Go version drifted from the component lock"
         if docker exec "${container_name}" sh -c 'command -v rustc >/dev/null 2>&1'; then
             fail "Rust compiler is unexpectedly present in the workstation image"
         fi
         if docker exec "${container_name}" sh -c 'command -v cargo >/dev/null 2>&1'; then
             fail "Cargo is unexpectedly present in the workstation image"
         fi
-        [[ "$(docker exec "${container_name}" actionlint -version | head -n 1)" == "1.7.12" ]] \
-            || fail "actionlint is not pinned to 1.7.12"
-        docker exec "${container_name}" yq --version | grep -Fq 'version v4.53.6' \
-            || fail "yq is not pinned to 4.53.6"
-        docker exec "${container_name}" uv --version | grep -Fq 'uv 0.12.12 ' \
-            || fail "uv is not pinned to 0.12.12"
-        docker exec "${container_name}" uvx --version | grep -Fq 'uvx 0.12.12 ' \
-            || fail "uvx is not pinned to 0.12.12"
-        [[ "$(docker exec "${container_name}" ruff --version)" == "ruff 0.16.6" ]] \
-            || fail "Ruff is not pinned to 0.16.6"
-        [[ "$(docker exec "${container_name}" docker --version)" == Docker\ version\ 29.8.0,* ]] \
-            || fail "Docker CLI is not pinned to 29.8.0"
-        docker exec "${container_name}" docker compose version | grep -Fq 'Docker Compose version v5.5.1' \
-            || fail "Docker Compose is not pinned to 5.5.1"
-        docker exec "${container_name}" docker buildx version | grep -Fq 'github.com/docker/buildx v0.37.0 ' \
-            || fail "Docker Buildx is not pinned to 0.37.0"
+        [[ "$(docker exec "${container_name}" actionlint -version | head -n 1)" == "${actionlint_version}" ]] \
+            || fail "actionlint version drifted from the component lock"
+        docker exec "${container_name}" yq --version | grep -Fq "version v${yq_version}" \
+            || fail "yq version drifted from the component lock"
+        docker exec "${container_name}" uv --version | grep -Fq "uv ${uv_version} " \
+            || fail "uv version drifted from the component lock"
+        docker exec "${container_name}" uvx --version | grep -Fq "uvx ${uv_version} " \
+            || fail "uvx version drifted from the component lock"
+        [[ "$(docker exec "${container_name}" ruff --version)" == "ruff ${ruff_version}" ]] \
+            || fail "Ruff version drifted from the component lock"
+        [[ "$(docker exec "${container_name}" docker --version)" == "Docker version ${docker_version},"* ]] \
+            || fail "Docker CLI version drifted from the component lock"
+        docker exec "${container_name}" docker compose version | grep -Fq "Docker Compose version v${docker_compose_version}" \
+            || fail "Docker Compose version drifted from the component lock"
+        docker exec "${container_name}" docker buildx version | grep -Fq "github.com/docker/buildx v${docker_buildx_version} " \
+            || fail "Docker Buildx version drifted from the component lock"
         if docker exec "${container_name}" test -S /var/run/docker.sock; then
             fail "Docker daemon socket is unexpectedly mounted by default"
         fi
@@ -1156,8 +1189,8 @@ check_runtime_versions() {
         pass "workstation language toolchains and development CLI are present"
     fi
 
-    docker exec "${container_name}" caddy version | grep -Fq 'v2.11.4' \
-        || fail "Caddy version is not pinned to v2.11.4"
+    docker exec "${container_name}" caddy version | grep -Fq "v${caddy_version}" \
+        || fail "Caddy version drifted from the component lock"
     local caddy_modules
     caddy_modules="$(docker exec "${container_name}" caddy list-modules)"
     for module in \

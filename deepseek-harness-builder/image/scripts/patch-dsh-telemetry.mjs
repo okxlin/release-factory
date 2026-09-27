@@ -14,7 +14,7 @@ const baseRequire = createRequire(basePath)
 
 // These 0.1.6 request contributors are independent of the CLI's OTel switch.
 // Preserve the image's opt-out for every profile, including explicit overlays.
-// https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.6-alpha.2/packages/session/session-log-deepseek
+// https://github.com/deepseek-ai/deepseek-harness/tree/dsh-v0.1.7-rc.2/packages/session/session-log-deepseek
 const guards = [
   ['@deepseek-ai/dsh-session-log-deepseek', 'config.enabled !== true'],
   ['@deepseek-ai/dsh-plugin-package-inventory-deepseek', 'config.enabled === false'],
