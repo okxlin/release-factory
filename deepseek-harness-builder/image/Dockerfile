@@ -53,8 +53,8 @@ RUN wget -qO /tmp/caddy.tar.gz \
     && ! grep -R -F 'github.com/google/cel-go' modules/caddyhttp
 
 # caddy-security's local password flow does not use go-authcrunch's GPG public
-# key parser. Remove that parser because x/crypto/openpgp is unmaintained and
-# has no fixed release, then test the patched identity package before linking.
+# key parser. Keep this unused parser out of the custom binary, then test the
+# patched identity package before linking.
 RUN wget -qO /tmp/go-authcrunch.tar.gz \
         "https://github.com/greenpau/go-authcrunch/archive/refs/tags/v${GO_AUTHCRUNCH_VERSION}.tar.gz" \
     && printf '%s  %s\n' \
