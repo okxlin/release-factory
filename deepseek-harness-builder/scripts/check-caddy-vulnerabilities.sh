@@ -3,6 +3,8 @@ set -Eeuo pipefail
 
 IMAGE="${CADDY_SCAN_IMAGE:-deepseek-harness:ci-amd64}"
 EXPECTED_STRIPPED_BINARY_FINDING="GO-2026-5932"
+EXPECTED_PATCHED_GRPC_FINDING="GO-2026-6443"
+EXPECTED_PATCHED_GRPC_VERSION="v1.84.0"
 
 usage() {
     cat <<'EOF'
@@ -11,7 +13,8 @@ Usage: check-caddy-vulnerabilities.sh [--image IMAGE]
 Runs govulncheck against the Caddy binary embedded in the image. Caddy's
 production build is stripped, so govulncheck can fall back to module-level
 findings. The only accepted fallback is GO-2026-5932 when the build-produced Go
-package manifest proves that no openpgp package is linked.
+package manifest proves that no openpgp package is linked. GO-2026-6443 is also
+accepted only for patched gRPC v1.84.0 when the manifest excludes its xDS server.
 EOF
 }
 
@@ -104,9 +107,7 @@ mapfile -t finding_ids < <(
 )
 finding_count="$(grep -Ec '^Vulnerability #[0-9]+:' <<< "${scan_output}" || true)"
 
-if (( finding_count != 1 )) \
-    || (( ${#finding_ids[@]} != 1 )) \
-    || [[ "${finding_ids[0]:-}" != "${EXPECTED_STRIPPED_BINARY_FINDING}" ]]; then
+if (( finding_count == 0 )) || (( finding_count != ${#finding_ids[@]} )); then
     printf 'ERROR: govulncheck reported an unaccepted Caddy finding\n' >&2
     exit 1
 fi
@@ -116,7 +117,32 @@ if go tool nm "${temp_dir}/caddy" >/dev/null 2>&1; then
     exit 1
 fi
 
+for finding_id in "${finding_ids[@]}"; do
+    case "${finding_id}" in
+        "${EXPECTED_STRIPPED_BINARY_FINDING}"|"${EXPECTED_PATCHED_GRPC_FINDING}") ;;
+        *)
+            printf 'ERROR: govulncheck reported an unaccepted Caddy finding: %s\n' "${finding_id}" >&2
+            exit 1
+            ;;
+    esac
+done
+
+if printf '%s\n' "${finding_ids[@]}" | grep -Fxq "${EXPECTED_PATCHED_GRPC_FINDING}"; then
+    grpc_version="$(go version -m "${temp_dir}/caddy" \
+        | awk '$1 == "dep" && $2 == "google.golang.org/grpc" { print $3 }')"
+    if [[ "${grpc_version}" != "${EXPECTED_PATCHED_GRPC_VERSION}" ]]; then
+        printf 'ERROR: refusing the gRPC fallback for unexpected version: %s\n' "${grpc_version:-missing}" >&2
+        exit 1
+    fi
+    if grep -Fxq 'google.golang.org/grpc/internal/xds/server' "${temp_dir}/CADDY_GO_PACKAGES.txt"; then
+        printf 'ERROR: refusing the gRPC fallback because the vulnerable xDS server package is linked\n' >&2
+        exit 1
+    fi
+    printf '[caddy-scan] PASS: %s is excluded by patched gRPC %s and the unlinked xDS server package\n' \
+        "${EXPECTED_PATCHED_GRPC_FINDING}" "${EXPECTED_PATCHED_GRPC_VERSION}"
+fi
+
 printf '%s\n' \
-    "[caddy-scan] PASS: accepted ${EXPECTED_STRIPPED_BINARY_FINDING} only as a stripped-binary module-level finding; the linked package manifest excludes OpenPGP"
+    "[caddy-scan] PASS: accepted stripped-binary module-level findings: ${finding_ids[*]}; the linked package manifest excludes OpenPGP"
 printf '%s\n' \
     '[caddy-scan] Reference: https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck#hdr-Limitations'

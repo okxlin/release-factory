@@ -148,13 +148,17 @@ try {
   assert.equal(basename(wrap.argv[0]), 'landlock-run')
 
   const bash = ctx.shell
+  const runBash = async request => {
+    const execution = await bash.execute(bash.resolve(request))
+    return execution.result()
+  }
   const insidePath = join(workspace, 'allowed.txt')
   const deniedPath = join(outside, 'blocked.txt')
   const fullPath = join(outside, 'full-access.txt')
 
-  const inside = await bash.run(bash.resolve({
+  const inside = await runBash({
     command: `printf workspace-ok > ${insidePath}`,
-  }))
+  })
   assert.equal(inside.exitCode, 0)
   assert.deepEqual(inside.sandbox, {
     mode: 'workspace-write',
@@ -163,21 +167,21 @@ try {
   })
   assert.equal(await readFile(insidePath, 'utf8'), 'workspace-ok')
 
-  const denied = await bash.run(bash.resolve({
+  const denied = await runBash({
     command: `printf should-not-exist > ${deniedPath}`,
-  }))
+  })
   assert.notEqual(denied.exitCode, 0)
   assert.equal(denied.sandbox?.mode, 'workspace-write')
   assert.equal(denied.sandbox?.denied, true)
   await assert.rejects(readFile(deniedPath, 'utf8'), error => error?.code === 'ENOENT')
 
-  const full = await bash.run(bash.resolve({
+  const full = await runBash({
     command: `printf full-access-ok > ${fullPath}`,
     sandboxPolicy: {
       mode: 'danger-full-access',
       workspaceRoot: workspace,
     },
-  }))
+  })
   assert.equal(full.exitCode, 0)
   assert.deepEqual(full.sandbox, {
     mode: 'danger-full-access',

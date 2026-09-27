@@ -1,19 +1,18 @@
 diff --git a/pkg/identity/public_key.go b/pkg/identity/public_key.go
-index 7236ec9..cbc9f4d 100644
 --- a/pkg/identity/public_key.go
 +++ b/pkg/identity/public_key.go
-@@ -22 +21,0 @@ import (
+@@ -22,1 +22,0 @@
 -	"encoding/hex"
-@@ -25 +23,0 @@ import (
+@@ -25,1 +24,0 @@
 -	"strconv"
-@@ -33 +30,0 @@ import (
--	"golang.org/x/crypto/openpgp"
-@@ -39 +35,0 @@ var supportedPublicKeyTypes = map[string]bool{
+@@ -29,1 +27,0 @@
+-	"github.com/ProtonMail/go-crypto/openpgp"
+@@ -40,1 +37,0 @@
 -	"gpg": true,
-@@ -134,2 +129,0 @@ func (p *PublicKey) parse() error {
+@@ -135,2 +131,0 @@
 -	case strings.Contains(p.Payload, "BEGIN PGP PUBLIC KEY BLOCK"):
 -		return p.parsePublicKeyPGP()
-@@ -203,61 +196,0 @@ func (p *PublicKey) parsePublicKeyOpenSSH() error {
+@@ -204,61 +198,0 @@
 -func (p *PublicKey) parsePublicKeyPGP() error {
 -	var user, algo, comment string
 -	p.Payload = strings.TrimSpace(p.Payload)
@@ -76,15 +75,14 @@ index 7236ec9..cbc9f4d 100644
 -}
 -
 diff --git a/pkg/identity/public_key_test.go b/pkg/identity/public_key_test.go
-index 10af3bf..a55e806 100644
 --- a/pkg/identity/public_key_test.go
 +++ b/pkg/identity/public_key_test.go
-@@ -18,2 +17,0 @@ import (
+@@ -18,2 +18,0 @@
 -	"bufio"
 -	"bytes"
-@@ -25 +22,0 @@ import (
+@@ -25,1 +23,0 @@
 -	"os"
-@@ -35,18 +31,0 @@ import (
+@@ -35,19 +33,0 @@
 -func readPEMFile(fp string) string {
 -	var buffer bytes.Buffer
 -	fileHandle, err := os.Open(fp)
@@ -95,7 +93,8 @@ index 10af3bf..a55e806 100644
 -	scanner := bufio.NewScanner(fileHandle)
 -	for scanner.Scan() {
 -		line := scanner.Text()
--		buffer.WriteString(strings.TrimSpace(line) + "\n")
+-		buffer.WriteString(strings.TrimSpace(line))
+-		buffer.WriteString("\n")
 -	}
 -	if err := scanner.Err(); err != nil {
 -		panic(err)
@@ -103,10 +102,10 @@ index 10af3bf..a55e806 100644
 -	return buffer.String()
 -}
 -
-@@ -168 +147 @@ func TestNewPublicKey(t *testing.T) {
+@@ -169,1 +147,1 @@
 -			err:       errors.ErrPublicKeyUsagePayloadMismatch.WithArgs("gpg"),
 +			err:       errors.ErrPublicKeyInvalidUsage.WithArgs("gpg"),
-@@ -192,27 +170,0 @@ func TestNewPublicKey(t *testing.T) {
+@@ -193,27 +171,0 @@
 -		{
 -			name: "test gpg public key without end block",
 -			req: &requests.Request{
@@ -134,7 +133,24 @@ index 10af3bf..a55e806 100644
 -				"id":      "a040830f7fac5991",
 -			},
 -		},
-@@ -245,3 +196,0 @@ func TestNewPublicKey(t *testing.T) {
+@@ -246,3 +197,0 @@
 -			if key.Usage == "gpg" {
 -				got["id"] = key.ID
 -			}
+diff --git a/pkg/identity/public_key_pgp_test.go b/pkg/identity/public_key_pgp_test.go
+--- a/pkg/identity/public_key_pgp_test.go
++++ b/pkg/identity/public_key_pgp_test.go
+@@ -28,1 +28,1 @@
+-func TestPublicKeyPGPCompatibility(t *testing.T) {
++func TestPublicKeyPGPUnsupported(t *testing.T) {
+@@ -33,7 +33,3 @@
+-	key, err := NewPublicKey(&requests.Request{Key: requests.Key{Usage: "gpg", Payload: "\n " + string(data) + " \n", Description: "preserved description"}})
+-	if err != nil {
+-		t.Fatal(err)
+-	}
+-	if key.ID != "a040830f7fac5991" || key.Fingerprint != "4cca1eaf950cee4ab83976dca040830f7fac5991" || key.Type != "dsa" || key.Description != "preserved description" || key.Payload != strings.TrimSpace(string(data)) {
+-		t.Fatal("legacy public key metadata changed")
+-	}
++	if key, err := NewPublicKey(&requests.Request{Key: requests.Key{Usage: "gpg", Payload: string(data)}}); err == nil || key != nil {
++		t.Fatal("GPG public-key parsing must remain disabled")
++	}
