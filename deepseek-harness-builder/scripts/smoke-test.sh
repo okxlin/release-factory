@@ -471,12 +471,18 @@ function publicPath(location) {
 }
 
 async function followToPage(response, jar) {
+  const redirects = [];
   for (let redirect = 0; redirect < 8; redirect += 1) {
     if (response.status < 300 || response.status >= 400) return response;
     if (!response.headers.location) throw new Error('redirect response omitted Location');
-    response = await request(publicPath(response.headers.location), {}, jar);
+    const path = publicPath(response.headers.location);
+    const target = new URL(path, publicOrigin);
+    const queryKeys = [...target.searchParams.keys()];
+    redirects.push(`${response.status} ${target.pathname}${queryKeys.length ? `?keys=${queryKeys.join(',')}` : ''}`);
+    response = await request(path, {}, jar);
   }
-  throw new Error('redirect limit exceeded');
+  const cookieNames = [...jar.cookies.keys()];
+  throw new Error(`redirect limit exceeded (${redirects.join(' -> ')}); cookies=${cookieNames.join(',') || 'none'}`);
 }
 
 async function submitUsername(jar, extraHeaders = {}) {
