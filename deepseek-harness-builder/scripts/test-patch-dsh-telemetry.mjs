@@ -63,12 +63,13 @@ test('legacy releases without the request contributors remain supported', async 
 test('0.2 volatile session-log config retains the telemetry opt-out', async t => {
   const root = await fixture(t)
   const target = join(root, 'node_modules', names[0], 'index.js')
-  await writeFile(target, `export function apply(ctx, config) {
+  await writeFile(target, `function apply(ctx, config) {
     ctx.register({ prepare() {
       if (!config.enabled.get()) return undefined;
       return 'session log';
     } });
-  }\n`)
+  }
+  export { apply };\n`)
   assert.equal(run(root).status, 0)
   assert.equal(run(root).status, 0, 'patch is idempotent')
   const { apply } = await import(pathToFileURL(target))

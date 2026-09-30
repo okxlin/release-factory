@@ -43,7 +43,7 @@ for (const [name, supportedGuards] of guards) {
   // 0.2 registers first and reads the volatile switch inside prepare(). Keep the
   // image opt-out at plugin activation as well as at request preparation.
   if (original.includes('config.enabled.get()')) {
-    const entry = 'export function apply(ctx, config) {'
+    const entry = 'function apply(ctx, config) {'
     const activation = `${entry}\n    if (process.env.DSH_TELEMETRY_DISABLED) return;`
     if (count(entry) !== 1) throw new Error(`unexpected telemetry plugin entry in ${name}`)
     if (!patched.includes(activation)) patched = patched.replace(entry, activation)
