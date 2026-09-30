@@ -341,6 +341,20 @@ RUN [[ "${CODE_SERVER_TAR_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
         "${code_server_tar_dir}/package.json" "${CODE_SERVER_TAR_VERSION}" \
     && find /tmp -maxdepth 1 -name "${tarball}" -delete
 
+# Patch the HTTP client bundled by VS Code until code-server includes the fix.
+ARG CODE_SERVER_UNDICI_VERSION=7.29.1
+RUN [[ "${CODE_SERVER_UNDICI_VERSION}" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]] \
+    && undici_dir="/usr/lib/code-server/lib/vscode/node_modules/undici" \
+    && test "$(realpath "${undici_dir}")" = "${undici_dir}" \
+    && test "$(node -p "require('${undici_dir}/package.json').name")" = undici \
+    && tarball="$(npm pack --ignore-scripts --silent --pack-destination /tmp "undici@${CODE_SERVER_UNDICI_VERSION}")" \
+    && [[ "${tarball}" == "undici-${CODE_SERVER_UNDICI_VERSION}.tgz" ]] \
+    && find "${undici_dir}" -mindepth 1 -delete \
+    && tar -xzf "/tmp/${tarball}" --strip-components=1 -C "${undici_dir}" \
+    && node -e 'const [directory, expected] = process.argv.slice(1); if (require(`${directory}/package.json`).version !== expected) throw new Error("unexpected code-server undici version"); require(directory)' \
+        "${undici_dir}" "${CODE_SERVER_UNDICI_VERSION}" \
+    && rm -f "/tmp/${tarball}"
+
 # ── npm globals and Corepack package managers ──
 # Claude's audited postinstall links its platform-native optional dependency.
 # Keep lifecycle scripts from all other global packages blocked by npm 12.
