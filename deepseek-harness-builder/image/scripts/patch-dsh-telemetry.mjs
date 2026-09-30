@@ -36,10 +36,19 @@ for (const [name, supportedGuards] of guards) {
   ]).filter(([original, replacement]) => count(original) + count(replacement) > 0)
   if (matches.length !== 1) throw new Error(`unexpected telemetry activation guard in ${name}`)
   const [original, replacement] = matches[0]
-  if (count(original) === 0 && count(replacement) === 1) continue
-  if (count(original) !== 1 || count(replacement) !== 0) {
+  if (count(original) + count(replacement) !== 1) {
     throw new Error(`unexpected telemetry activation guard in ${name}`)
   }
-  await writeFile(target, source.replace(original, replacement), 'utf8')
+  let patched = source.replace(original, replacement)
+  // 0.2 registers first and reads the volatile switch inside prepare(). Keep the
+  // image opt-out at plugin activation as well as at request preparation.
+  if (original.includes('config.enabled.get()')) {
+    const entry = 'export function apply(ctx, config) {'
+    const activation = `${entry}\n    if (process.env.DSH_TELEMETRY_DISABLED) return;`
+    if (count(entry) !== 1) throw new Error(`unexpected telemetry plugin entry in ${name}`)
+    if (!patched.includes(activation)) patched = patched.replace(entry, activation)
+  }
+  if (patched === source) continue
+  await writeFile(target, patched, 'utf8')
   process.stdout.write(`[dsh-patch] ${name} honors DSH_TELEMETRY_DISABLED\n`)
 }

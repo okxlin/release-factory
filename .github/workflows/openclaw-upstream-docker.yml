@@ -53,6 +53,7 @@ jobs:
         run: |
           python3 scripts/test-resolve-openclaw-inputs.py
           bash scripts/test-apply-openclaw-runtime-hardening.sh
+          node --test scripts/test-openclaw-npm-bundle.mjs
           python3 scripts/test-evaluate-trivy-policy.py
           python3 scripts/test-registry-image.py
           python3 scripts/test-publish-tested-image.py
