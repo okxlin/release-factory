@@ -2,6 +2,7 @@
 """Exercise the desktop, daemon, Puppeteer/stealth, sharp and persisted cookies."""
 import argparse
 import json
+import re
 import subprocess
 import sys
 import time
@@ -100,11 +101,20 @@ def main(image, variant):
             else:
                 raise RuntimeError("desktop/daemon did not become ready")
             if variant == "linuxserver":
-                docker("exec", name, "nginx", "-t")
+                nginx = docker("exec", name, "nginx", "-T")
+                # Selkies 2 moved file downloads behind the /api proxy.
+                # https://github.com/linuxserver/docker-baseimage-selkies/commit/c28cd610744dae7c278f2a49ca28748dbf387c1a
+                config = nginx.stdout + nginx.stderr
+                files_path = "/api/files/" if re.search(r"\blocation\s+/api\s*\{", config) else "/files/"
+                files_url = "https://127.0.0.1:3001" + files_path
                 docker("exec", name, "sh", "-c", "printf '%s' 'release-factory files smoke' > /config/Desktop/rf-smoke.txt")
-                files = docker("exec", name, "curl", "-kfsS", "--max-time", "5", "-u",
-                               "smoke:ci-gemini-password", "https://127.0.0.1:3001/files/")
+                # Nginx can serve the desktop before the Selkies API is ready.
+                curl = ("exec", name, "curl", "-kfsS", "--max-time", "5", "--retry", "10",
+                        "--retry-delay", "1", "--retry-max-time", "30", "-u", "smoke:ci-gemini-password")
+                files = docker(*curl, files_url)
                 assert "rf-smoke.txt" in files.stdout, "file browser did not list the test file"
+                downloaded = docker(*curl, files_url + "rf-smoke.txt")
+                assert downloaded.stdout == "release-factory files smoke", "file download content mismatch"
             result = docker("exec", "-w", "/opt/gemini-skill", "-e", "SMOKE_PHASE=" + phase,
                             name, "node", "--input-type=module", "-e", PROBE)
             print(result.stdout, end="", flush=True)

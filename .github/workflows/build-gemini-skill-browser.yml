@@ -30,6 +30,7 @@ on:
       - '.github/workflows/build-gemini-skill-browser.yml'
       - '.github/workflows/release-gemini-browser.yml'
       - 'scripts/smoke-gemini-browser.py'
+      - 'scripts/test-smoke-gemini-browser.py'
       - 'scripts/trivy-image-gate.sh'
       - 'scripts/evaluate-trivy-policy.py'
       - 'scripts/test-evaluate-trivy-policy.py'
