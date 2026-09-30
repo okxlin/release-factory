@@ -112,11 +112,11 @@ if (root?.dependencies?.["@getpaseo/cli"] !== "0.3.1") {
 if (lock.packages?.["node_modules/@getpaseo/cli"]?.version !== "0.3.1") {
   throw new Error("package-lock does not resolve @getpaseo/cli 0.3.1");
 }
-if (packageJson.overrides?.["fast-uri"] !== "3.1.6") {
-  throw new Error("package.json must pin the fast-uri security override to 3.1.6");
+if (packageJson.overrides?.["fast-uri"] !== "3.1.8") {
+  throw new Error("package.json must pin the fast-uri security override to 3.1.8");
 }
-if (lock.packages?.["node_modules/fast-uri"]?.version !== "3.1.6") {
-  throw new Error("package-lock does not resolve fast-uri 3.1.6");
+if (lock.packages?.["node_modules/fast-uri"]?.version !== "3.1.8") {
+  throw new Error("package-lock does not resolve fast-uri 3.1.8");
 }
 
 const installScripts = [];

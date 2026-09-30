@@ -11,11 +11,11 @@
 | `latest` | `<DSH_VERSION>` | `runtime` | 轻量级 1Panel 服务镜像，包含必要 Shell 和仓库工具。它仍是默认最终 target。 |
 | `workstation` | `<DSH_VERSION>-workstation` | `workstation` | 完整交互式开发环境，包含编译器和语言工具链。 |
 
-两个工作流都会把相同标签发布到 `ghcr.io/okxlin/deepseek-harness` 和 `docker.io/$DOCKERHUB_USERNAME/deepseek-harness`。请把 `DOCKERHUB_USERNAME` 配置为 GitHub Actions 仓库变量或 Secret，并把 `DOCKERHUB_TOKEN` 配置为仓库 Secret。Docker Hub token 只用于 Registry 登录，不会传入镜像构建上下文。
+两个工作流都会把相同标签发布到 `ghcr.io/okxlin/deepseek-harness` 和 `docker.io/$DOCKERHUB_USERNAME/deepseek-harness`。请把 `DOCKERHUB_USERNAME` 配置为 GitHub Actions 仓库变量或 Secret，并把 `DOCKERHUB_TOKEN` 配置为仓库 Secret。Docker Hub token 只用于 Registry 认证和已验证镜像的发布，不会传入镜像构建上下文。
 
 定时任务以及留空版本的手动运行会从 DeepSeek Harness GitHub Releases 选择最高的非 draft `dsh-v*` 源码版本，校验对应 tag、commit 和源码归档 SHA-256 后构建，并发布匹配的 `<DSH_VERSION>` 和 `<DSH_VERSION>-workstation` 标签；因此上游源码版本可以在发布到 npm 之前进入镜像。手动显式传入 `dsh-v*` 可以选择指定的源码 release，传入已发布的 npm 版本或 dist-tag 时仍按请求的 npm selector 解析。`image/dsh-source.json` 保留可复现的本地/PR 基线，未来源码 release 不需要修改 Dockerfile。手动工作流也可覆盖发布标签。AppStore `latest` 通道使用浮动标签，编号 AppStore 版本使用匹配的版本标签。
 
-当前提交的源码基线是 [0.1.7-rc.2](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.7-rc.2)。该基线包含 PTC 包名 `ptc-runtime` 和 workflow 执行器 `workflow-ptc`；使用旧名称的自定义 profile 需要更新。DeepSeek 现在默认使用 Messages 协议；手动配置的旧官方 API 根地址应删除或改为 `https://api.deepseek.com/anthropic`，自定义 provider URL 不受影响。
+当前提交的源码基线是 [0.2.0-rc.2](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.2)。该基线包含 PTC 包名 `ptc-runtime` 和 workflow 执行器 `workflow-ptc`；使用旧名称的自定义 profile 需要更新。DeepSeek 现在默认使用 Messages 协议；手动配置的旧官方 API 根地址应删除或改为 `https://api.deepseek.com/anthropic`，自定义 provider URL 不受影响。
 
 构建版本、基础镜像 digest、源码和工具校验和集中保存在 [`image/components.lock.json`](image/components.lock.json)。Python 依赖使用独立的 [`image/python-requirements.lock`](image/python-requirements.lock)，旧版 npm 路径保留自己的 [package.json](image/package.json) 和 [pnpm-lock.yaml](image/pnpm-lock.yaml)。[`image/dsh-source.json`](image/dsh-source.json) 把源码归档绑定到确定的 commit 和 SHA-256。本地构建与 CI 都通过 `scripts/component-inputs.py` 解析参数，常规组件更新无需手改 Dockerfile 指令。源码构建当前仍由 npm 安装本地打包的 runtime tarball，依赖审计检查这棵实际安装树。
 

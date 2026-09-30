@@ -69,6 +69,8 @@ jobs:
       - name: Validate input and publication contracts
         run: |
           python3 gemini-skill-browser-builder/scripts/test-resolve-browser-inputs.py
+          python3 scripts/test-smoke-gemini-browser.py
+          python3 scripts/test-registry-image.py
           python3 scripts/test-publish-tested-image.py
           python3 scripts/test-evaluate-trivy-policy.py
       - uses: actions/setup-node@v7
@@ -133,6 +135,8 @@ jobs:
           REPOSITORY: ${{ steps.params.outputs.repository }}
           IMAGE_TAG: ${{ steps.params.outputs.image_tag }}
           LATEST_TAG: ${{ steps.params.outputs.release_latest }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
         run: |
           python3 scripts/publish-tested-image.py stage --image "$IMAGE" --image-id "$IMAGE" \
             --variant "$VARIANT" --platform linux/amd64 --repository "$REPOSITORY" \

@@ -60,6 +60,40 @@ test('legacy releases without the request contributors remain supported', async 
   assert.equal(run(root).status, 0)
 })
 
+test('0.2 volatile session-log config retains the telemetry opt-out', async t => {
+  const root = await fixture(t)
+  const target = join(root, 'node_modules', names[0], 'index.js')
+  await writeFile(target, `function apply(ctx, config) {
+    ctx.register({ prepare() {
+      if (!config.enabled.get()) return undefined;
+      return 'session log';
+    } });
+  }
+  export { apply };\n`)
+  assert.equal(run(root).status, 0)
+  assert.equal(run(root).status, 0, 'patch is idempotent')
+  const { apply } = await import(pathToFileURL(target))
+  const previous = process.env.DSH_TELEMETRY_DISABLED
+  t.after(() => {
+    if (previous === undefined) delete process.env.DSH_TELEMETRY_DISABLED
+    else process.env.DSH_TELEMETRY_DISABLED = previous
+  })
+  for (const disabled of ['', '1']) {
+    process.env.DSH_TELEMETRY_DISABLED = disabled
+    for (const enabled of [false, true]) {
+      const registrations = []
+      apply({ register(value) { registrations.push(value) } }, { enabled: { get: () => enabled } })
+      assert.equal(registrations.length, disabled ? 0 : 1, 'opt-out prevents registration')
+      if (registrations.length) {
+        assert.equal(registrations[0].prepare(), enabled ? 'session log' : undefined)
+        process.env.DSH_TELEMETRY_DISABLED = '1'
+        assert.equal(registrations[0].prepare(), undefined, 'request-time opt-out still applies')
+        process.env.DSH_TELEMETRY_DISABLED = disabled
+      }
+    }
+  }
+})
+
 test('unknown activation code and missing declared packages fail closed', async t => {
   const root = await fixture(t)
   const target = join(root, 'node_modules', names[0], 'index.js')

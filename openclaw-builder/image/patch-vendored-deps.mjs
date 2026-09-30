@@ -34,8 +34,68 @@ export function verifyArchiveReader(directory) {
   assert.equal(oversized, false, 'archive reader trusted the attacker-declared size');
 }
 
+export async function patchNpmBundles(root, pins) {
+  root = fs.realpathSync(root);
+  const store = path.join(root, '.pnpm');
+  for (const [name, pin] of Object.entries(pins)) {
+    assert.ok(['brace-expansion', 'undici'].includes(name));
+    assert.match(pin.version, /^\d+\.\d+\.\d+$/);
+    assert.equal(pin.url, `https://registry.npmjs.org/${name}/-/${name}-${pin.version}.tgz`);
+    assert.match(pin.sha512, /^[a-f0-9]{128}$/);
+    const outdated = [];
+    for (const entry of fs.readdirSync(store)) {
+      if (!/^npm@\d/.test(entry)) continue;
+      const directory = path.join(store, entry, 'node_modules/npm/node_modules', name);
+      if (!fs.existsSync(directory)) continue;
+      assert.equal(fs.realpathSync(directory), directory, 'unexpected bundled npm dependency path');
+      const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
+      assert.equal(pkg.name, name);
+      if (pkg.version === pin.from) outdated.push(directory);
+      else {
+        assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
+        const fixed = pin.version.split('.').map(Number);
+        assert.ok(pkg.version.split('.').map(Number).reduce((order, value, index) =>
+          order || value - fixed[index], 0) >= 0, `unexpected vulnerable ${name} version`);
+      }
+    }
+    if (!outdated.length) continue;
+    const temporary = fs.mkdtempSync('/tmp/openclaw-npm-bundle-');
+    try {
+      const response = await fetch(pin.url, {redirect: 'error', signal: AbortSignal.timeout(60000)});
+      assert.equal(response.status, 200);
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of response.body) {
+        size += chunk.length;
+        assert.ok(size <= 4 * 1024 * 1024, 'npm dependency archive exceeds expected size');
+        chunks.push(chunk);
+      }
+      const bytes = Buffer.concat(chunks);
+      assert.equal(createHash('sha512').update(bytes).digest('hex'), pin.sha512);
+      const archive = path.join(temporary, 'dependency.tgz');
+      fs.writeFileSync(archive, bytes);
+      execFileSync('tar', ['-xzf', archive, '--no-same-owner', '--no-same-permissions', '-C', temporary]);
+      const replacement = path.join(temporary, 'package');
+      const pkg = JSON.parse(fs.readFileSync(path.join(replacement, 'package.json')));
+      assert.equal(pkg.name, name);
+      assert.equal(pkg.version, pin.version);
+      for (const directory of outdated) {
+        const {uid, gid} = fs.statSync(directory);
+        fs.rmSync(directory, {recursive: true});
+        fs.cpSync(replacement, directory, {recursive: true});
+        execFileSync('chown', ['-R', `${uid}:${gid}`, directory]);
+        console.log(`Replace verified bundled npm dependency ${name} ${pin.from} -> ${pin.version}: ${directory}`);
+      }
+    } finally {
+      fs.rmSync(temporary, {recursive: true});
+    }
+  }
+}
+
 async function main() {
-  const pin = JSON.parse(fs.readFileSync(new URL('./components.json', import.meta.url))).adm_zip;
+  const components = JSON.parse(fs.readFileSync(new URL('./components.json', import.meta.url)));
+  await patchNpmBundles('/app/node_modules', components.npm_bundled);
+  const pin = components.adm_zip;
   assert.match(pin.version, /^\d+\.\d+\.\d+$/);
   assert.equal(pin.url, `https://registry.npmjs.org/adm-zip/-/adm-zip-${pin.version}.tgz`);
   assert.match(pin.sha512, /^[a-f0-9]{128}$/);

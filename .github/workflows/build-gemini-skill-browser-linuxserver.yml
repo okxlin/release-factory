@@ -30,10 +30,13 @@ on:
       - '.github/workflows/build-gemini-skill-browser-linuxserver.yml'
       - '.github/workflows/release-gemini-browser.yml'
       - 'scripts/smoke-gemini-browser.py'
+      - 'scripts/test-smoke-gemini-browser.py'
       - 'scripts/trivy-image-gate.sh'
       - 'scripts/evaluate-trivy-policy.py'
       - 'scripts/test-evaluate-trivy-policy.py'
       - 'scripts/publish-tested-image.py'
+      - 'scripts/registry_image.py'
+      - 'scripts/test-registry-image.py'
       - 'scripts/test-publish-tested-image.py'
 
 permissions:
