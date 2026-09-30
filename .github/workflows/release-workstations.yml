@@ -83,6 +83,7 @@ jobs:
         env:
           VARIANT: ${{ inputs.variant }}
         run: |
+          python3 scripts/test-registry-image.py
           python3 scripts/test-publish-tested-image.py
           python3 scripts/test-evaluate-trivy-policy.py
           if [[ "$VARIANT" == codex ]]; then
@@ -180,6 +181,8 @@ jobs:
           VARIANT: ${{ inputs.variant }}
           REPOSITORY: ${{ needs.prepare.outputs.repository }}
           ARCH: ${{ matrix.arch }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
         run: |
           python3 scripts/publish-tested-image.py stage --image "$IMAGE" --image-id "$IMAGE" \
             --variant "$VARIANT" --platform "linux/$ARCH" --repository "$REPOSITORY" \

@@ -12,6 +12,8 @@ on:
       - ".github/actions/verify-deepseek-harness/**"
       - "deepseek-harness-builder/**"
       - "scripts/trivy-image-gate.sh"
+      - "scripts/registry_image.py"
+      - "scripts/test-registry-image.py"
       - "scripts/evaluate-trivy-policy.py"
       - "scripts/test-evaluate-trivy-policy.py"
       - "SECURITY_SCAN.md"
@@ -54,7 +56,9 @@ jobs:
         run: python3 scripts/test-evaluate-trivy-policy.py
 
       - name: Run tested image publication regression tests
-        run: python3 deepseek-harness-builder/scripts/test-tested-image-artifact.py
+        run: |
+          python3 scripts/test-registry-image.py
+          python3 deepseek-harness-builder/scripts/test-tested-image-artifact.py
 
       - name: Run DeepSeek Harness version resolver regression tests
         run: |

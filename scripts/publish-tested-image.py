@@ -3,10 +3,20 @@
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
+
+LIBRARY = Path(__file__).resolve().parent
+if str(LIBRARY) not in sys.path:
+    sys.path.insert(0, str(LIBRARY))
+from registry_image import (
+    create_registry_client,
+    prepare_platform_manifest,
+    save_image,
+)
 
 REPOSITORIES = {
     "codex": "codex-claude-workstation", "opencode": "opencode-workstation",
@@ -59,12 +69,15 @@ def stage(args, expected):
     receipt_path = args.receipt
     require(not receipt_path.exists() and not receipt_path.is_symlink(), "receipt must be a new file")
     receipt_path.parent.mkdir(parents=True, exist_ok=True)
-    reference = f"{args.repository}:ci-{args.run_id}-{args.run_attempt}-{args.variant}-{args.platform.split('/')[1]}"
-    # Tag the recorded ID, never a mutable local tag.
-    docker("image", "tag", args.image_id, reference)
-    docker("image", "push", reference)
-    manifest, digest = remote_manifest(reference)
-    check_manifest(manifest, args.image_id)
+    with tempfile.TemporaryDirectory(prefix="tested-image-") as staging:
+        archive = Path(staging) / "image.tar.gz"
+        save_image(args.image_id, archive)
+        prepared = prepare_platform_manifest(archive, args.image_id, Path(staging) / "manifest")
+        digest = create_registry_client(args.repository).publish_platform_manifest(prepared)
+        reference = f"{args.repository}@{digest}"
+        manifest, remote_digest = remote_manifest(reference)
+        require(remote_digest == digest, "registry manifest digest mismatch after publication")
+        check_manifest(manifest, args.image_id)
     receipt = {"schema_version": 1, **expected, "platform": args.platform,
                "image_id": args.image_id, "manifest_digest": digest}
     with receipt_path.open("x", encoding="utf-8") as output:
@@ -163,6 +176,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+    except (ValueError, OSError, KeyError, TypeError, AttributeError, RuntimeError,
+            subprocess.CalledProcessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         sys.exit(1)

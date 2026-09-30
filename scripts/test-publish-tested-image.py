@@ -3,13 +3,13 @@
 import importlib.util
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import textwrap
-from types import SimpleNamespace
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location("publish_tested", Path(__file__).with_name("publish-tested-image.py"))
@@ -49,7 +49,7 @@ class PublicationTests(unittest.TestCase):
         directory.mkdir()
         (directory / "receipt.json").write_text(json.dumps(receipt))
 
-    def test_stage_tags_the_recorded_id_and_checks_remote_config(self):
+    def test_stage_publishes_the_recorded_id_by_digest_without_a_ci_tag(self):
         with tempfile.TemporaryDirectory() as tmp:
             args = SimpleNamespace(**self.expected, image="mutable:tag", image_id=self.image_id,
                                    platform="linux/amd64", receipt=Path(tmp) / "receipt.json")
@@ -59,9 +59,21 @@ class PublicationTests(unittest.TestCase):
             def docker(*argv, **kwargs):
                 calls.append(argv)
                 return json.dumps([image]).encode() if kwargs.get("capture") else None
-            with patch.object(MODULE, "docker", docker), patch.object(MODULE, "remote_manifest", return_value=(self.manifest, self.digest)):
+            class Client:
+                def __init__(self, digest):
+                    self.digest = digest
+
+                def publish_platform_manifest(self, prepared):
+                    return self.digest
+
+            with patch.object(MODULE, "docker", docker), \
+                 patch.object(MODULE, "save_image"), \
+                 patch.object(MODULE, "prepare_platform_manifest", return_value=object()), \
+                 patch.object(MODULE, "create_registry_client", return_value=Client(self.digest)), \
+                 patch.object(MODULE, "remote_manifest", return_value=(self.manifest, self.digest)):
                 MODULE.stage(args, self.expected)
-            self.assertEqual(calls[1][0:3], ("image", "tag", self.image_id))
+            self.assertEqual(calls, [("image", "inspect", "mutable:tag")])
+            self.assertNotIn(":ci-", str(json.loads(args.receipt.read_text())))
             self.assertEqual(json.loads(args.receipt.read_text())["image_id"], self.image_id)
 
     def test_changed_image_or_platform_never_reaches_registry_write(self):
