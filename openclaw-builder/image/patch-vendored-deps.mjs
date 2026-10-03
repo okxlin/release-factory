@@ -92,9 +92,82 @@ export async function patchNpmBundles(root, pins) {
   }
 }
 
+// Local workaround until upstream releases a fix for CVE-2026-93748.
+// https://github.com/kornelski/http-cache-semantics/issues/56
+const cacheSourceHash = '01b7d66c854b2fe53ac05c98feb6e0d64722ab8898a778e2d2426a8b468d178f';
+const cacheAnchor = `    evaluateRequest(req) {
+        this._assertRequestHasHeaders(req);`;
+const cacheGuard = `
+
+        // release-factory: security prohibitions cannot be overridden by max-stale.
+        if (!this.storable() || this._rescc['no-cache'] ||
+            (this._isShared && (this._rescc['proxy-revalidate'] ||
+                (this._resHeaders['set-cookie'] && !this._rescc.public && !this._rescc.immutable)))) {
+            return this._evaluateRequestMissResult(req);
+        }`;
+
+export function verifyCacheSemantics(directory) {
+  const require = createRequire(import.meta.url);
+  const entry = require.resolve(directory);
+  delete require.cache[entry];
+  const CachePolicy = require(entry);
+  const request = {url: 'https://cache.test/item', headers: {host: 'cache.test'}};
+  for (const directive of ['max-stale', 'max-stale=999999']) {
+    const next = {...request, headers: {...request.headers, 'cache-control': directive}};
+    for (const headers of [
+      {'set-cookie': 'session=fixture'},
+      {'cache-control': 'proxy-revalidate'},
+      {'cache-control': 'no-cache'},
+      {'cache-control': 'no-store'},
+      {'cache-control': 'private'},
+      {'set-cookie': 'session=fixture', 'cache-control': 'stale-while-revalidate=999999'},
+    ]) {
+      const policy = new CachePolicy(request, {status: 200, headers});
+      assert.equal(policy.satisfiesWithoutRevalidation(next), false, 'unsafe cached response reused');
+      assert.equal(policy.evaluateRequest(next).response, undefined, 'unsafe response exposed during revalidation');
+    }
+    // Ordinary stale public responses and private client caches must keep working.
+    for (const shared of [true, false]) {
+      const policy = new CachePolicy(request, {status: 200, headers: {
+        'cache-control': shared ? 'public, max-age=60' : 'max-age=60',
+        'set-cookie': 'session=fixture',
+      }}, {shared});
+      policy.age = () => 120;
+      assert.equal(policy.satisfiesWithoutRevalidation(next), true, 'ordinary stale cache reuse broken');
+    }
+  }
+}
+
+export function patchCacheSemantics(directory) {
+  assert.equal(fs.realpathSync(directory), directory, 'unexpected cache dependency path');
+  const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
+  assert.equal(pkg.name, 'http-cache-semantics');
+  if (pkg.version === '4.2.0') {
+    const file = path.join(directory, 'index.js');
+    assert.equal(fs.realpathSync(file), file, 'unexpected cache source path');
+    const source = fs.readFileSync(file, 'utf8');
+    const original = source.includes(cacheGuard) ? source.replace(cacheGuard, '') : source;
+    assert.equal(createHash('sha256').update(original).digest('hex'), cacheSourceHash,
+      'unreviewed http-cache-semantics source');
+    assert.equal(original.split(cacheAnchor).length, 2, 'missing cache patch anchor');
+    if (source === original) fs.writeFileSync(file, original.replace(cacheAnchor, cacheAnchor + cacheGuard));
+  }
+  // A future upstream version is accepted only if the actual security regression passes.
+  verifyCacheSemantics(directory);
+  console.log(`Verified CVE-2026-93748 cache protections: ${directory}`);
+}
+
 async function main() {
   const components = JSON.parse(fs.readFileSync(new URL('./components.json', import.meta.url)));
   await patchNpmBundles('/app/node_modules', components.npm_bundled);
+  const cacheFiles = execFileSync('find', ['/app/node_modules', '-type', 'f', '-path',
+    '*/http-cache-semantics/package.json'], {encoding: 'utf8'}).trim();
+  for (const file of cacheFiles ? cacheFiles.split('\n') : []) {
+    const directory = path.dirname(fs.realpathSync(file));
+    assert.ok(directory.startsWith('/app/node_modules/'));
+    patchCacheSemantics(directory);
+  }
+  patchCacheSemantics('/usr/local/lib/node_modules/npm/node_modules/http-cache-semantics');
   const pin = components.adm_zip;
   assert.match(pin.version, /^\d+\.\d+\.\d+$/);
   assert.equal(pin.url, `https://registry.npmjs.org/adm-zip/-/adm-zip-${pin.version}.tgz`);
