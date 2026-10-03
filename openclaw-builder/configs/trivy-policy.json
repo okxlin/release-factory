@@ -4,5 +4,19 @@
     "sandbox": {"max_fixable_critical": 0, "max_fixable_high": null}
   },
   "protected_paths": ["app/", "usr/local/bin/node"],
-  "exceptions": []
+  "exceptions": [
+    {
+      "id": "CVE-2026-93748",
+      "package": "http-cache-semantics",
+      "installed_version": "4.2.0",
+      "path": "app/node_modules/.pnpm/npm@11.20.0/node_modules/npm/node_modules/http-cache-semantics/package.json",
+      "type": "node-pkg",
+      "profiles": [
+        "sandbox"
+      ],
+      "reason": "Local source patch rejects security-zeroed cache reuse before max-stale and stale-while-revalidate. The image build verifies the exact original source hash and executes the advisory regression against every patched copy; package version is retained honestly. Review when upstream publishes a fix.",
+      "reference": "https://github.com/kornelski/http-cache-semantics/issues/56",
+      "expires": "2026-11-03"
+    }
+  ]
 }
