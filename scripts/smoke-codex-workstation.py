@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify credential rejection, authenticated startup, and persisted HOME."""
 import json
+from pathlib import Path
 import subprocess
 import sys
 import time
@@ -75,6 +76,9 @@ assert.ok(!/^password\\s*:/m.test(fs.readFileSync(process.env.HOME + '/.config/c
         name = start("legacy", "ci-legacy-password-20260912", mounts=mounts, network="bridge")
         ready(name)
         login(name)
+        ftp_test = (Path(__file__).resolve().parent.parent /
+                    "codex-claude-workstation-builder/scripts/test-code-server-ftp.cjs").read_text()
+        print(docker("exec", name, "timeout", "15s", "node", "-e", ftp_test).stdout, end="", flush=True)
         print(docker("exec", name, "doctor.sh").stdout, end="", flush=True)
         print(docker("exec", name, "smoke-test.sh").stdout, end="", flush=True)
         docker("exec", name, "sh", "-c", 'printf preserved > "$HOME/.config/smoke-marker"')
