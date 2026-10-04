@@ -355,6 +355,21 @@ RUN [[ "${CODE_SERVER_UNDICI_VERSION}" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]] \
         "${undici_dir}" "${CODE_SERVER_UNDICI_VERSION}" \
     && rm -f "/tmp/${tarball}"
 
+# Fix FTP directory/PASV parser denial of service in code-server's proxy dependencies.
+# https://github.com/patrickjuchli/basic-ftp/releases/tag/v6.2.2
+ARG CODE_SERVER_BASIC_FTP_VERSION=6.2.2
+RUN [[ "${CODE_SERVER_BASIC_FTP_VERSION}" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]] \
+    && ftp_dir="/usr/lib/code-server/node_modules/basic-ftp" \
+    && test "$(realpath "${ftp_dir}")" = "${ftp_dir}" \
+    && test "$(node -p "require('${ftp_dir}/package.json').name")" = basic-ftp \
+    && tarball="$(npm pack --ignore-scripts --silent --pack-destination /tmp "basic-ftp@${CODE_SERVER_BASIC_FTP_VERSION}")" \
+    && [[ "${tarball}" == "basic-ftp-${CODE_SERVER_BASIC_FTP_VERSION}.tgz" ]] \
+    && find "${ftp_dir}" -mindepth 1 -delete \
+    && tar -xzf "/tmp/${tarball}" --strip-components=1 -C "${ftp_dir}" \
+    && node -e 'const [directory, expected] = process.argv.slice(1); if (require(`${directory}/package.json`).version !== expected) throw new Error("unexpected code-server basic-ftp version"); require(directory)' \
+        "${ftp_dir}" "${CODE_SERVER_BASIC_FTP_VERSION}" \
+    && rm -f "/tmp/${tarball}"
+
 # ── npm globals and Corepack package managers ──
 # Claude's audited postinstall links its platform-native optional dependency.
 # Keep lifecycle scripts from all other global packages blocked by npm 12.
