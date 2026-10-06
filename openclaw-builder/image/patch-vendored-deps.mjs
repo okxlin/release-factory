@@ -94,7 +94,11 @@ export async function patchNpmBundles(root, pins) {
 
 // Local workaround until upstream releases a fix for CVE-2026-93748.
 // https://github.com/kornelski/http-cache-semantics/issues/56
-const cacheSourceHash = '01b7d66c854b2fe53ac05c98feb6e0d64722ab8898a778e2d2426a8b468d178f';
+// npm's dependency refresh can install 4.3.0, which retains the same unsafe stale path.
+const cacheSourceHashes = new Map([
+  ['4.2.0', '01b7d66c854b2fe53ac05c98feb6e0d64722ab8898a778e2d2426a8b468d178f'],
+  ['4.3.0', 'ede1cc404a492fa348eb9d97a3007a0d72aa717bd22cd86a56bd0824c19729ca'],
+]);
 const cacheAnchor = `    evaluateRequest(req) {
         this._assertRequestHasHeaders(req);`;
 const cacheGuard = `
@@ -142,19 +146,20 @@ export function patchCacheSemantics(directory) {
   assert.equal(fs.realpathSync(directory), directory, 'unexpected cache dependency path');
   const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
   assert.equal(pkg.name, 'http-cache-semantics');
-  if (pkg.version === '4.2.0') {
+  const sourceHash = cacheSourceHashes.get(pkg.version);
+  if (sourceHash) {
     const file = path.join(directory, 'index.js');
     assert.equal(fs.realpathSync(file), file, 'unexpected cache source path');
     const source = fs.readFileSync(file, 'utf8');
     const original = source.includes(cacheGuard) ? source.replace(cacheGuard, '') : source;
-    assert.equal(createHash('sha256').update(original).digest('hex'), cacheSourceHash,
+    assert.equal(createHash('sha256').update(original).digest('hex'), sourceHash,
       'unreviewed http-cache-semantics source');
     assert.equal(original.split(cacheAnchor).length, 2, 'missing cache patch anchor');
     if (source === original) fs.writeFileSync(file, original.replace(cacheAnchor, cacheAnchor + cacheGuard));
   }
   // A future upstream version is accepted only if the actual security regression passes.
   verifyCacheSemantics(directory);
-  console.log(`Verified CVE-2026-93748 cache protections: ${directory}`);
+  console.log(`Verified CVE-2026-93748 cache protections (${pkg.version}): ${directory}`);
 }
 
 async function main() {
