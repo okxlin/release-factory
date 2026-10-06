@@ -58,38 +58,88 @@ export async function patchNpmBundles(root, pins) {
           order || value - fixed[index], 0) >= 0, `unexpected vulnerable ${name} version`);
       }
     }
-    if (!outdated.length) continue;
-    const temporary = fs.mkdtempSync('/tmp/openclaw-npm-bundle-');
-    try {
-      const response = await fetch(pin.url, {redirect: 'error', signal: AbortSignal.timeout(60000)});
-      assert.equal(response.status, 200);
-      const chunks = [];
-      let size = 0;
-      for await (const chunk of response.body) {
-        size += chunk.length;
-        assert.ok(size <= 4 * 1024 * 1024, 'npm dependency archive exceeds expected size');
-        chunks.push(chunk);
-      }
-      const bytes = Buffer.concat(chunks);
-      assert.equal(createHash('sha512').update(bytes).digest('hex'), pin.sha512);
-      const archive = path.join(temporary, 'dependency.tgz');
-      fs.writeFileSync(archive, bytes);
-      execFileSync('tar', ['-xzf', archive, '--no-same-owner', '--no-same-permissions', '-C', temporary]);
-      const replacement = path.join(temporary, 'package');
-      const pkg = JSON.parse(fs.readFileSync(path.join(replacement, 'package.json')));
-      assert.equal(pkg.name, name);
-      assert.equal(pkg.version, pin.version);
-      for (const directory of outdated) {
-        const {uid, gid} = fs.statSync(directory);
-        fs.rmSync(directory, {recursive: true});
-        fs.cpSync(replacement, directory, {recursive: true});
-        execFileSync('chown', ['-R', `${uid}:${gid}`, directory]);
-        console.log(`Replace verified bundled npm dependency ${name} ${pin.from} -> ${pin.version}: ${directory}`);
-      }
-    } finally {
-      fs.rmSync(temporary, {recursive: true});
+    await replaceVerifiedDependency(name, pin, outdated);
+  }
+}
+
+async function replaceVerifiedDependency(name, pin, outdated, verify = () => {}) {
+  assert.match(pin.version, /^\d+\.\d+\.\d+$/);
+  assert.equal(pin.url, `https://registry.npmjs.org/${name}/-/${name}-${pin.version}.tgz`);
+  assert.match(pin.sha512, /^[a-f0-9]{128}$/);
+  if (!outdated.length) return;
+  const temporary = fs.mkdtempSync('/tmp/openclaw-npm-bundle-');
+  try {
+    const response = await fetch(pin.url, {redirect: 'error', signal: AbortSignal.timeout(60000)});
+    assert.equal(response.status, 200);
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of response.body) {
+      size += chunk.length;
+      assert.ok(size <= 4 * 1024 * 1024, 'npm dependency archive exceeds expected size');
+      chunks.push(chunk);
+    }
+    const bytes = Buffer.concat(chunks);
+    assert.equal(createHash('sha512').update(bytes).digest('hex'), pin.sha512);
+    const archive = path.join(temporary, 'dependency.tgz');
+    fs.writeFileSync(archive, bytes);
+    execFileSync('tar', ['-xzf', archive, '--no-same-owner', '--no-same-permissions', '-C', temporary]);
+    const replacement = path.join(temporary, 'package');
+    const pkg = JSON.parse(fs.readFileSync(path.join(replacement, 'package.json')));
+    assert.equal(pkg.name, name);
+    assert.equal(pkg.version, pin.version);
+    verify(replacement);
+    for (const directory of outdated) {
+      const {uid, gid} = fs.statSync(directory);
+      fs.rmSync(directory, {recursive: true});
+      fs.cpSync(replacement, directory, {recursive: true});
+      execFileSync('chown', ['-R', `${uid}:${gid}`, directory]);
+      verify(directory);
+      console.log(`Replace verified dependency ${name} ${pin.from} -> ${pin.version}: ${directory}`);
+    }
+  } finally {
+    fs.rmSync(temporary, {recursive: true});
+  }
+}
+
+// https://github.com/7rulnik/source-map-js/releases/tag/v1.2.2
+export function verifySourceMaps(directory) {
+  const require = createRequire(import.meta.url);
+  // Verification may follow replacement at the same path in the fixture tests.
+  for (const key of Object.keys(require.cache)) {
+    if (key.startsWith(directory + path.sep)) delete require.cache[key];
+  }
+  const {SourceMapConsumer, SourceNode} = require(directory);
+  const flat = {version: 3, sources: ['input.js'], sourcesContent: ['let x;\n'], names: [], mappings: 'AAAA'};
+  const indexed = (line, map = flat, column = 0) => ({version: 3, sections: [{offset: {line, column}, map}]});
+  for (const value of [-1, 1.5, Infinity, NaN, '1', null]) {
+    for (const map of [indexed(value), indexed(0, flat, value)]) {
+      assert.throws(() => new SourceMapConsumer(map), /non-negative integers/);
     }
   }
+  assert.throws(() => new SourceMapConsumer(indexed(1e12)), /must not exceed/);
+  assert.throws(() => new SourceMapConsumer(indexed(6e6, indexed(6e6))), /including offsets of nested sections/);
+  const consumer = new SourceMapConsumer(indexed(0));
+  assert.equal(consumer.originalPositionFor({line: 1, column: 1}).source, 'input.js');
+  assert.equal(SourceNode.fromStringWithSourceMap('let x;\n', consumer).toString(), 'let x;\n');
+  // A valid offset past the supplied code must skip the gap without allocating empty lines.
+  const distant = SourceNode.fromStringWithSourceMap('let x;\n', new SourceMapConsumer(indexed(1e7)));
+  assert.equal(distant.toString(), 'let x;\n');
+  assert.ok(distant.children.length < 10);
+}
+
+export async function patchSourceMaps(root, pin) {
+  const store = path.join(fs.realpathSync(root), '.pnpm');
+  const outdated = [];
+  for (const entry of fs.readdirSync(store)) {
+    if (!entry.startsWith('source-map-js@')) continue;
+    const directory = path.join(store, entry, 'node_modules/source-map-js');
+    assert.equal(fs.realpathSync(directory), directory, 'unexpected source-map-js dependency path');
+    const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
+    assert.equal(pkg.name, 'source-map-js');
+    if (pkg.version === pin.from) outdated.push(directory);
+    else verifySourceMaps(directory);
+  }
+  await replaceVerifiedDependency('source-map-js', pin, outdated, verifySourceMaps);
 }
 
 // Local workaround until upstream releases a fix for CVE-2026-93748.
@@ -165,6 +215,7 @@ export function patchCacheSemantics(directory) {
 async function main() {
   const components = JSON.parse(fs.readFileSync(new URL('./components.json', import.meta.url)));
   await patchNpmBundles('/app/node_modules', components.npm_bundled);
+  await patchSourceMaps('/app/node_modules', components.source_map_js);
   const cacheFiles = execFileSync('find', ['/app/node_modules', '-type', 'f', '-path',
     '*/http-cache-semantics/package.json'], {encoding: 'utf8'}).trim();
   for (const file of cacheFiles ? cacheFiles.split('\n') : []) {
