@@ -38,5 +38,25 @@
     "version": "1.2.2",
     "url": "https://registry.npmjs.org/source-map-js/-/source-map-js-1.2.2.tgz",
     "sha512": "2868fff18e37c77e5a6550edb7e27898ad61a0b18750b3187d290e0c93508cd0c2de85b53ea3e8c4cc28d292d4b1633f5041b338dfcdc5e1f2c047cd5cd3f757"
+  },
+  "mcp_packages": {
+    "@modelcontextprotocol/core": {
+      "from": "2.0.0",
+      "version": "2.2.0",
+      "url": "https://registry.npmjs.org/@modelcontextprotocol/core/-/core-2.2.0.tgz",
+      "sha512": "88b866a6b466588f04728b0e037c15bf0c36db3d3636482a855e1f047e9ffe875006c8bbc6725cd071a68b6d7258efbf88ac36cb3a95135dbb6619dae7ff895f"
+    },
+    "@modelcontextprotocol/client": {
+      "from": "2.0.0",
+      "version": "2.2.0",
+      "url": "https://registry.npmjs.org/@modelcontextprotocol/client/-/client-2.2.0.tgz",
+      "sha512": "2f10a8bbf092610e9dc049e384b658d0a9c4b9cf15e1427720440297fb91db21e86d240811d24a52528b458445e62e45a91187cb578aeee9dedda0160c72ed8a"
+    },
+    "@modelcontextprotocol/sdk": {
+      "from": "1.30.0",
+      "version": "1.31.0",
+      "url": "https://registry.npmjs.org/@modelcontextprotocol/sdk/-/sdk-1.31.0.tgz",
+      "sha512": "52f4cc8273659c804eff6da86f645c5460e572f3ac950b3c4f9f7e15319d0342f6edadfd7dd185fc40c44cdb4354ae03646a70a2696c62945d03c5177152ffa7"
+    }
   }
 }

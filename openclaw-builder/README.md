@@ -26,6 +26,11 @@ Copilot 平台包内的 Foundry SDK 自带 `adm-zip`，无法通过 OpenClaw 的
 回归检查覆盖正常 ZIP 读取，并阻止伪造大小字段触发巨额预分配：
 <https://github.com/advisories/GHSA-xcpc-8h2w-3j85>。
 
+MCP OAuth 修复同步更新 SDK 1.31.0、client/core 2.2.0，并在实际依赖上验证 issuer 绑定和正常授权。
+已有部署中，未记录 `issuer` 的旧 OAuth 凭据仍需重新授权，或依据可信的原授权服务器信息补充绑定；
+预配置的 OAuth provider 也必须设置 `expectedIssuer`。镜像构建不会修改持久化凭据。
+详见官方迁移说明：<https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-6qxp-vccf-f47h>。
+
 镜像扫描采用 `configs/trivy-policy.json`：可修复 CRITICAL 阻断，应用目录的 HIGH/CRITICAL 阻断，
 其余开发工具和系统包 HIGH 保留报告。测试和扫描通过后将同一个镜像推送到两个仓库，不再二次构建。
 两端暂存镜像均验证通过后才发布版本标签；两端版本标签均验证通过后才更新 `latest`。
