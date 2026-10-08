@@ -386,6 +386,7 @@ if target.is_symlink() or (target.exists() and not target.is_dir()):
     raise SystemExit('invalid generated OpenClaw runtime directory')
 target.mkdir(exist_ok=True)
 for name, original in [('components.json', inputs / 'configs/components.json'),
+                       ('verify-mcp-auth.mjs', inputs / 'image/verify-mcp-auth.mjs'),
                        ('patch-vendored-deps.mjs', inputs / 'image/patch-vendored-deps.mjs')]:
     destination = target / name
     if destination.is_symlink():
@@ -394,7 +395,7 @@ for name, original in [('components.json', inputs / 'configs/components.json'),
     with temporary.open('xb') as output:
         output.write(original.read_bytes())
     os.replace(temporary, destination)
-print(f'Prepared generated runtime inputs: {inputs} -> {target} (2 files)')
+print(f'Prepared generated runtime inputs: {inputs} -> {target} (3 files)')
 PY
 
 if cmp -s "${tmp_file}" "${dockerfile}"; then

@@ -64,7 +64,7 @@ export async function patchNpmBundles(root, pins) {
 
 async function replaceVerifiedDependency(name, pin, outdated, verify = () => {}) {
   assert.match(pin.version, /^\d+\.\d+\.\d+$/);
-  assert.equal(pin.url, `https://registry.npmjs.org/${name}/-/${name}-${pin.version}.tgz`);
+  assert.equal(pin.url, `https://registry.npmjs.org/${name}/-/${name.split('/').at(-1)}-${pin.version}.tgz`);
   assert.match(pin.sha512, /^[a-f0-9]{128}$/);
   if (!outdated.length) return;
   const temporary = fs.mkdtempSync('/tmp/openclaw-npm-bundle-');
@@ -98,6 +98,54 @@ async function replaceVerifiedDependency(name, pin, outdated, verify = () => {})
     }
   } finally {
     fs.rmSync(temporary, {recursive: true});
+  }
+}
+
+export async function patchMcpPackages(root, pins) {
+  const store = path.join(fs.realpathSync(root), '.pnpm');
+  const packages = new Map();
+  // Upgrade core first: the client must resolve the matching issuer-preserving schemas.
+  for (const kind of ['core', 'client', 'sdk']) {
+    const name = `@modelcontextprotocol/${kind}`;
+    const pin = pins[name];
+    const outdated = [];
+    const originals = [];
+    const directories = [];
+    for (const entry of fs.readdirSync(store)) {
+      if (!entry.startsWith(`@modelcontextprotocol+${kind}@`)) continue;
+      const directory = path.join(store, entry, 'node_modules', name);
+      assert.equal(fs.realpathSync(directory), directory, 'unexpected MCP dependency path');
+      const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
+      assert.equal(pkg.name, name);
+      directories.push(directory);
+      if (pkg.version === pin.from) { outdated.push(directory); originals.push(pkg); }
+    }
+    await replaceVerifiedDependency(name, pin, outdated, directory => {
+      const replacement = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
+      for (const original of originals) {
+        const dependencies = {...original.dependencies};
+        if (kind === 'client') dependencies['@modelcontextprotocol/core'] = pins['@modelcontextprotocol/core'].version;
+        assert.deepEqual(replacement.dependencies, dependencies, 'MCP dependency graph changed beyond the reviewed core upgrade');
+        assert.deepEqual(replacement.peerDependencies, original.peerDependencies);
+        assert.deepEqual(replacement.engines, original.engines);
+      }
+    });
+    packages.set(kind, directories);
+  }
+  for (const kind of ['client', 'sdk']) {
+    for (const directory of packages.get(kind)) {
+      if (kind === 'client') {
+        const require = createRequire(path.join(directory, 'package.json'));
+        const coreFile = path.join(path.dirname(require.resolve('@modelcontextprotocol/core')), '../package.json');
+        const core = JSON.parse(fs.readFileSync(coreFile));
+        const client = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
+        assert.equal(core.version, client.dependencies['@modelcontextprotocol/core'], 'MCP client resolved the wrong core version');
+      }
+      for (const mode of ['cjs', 'esm']) {
+        execFileSync(process.execPath, [fileURLToPath(new URL('./verify-mcp-auth.mjs', import.meta.url)), directory, kind, mode],
+          {stdio: 'inherit', timeout: 30000});
+      }
+    }
   }
 }
 
@@ -216,6 +264,7 @@ async function main() {
   const components = JSON.parse(fs.readFileSync(new URL('./components.json', import.meta.url)));
   await patchNpmBundles('/app/node_modules', components.npm_bundled);
   await patchSourceMaps('/app/node_modules', components.source_map_js);
+  await patchMcpPackages('/app/node_modules', components.mcp_packages);
   const cacheFiles = execFileSync('find', ['/app/node_modules', '-type', 'f', '-path',
     '*/http-cache-semantics/package.json'], {encoding: 'utf8'}).trim();
   for (const file of cacheFiles ? cacheFiles.split('\n') : []) {
