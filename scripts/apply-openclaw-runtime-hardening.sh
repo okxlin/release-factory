@@ -272,6 +272,9 @@ function emit_docker_toolchain_overlay(indent) {
   if ($0 ~ /^RUN[[:space:]]+--mount=type=bind,source=\.release-factory-runtime,/) {
     vendored_patch_count++
   }
+  if ($0 ~ /^RUN[[:space:]]+--mount=type=bind,source=\.release-factory-runtime\/prune-native-typescript\.mjs,/) {
+    native_typescript_prune_count++
+  }
 }
 
 END {
@@ -365,6 +368,11 @@ END {
     }
 
     print line
+    if (line ~ /^FROM[[:space:]]+.*[[:space:]]+AS[[:space:]]+runtime-assets[[:space:]]*$/ && native_typescript_prune_count == 0) {
+      print "# Optional peers retain the development-only native compiler even in a production install."
+      print "RUN --mount=type=bind,source=.release-factory-runtime/prune-native-typescript.mjs,target=/tmp/prune-native-typescript.mjs \\"
+      print "    node /tmp/prune-native-typescript.mjs /app"
+    }
     if (line ~ /^FROM[[:space:]]+base-runtime([[:space:]]+AS[[:space:]]+[A-Za-z0-9_.-]+)?[[:space:]]*$/ && security_refresh_count == 0) {
       print "# A release refresh invalidates runtime package layers without rebuilding the compiler stages."
       print "ARG SECURITY_REFRESH=manual"
@@ -386,6 +394,7 @@ if target.is_symlink() or (target.exists() and not target.is_dir()):
     raise SystemExit('invalid generated OpenClaw runtime directory')
 target.mkdir(exist_ok=True)
 for name, original in [('components.json', inputs / 'configs/components.json'),
+                       ('prune-native-typescript.mjs', inputs / 'image/prune-native-typescript.mjs'),
                        ('verify-mcp-auth.mjs', inputs / 'image/verify-mcp-auth.mjs'),
                        ('patch-vendored-deps.mjs', inputs / 'image/patch-vendored-deps.mjs')]:
     destination = target / name
@@ -395,7 +404,7 @@ for name, original in [('components.json', inputs / 'configs/components.json'),
     with temporary.open('xb') as output:
         output.write(original.read_bytes())
     os.replace(temporary, destination)
-print(f'Prepared generated runtime inputs: {inputs} -> {target} (3 files)')
+print(f'Prepared generated runtime inputs: {inputs} -> {target} (4 files)')
 PY
 
 if cmp -s "${tmp_file}" "${dockerfile}"; then

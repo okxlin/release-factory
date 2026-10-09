@@ -51,6 +51,18 @@ run_case() {
   grep -Fq -- "FROM ${stage_source} AS runtime-assets" "${dockerfile}"
   test "$(grep -Fc -- '/app/node_modules/@vitest' "${dockerfile}")" -eq 1
   test "$(grep -Fc -- '/app/node_modules/vitest' "${dockerfile}")" -eq 1
+  test "$(grep -Fc -- 'node /tmp/prune-native-typescript.mjs /app' "${dockerfile}")" -eq 1
+  test -f "${fixture_dir}/.release-factory-runtime/prune-native-typescript.mjs"
+  python3 - "${dockerfile}" <<'PY'
+from pathlib import Path
+import sys
+stage = ''
+for line in Path(sys.argv[1]).read_text().splitlines():
+    if line.startswith('FROM '):
+        stage = line
+    if 'node /tmp/prune-native-typescript.mjs /app' in line:
+        assert stage.endswith(' AS runtime-assets'), stage
+PY
   test "$(grep -Fc -- 'AS openclaw-runtime-docker-tools' "${dockerfile}")" -eq 1
   test "$(grep -Fc -- 'ARG SECURITY_REFRESH=manual' "${dockerfile}")" -eq 1
   test "$(grep -Fc -- 'RUN --mount=type=bind,from=openclaw-runtime-docker-tools' "${dockerfile}")" -eq 1
