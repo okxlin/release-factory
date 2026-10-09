@@ -24,6 +24,7 @@ ARG GO_AUTHCRUNCH_VERSION
 ARG GRPC_VERSION
 ARG KLAUSPOST_COMPRESS_VERSION
 ARG X_CRYPTO_VERSION
+ARG X_NET_VERSION
 ARG X_TEXT_VERSION
 ARG CADDY_RATELIMIT_REF
 
@@ -77,6 +78,7 @@ RUN xcaddy build "v${CADDY_VERSION}" \
         --replace "google.golang.org/grpc=google.golang.org/grpc@v${GRPC_VERSION}" \
         --replace "github.com/klauspost/compress=github.com/klauspost/compress@v${KLAUSPOST_COMPRESS_VERSION}" \
         --replace "golang.org/x/crypto=golang.org/x/crypto@v${X_CRYPTO_VERSION}" \
+        --replace "golang.org/x/net=golang.org/x/net@v${X_NET_VERSION}" \
         --replace "golang.org/x/text=golang.org/x/text@v${X_TEXT_VERSION}" \
     && ./caddy version \
     && ./caddy list-modules | grep -Fx 'security' \
@@ -88,6 +90,7 @@ RUN PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "google\.g
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "github\\.com/klauspost/compress[[:space:]]+v${KLAUSPOST_COMPRESS_VERSION}" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "cel\.dev/cel-go[[:space:]]+v${CEL_GO_VERSION}" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "golang\.org/x/crypto[[:space:]]+v${X_CRYPTO_VERSION}" \
+    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "golang\.org/x/net[[:space:]]+v${X_NET_VERSION}" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "golang\.org/x/text[[:space:]]+v${X_TEXT_VERSION}" \
     && set -- /tmp/buildenv_* \
     && test "$#" -eq 1 \

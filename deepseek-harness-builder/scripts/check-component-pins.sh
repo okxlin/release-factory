@@ -403,6 +403,12 @@ require_literal \
     "golang.org/x/crypto=golang.org/x/crypto@v\${X_CRYPTO_VERSION}" \
     'the Caddy x/crypto security override'
 require_literal \
+    'golang.org/x/net=golang.org/x/net@v${X_NET_VERSION}' \
+    'the Caddy x/net security override'
+require_literal \
+    'grep -Eq "golang\.org/x/net[[:space:]]+v${X_NET_VERSION}"' \
+    'the Caddy x/net module verification'
+require_literal \
     'golang.org/x/text=golang.org/x/text@v${X_TEXT_VERSION}' \
     'the Caddy x/text security override'
 require_literal \

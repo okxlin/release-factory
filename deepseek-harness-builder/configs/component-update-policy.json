@@ -58,6 +58,14 @@
       }
     },
     {
+      "name": "x/net security override",
+      "pin": "X_NET_VERSION",
+      "source": {
+        "type": "go_module",
+        "module": "golang.org/x/net"
+      }
+    },
+    {
       "name": "x/crypto security override",
       "pin": "X_CRYPTO_VERSION",
       "source": {
