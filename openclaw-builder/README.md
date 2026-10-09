@@ -36,6 +36,11 @@ MCP OAuth 修复同步更新 SDK 1.31.0、client/core 2.2.0，并在实际依赖
 两端暂存镜像均验证通过后才发布版本标签；两端版本标签均验证通过后才更新 `latest`。
 任一端失败都会使 workflow 失败，PR 验证不执行登录或推送。
 
+TypeScript 7 原生编译器虽是开发依赖，仍可能经可选 peer 进入生产依赖树。
+构建完成后的 `runtime-assets` 阶段会清理它的 pnpm 包、引用和 `tsc` 入口，
+避免把编译器内的旧 Go 运行库带入成品镜像；TypeScript 5 运行时 API 和其他依赖保留。
+若上游将 TypeScript 声明为直接运行依赖，清理会停止并要求重新审查。
+
 本地可先运行以下检查，再按解析出的 `build_args` 构建上游检出目录：
 
 ```bash

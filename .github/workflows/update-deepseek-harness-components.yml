@@ -1,10 +1,9 @@
 name: Update DeepSeek Harness Components
 
 on:
-  workflow_run:
-    workflows: [Check DeepSeek Harness Component Updates]
-    types: [completed]
-    branches: [main]
+  schedule:
+    # Friday 23:00 in China Standard Time. Daily checks remain read-only.
+    - cron: "0 15 * * 5"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -23,10 +22,7 @@ jobs:
   prepare:
     if: >-
       github.repository == 'okxlin/release-factory' &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.head_repository.full_name == github.repository &&
-        contains(fromJSON('["schedule", "workflow_dispatch"]'), github.event.workflow_run.event)))
+      contains(fromJSON('["schedule", "workflow_dispatch"]'), github.event_name)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
