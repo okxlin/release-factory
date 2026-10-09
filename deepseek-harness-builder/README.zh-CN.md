@@ -13,7 +13,7 @@
 
 两个工作流都会把相同标签发布到 `ghcr.io/okxlin/deepseek-harness` 和 `docker.io/$DOCKERHUB_USERNAME/deepseek-harness`。请把 `DOCKERHUB_USERNAME` 配置为 GitHub Actions 仓库变量或 Secret，并把 `DOCKERHUB_TOKEN` 配置为仓库 Secret。Docker Hub token 只用于 Registry 认证和已验证镜像的发布，不会传入镜像构建上下文。
 
-定时任务以及留空版本的手动运行会从 DeepSeek Harness GitHub Releases 选择最高的非 draft `dsh-v*` 源码版本，校验对应 tag、commit 和源码归档 SHA-256 后构建，并发布匹配的 `<DSH_VERSION>` 和 `<DSH_VERSION>-workstation` 标签；因此上游源码版本可以在发布到 npm 之前进入镜像。手动显式传入 `dsh-v*` 可以选择指定的源码 release，传入已发布的 npm 版本或 dist-tag 时仍按请求的 npm selector 解析。`image/dsh-source.json` 保留可复现的本地/PR 基线，未来源码 release 不需要修改 Dockerfile。手动工作流也可覆盖发布标签。AppStore `latest` 通道使用浮动标签，编号 AppStore 版本使用匹配的版本标签。
+留空版本的手动发布会从 DeepSeek Harness GitHub Releases 选择最高的非 draft `dsh-v*` 源码版本，校验对应 tag、commit 和源码归档 SHA-256 后构建，并发布匹配的 `<DSH_VERSION>` 和 `<DSH_VERSION>-workstation` 标签；因此上游源码版本可以在发布到 npm 之前进入镜像。手动显式传入 `dsh-v*` 可以选择指定的源码 release，传入已发布的 npm 版本或 dist-tag 时仍按请求的 npm selector 解析。`image/dsh-source.json` 保留可复现的本地/PR 基线，未来源码 release 不需要修改 Dockerfile。手动工作流也可覆盖发布标签。AppStore `latest` 通道使用浮动标签，编号 AppStore 版本使用匹配的版本标签。
 
 当前提交的源码基线是 [0.2.0-rc.2](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.2)。该基线包含 PTC 包名 `ptc-runtime` 和 workflow 执行器 `workflow-ptc`；使用旧名称的自定义 profile 需要更新。DeepSeek 现在默认使用 Messages 协议；手动配置的旧官方 API 根地址应删除或改为 `https://api.deepseek.com/anthropic`，自定义 provider URL 不受影响。
 
@@ -23,9 +23,15 @@
 
 发布工作流只解析一次选定的源码或 npm release，再复用同一个[验证 action](../.github/actions/verify-deepseek-harness/action.yml)。成功的 job 导出已测试镜像，并记录归档 checksum、镜像 config ID、架构、变体、DSH 版本、工作流代码 revision 和 run ID。[发布 job](../.github/workflows/release-deepseek-harness.yml) 在首次推送前校验全部归档和加载后的镜像，再用已核验的 registry digest 组装多架构标签，不重新构建。两个仓库都必须成功；两个版本标签均验证后才更新浮动标签。跨仓库写入不具备原子性，发布任务会排队，避免自动取消正在进行的发布。
 
-构建缓存按变体和架构隔离，使用 `mode=max` 保存中间编译阶段。定时发布主动刷新 `runtime-base`，Workstation 还刷新 `workstation` 的 APT 阶段；手动发布提供默认开启的 `refresh_system_packages`，本地脚本提供 `--refresh-system-packages`。源码编译缓存仍可复用。镜像传输 artifact 保留一天，原始 Trivy 报告保留七天。Docker save/load 保留被测试的 config 和镜像层，但不会保留 BuildKit provenance attestation；随附记录用于工作流追溯，不等同于签名证明。
+构建缓存按变体和架构隔离，使用 `mode=max` 保存中间编译阶段。组件更新和 PR 验证主动刷新 `runtime-base`，Workstation 还刷新 `workstation` 的 APT 阶段；手动发布提供默认开启的 `refresh_system_packages`，本地脚本提供 `--refresh-system-packages`。源码编译缓存仍可复用。镜像传输 artifact 保留一天，原始 Trivy 报告保留七天。Docker save/load 保留被测试的 config 和镜像层，但不会保留 BuildKit provenance attestation；随附记录用于工作流追溯，不等同于签名证明。
 
-另有一个每日只读工作流，会把固定组件版本与 GitHub、Go module proxy、Go、Node.js、npm、PyPI 和 Python 的权威版本源进行比较。它会把更新候选写入 Actions Summary 并发出 warning，但不会修改文件、创建 PR 或阻断定时发布。版本源或策略错误会让检查失败；手动运行时也可以启用严格模式，在发现更新时失败。报告出的版本只是待审候选，仍需更新对应 checksum 和镜像 digest，并通过现有构建、smoke 与漏洞门禁。
+每日只读检查在 UTC 15:00（北京时间 23:00）比较固定组件版本与 GitHub、Go module proxy、Go、Node.js、npm、PyPI 和 Python 的权威版本源，把候选写入 Actions Summary。每日或手动检查均不会触发镜像构建；版本源、策略错误或手动启用的 `fail_on_updates` 严格模式只影响该检查的结果。
+
+[Update DeepSeek Harness Components](../.github/workflows/update-deepseek-harness-components.yml) 独立在每周五 UTC 15:00（北京时间 23:00）运行，也可手动触发。它重新解析上游版本、归档 checksum 和两个架构的基础镜像 digest，将更新汇总到同一个机器人 PR；固定版本或基础镜像 digest 均未变化时，跳过新的候选构建。候选必须通过 amd64、arm64 的 runtime 和 workstation 构建、依赖审计、鉴权与透传 smoke、沙箱和漏洞门禁，才会 squash 合并并触发两种镜像发布。验证失败时保留 PR，不自动合并。更新保持既有版本线，不降级组件；许可证哈希变化、人工提交、允许范围外的文件变化或验证期间 main/PR 变化都会阻止自动合并。
+
+紧急安全修复可手动运行更新工作流并保持 `dry_run: false`，立即走相同验证和发布流程；`dry_run: true` 仅预览候选，不写入 GitHub。两种镜像发布工作流已取消各自的定时任务，避免每周重复构建。系统 APT 包在发布时刷新；组件版本未变但需要紧急修补系统包时，可手动运行两种镜像工作流并启用 `refresh_system_packages: true`，同时把两者的 `dsh_version` 都设为 `image/dsh-source.json` 中的裸 `version` 值（不加 `dsh-v` 前缀），以保留已固定的源码 commit；留空版本会重新解析最新上游源码。
+
+发布任务使用已验证的源码版本。合并后若触发发布的 API 调用中断，可重跑失败任务，或由下一次每周/手动更新恢复缺失的发布触发；恢复要求当前锁定文件仍匹配该 PR，不重新发布已被取代的旧组件。实际构建和仓库推送失败仍由发布工作流报告。
 
 Go 跟随官方稳定版本端点 <https://go.dev/VERSION?m=text>，其 Docker Official Image index 固定 digest，用于可复现地选择 `amd64` 和 `arm64`。actionlint 使用该固定 Go 工具链从 checksum 固定的官方源码归档重新构建；其他独立 workstation 工具从各自官方 GitHub Release 下载，并按架构固定 SHA-256 checksum。
 
@@ -451,4 +457,4 @@ Workstation 的普通工具链 HIGH 只告警，可修复 CRITICAL 继续阻断�
 `/data` 挂载。如果新的认证状态为空，entrypoint 会把旧 workstation 应用状态复制到
 `/data`。确认迁移数据后，后续容器仍必须挂载 `/data`；旧路径不能替代它。
 
-Caddy 和 caddy-security 会一起编译并固定版本。不能假设只更新 Caddy 是安全的。定时发布工作流会解析最高的非 draft GitHub 源码 release，校验 tag、commit 和归档 checksum，把当次版本作为 Docker `DSH_VERSION` 构建参数，并把 `runtime` target 发布为 `latest` 加 `<DSH_VERSION>`，把 `workstation` target 发布为 `workstation` 加 `<DSH_VERSION>-workstation`。手动运行可以选择指定的源码版本、已发布的 DSH npm 版本或 dist-tag，也可覆盖最终镜像标签，同时保留相同验证和可选浮动标签行为。每个工作流都会先审计依赖树、重建并验证插件、运行 Caddy 依赖图和 `govulncheck` 门禁，并执行 amd64 和 arm64 烟雾合约，然后才把验证过的多平台 manifest 推送到 GHCR 和 Docker Hub。runtime 发布继续应用零可修复 HIGH/CRITICAL Trivy 门禁；工具链范围更广的 workstation 会阻断可修复 CRITICAL，并报告可修复 HIGH 供确定性审查，同时由每日组件检查发现新的上游版本。任一 registry 登录或发布失败，工作流都会失败，而不是报告完整发布。
+Caddy 和 caddy-security 会一起编译并固定版本。不能假设只更新 Caddy 是安全的。每周组件更新工作流会解析并固定最高的非 draft GitHub 源码 release，校验 tag、commit 和归档 checksum，通过验证后再合并，并把已验证的版本传给发布工作流，将 `runtime` target 发布为 `latest` 加 `<DSH_VERSION>`，把 `workstation` target 发布为 `workstation` 加 `<DSH_VERSION>-workstation`。手动运行可以选择指定的源码版本、已发布的 DSH npm 版本或 dist-tag，也可覆盖最终镜像标签，同时保留相同验证和可选浮动标签行为。每个工作流都会先审计依赖树、重建并验证插件、运行 Caddy 依赖图和 `govulncheck` 门禁，并执行 amd64 和 arm64 烟雾合约，然后才把验证过的多平台 manifest 推送到 GHCR 和 Docker Hub。runtime 发布继续应用零可修复 HIGH/CRITICAL Trivy 门禁；工具链范围更广的 workstation 会阻断可修复 CRITICAL，并报告可修复 HIGH 供确定性审查，同时由每日组件检查发现新的上游版本。任一 registry 登录或发布失败，工作流都会失败，而不是报告完整发布。
