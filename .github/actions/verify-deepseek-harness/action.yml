@@ -107,6 +107,36 @@ runs:
         AUDIT_IMAGE: ${{ steps.components.outputs.audit_image }}
       run: bash deepseek-harness-builder/scripts/audit-runtime-dependencies.sh --image "$AUDIT_IMAGE"
 
+    - name: Verify MCP issuer binding and native SVG decoding
+      shell: bash
+      env:
+        AUDIT_IMAGE: ${{ steps.components.outputs.audit_image }}
+      run: |
+        set -euo pipefail
+        for mode in cjs esm; do
+          docker run --rm -i --network none --entrypoint node "$AUDIT_IMAGE" \
+            --input-type=module - /opt/dsh/node_modules/@modelcontextprotocol/client client "$mode" \
+            < openclaw-builder/image/verify-mcp-auth.mjs
+        done
+        docker run --rm -i --network none --entrypoint node "$AUDIT_IMAGE" --input-type=module - <<'NODE'
+        import assert from 'node:assert/strict';
+        import {createRequire} from 'node:module';
+        const sharp = createRequire('/opt/dsh/package.json')('sharp');
+        // https://github.com/advisories/GHSA-wq5f-xc86-pv6w
+        const fixed = [2, 63, 2];
+        const actual = sharp.versions.rsvg.split('.').map(Number);
+        assert.ok(actual.length === 3 && actual.every(Number.isInteger));
+        assert.ok(actual.reduce((order, value, index) => order || value - fixed[index], 0) >= 0,
+          'sharp must include fixed librsvg 2.63.2 or newer');
+        const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1" fill="red"/></svg>');
+        const png = await sharp(svg).resize(2, 2).png().toBuffer();
+        const metadata = await sharp(png).metadata();
+        assert.equal(metadata.format, 'png');
+        assert.equal(metadata.width, 2);
+        assert.equal(metadata.height, 2);
+        console.log(`Verified SVG decoding with sharp ${sharp.versions.sharp} and librsvg ${sharp.versions.rsvg}`);
+        NODE
+
     - name: Build native test image
       id: image
       uses: docker/build-push-action@v7
