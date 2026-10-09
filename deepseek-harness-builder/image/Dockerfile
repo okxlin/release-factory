@@ -31,9 +31,8 @@ COPY patches/caddy-cel-go-v0.30.patch /tmp/caddy-cel-go-v0.30.patch
 COPY patches/caddy-cel-go-module-relocation.patch /tmp/caddy-cel-go-module-relocation.patch
 COPY patches/go-authcrunch-disable-openpgp.patch /tmp/go-authcrunch-disable-openpgp.patch
 
-# Caddy v2.11.4 predates CEL's InterpretableV2 API. Apply the exact source
-# compatibility change from Caddy upstream commit b2693fb before pinning CEL
-# to the advisory's fixed release.
+# Apply the reviewed CEL fixes to older Caddy sources, or verify that newer
+# sources already contain those exact changes. Unknown source shapes fail.
 RUN wget -qO /tmp/caddy.tar.gz \
         "https://github.com/caddyserver/caddy/archive/refs/tags/v${CADDY_VERSION}.tar.gz" \
     && printf '%s  %s\n' \
@@ -42,10 +41,12 @@ RUN wget -qO /tmp/caddy.tar.gz \
     && mkdir -p /usr/src \
     && tar -xzf /tmp/caddy.tar.gz -C /usr/src \
     && cd "/usr/src/caddy-${CADDY_VERSION}" \
-    && git apply --check /tmp/caddy-cel-go-v0.30.patch \
-    && git apply /tmp/caddy-cel-go-v0.30.patch \
-    && git apply --check --unidiff-zero /tmp/caddy-cel-go-module-relocation.patch \
-    && git apply --unidiff-zero /tmp/caddy-cel-go-module-relocation.patch \
+    && if git apply --check /tmp/caddy-cel-go-v0.30.patch 2>/dev/null; then \
+        git apply /tmp/caddy-cel-go-v0.30.patch; \
+       else git apply --reverse --check /tmp/caddy-cel-go-v0.30.patch; fi \
+    && if git apply --check --unidiff-zero /tmp/caddy-cel-go-module-relocation.patch 2>/dev/null; then \
+        git apply --unidiff-zero /tmp/caddy-cel-go-module-relocation.patch; \
+       else git apply --reverse --check --unidiff-zero /tmp/caddy-cel-go-module-relocation.patch; fi \
     && PATH="/usr/local/go/bin:${PATH}" go mod edit \
         -droprequire=github.com/google/cel-go \
         -require="cel.dev/cel-go@v${CEL_GO_VERSION}" \
