@@ -510,6 +510,8 @@ def format_summary(rows: list[dict[str, str]], errors: list[str]) -> str:
             "This workflow is read-only. Update candidates still require reviewed pins, "
             "checksum/digest refreshes where applicable, and the existing build, smoke, "
             "and vulnerability gates.",
+            "Successful main-branch checks start the Update DeepSeek Harness Components workflow, "
+            "which maintains a single PR and verifies candidates before merging and releasing.",
             "",
         ]
     )

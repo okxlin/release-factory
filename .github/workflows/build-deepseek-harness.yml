@@ -1,8 +1,13 @@
 name: Build DeepSeek Harness Image
+run-name: ${{ inputs.component_update && format('Component update {0}', inputs.component_update) || 'Build DeepSeek Harness Image' }}
 
 on:
   workflow_dispatch:
     inputs:
+      component_update:
+        description: Correlation ID supplied by component automation; leave empty for manual builds
+        required: false
+        default: ""
       image_tag:
         description: "Published image tag; leave empty to use the resolved @deepseek-ai/dsh version"
         required: false

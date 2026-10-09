@@ -7,6 +7,7 @@ on:
       - ".github/workflows/build-deepseek-harness-workstation.yml"
       - ".github/workflows/validate-deepseek-harness-component-pins.yml"
       - ".github/workflows/verify-deepseek-harness-pr.yml"
+      - ".github/workflows/update-deepseek-harness-components.yml"
       - ".github/workflows/release-deepseek-harness.yml"
       - ".github/actions/verify-deepseek-harness/**"
       - "deepseek-harness-builder/**"
