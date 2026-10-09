@@ -1,0 +1,131 @@
+name: Update DeepSeek Harness Components
+
+on:
+  workflow_run:
+    workflows: [Check DeepSeek Harness Component Updates]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Resolve and validate updates without creating a PR or publishing
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-deepseek-harness-components
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: >-
+      github.repository == 'okxlin/release-factory' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        contains(fromJSON('["schedule", "workflow_dispatch"]'), github.event.workflow_run.event)))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: write
+      actions: write
+    outputs:
+      head: ${{ steps.pr.outputs.head }}
+      base: ${{ steps.pr.outputs.base }}
+      pr: ${{ steps.pr.outputs.pr }}
+      check: ${{ steps.pr.outputs.check }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Test component automation boundaries
+        run: |
+          python3 deepseek-harness-builder/scripts/test-update-components.py
+          python3 deepseek-harness-builder/scripts/test-component-update-pr.py
+      - name: Recover interrupted release dispatches
+        if: '!inputs.dry_run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 deepseek-harness-builder/scripts/component-update-pr.py recover
+      - name: Resolve versions and verify official artifacts
+        id: updates
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 deepseek-harness-builder/scripts/update-components.py --apply \
+            --summary "$RUNNER_TEMP/component-updates.md" --github-output "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/component-updates.md" >> "$GITHUB_STEP_SUMMARY"
+          bash deepseek-harness-builder/scripts/check-component-pins.sh
+      - name: Maintain the single component PR
+        id: pr
+        if: steps.updates.outputs.changed == 'true' && !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 deepseek-harness-builder/scripts/component-update-pr.py prepare \
+            --summary "$RUNNER_TEMP/component-updates.md" --output "$GITHUB_OUTPUT"
+
+  verify:
+    needs: prepare
+    if: needs.prepare.outputs.head != ''
+    name: Verify component candidate (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.head }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v4
+        with:
+          cache-binary: false
+      - name: Verify runtime
+        uses: ./.github/actions/verify-deepseek-harness
+        with:
+          variant: runtime
+          arch: ${{ matrix.arch }}
+          refresh-system-packages: "true"
+      - name: Verify workstation
+        uses: ./.github/actions/verify-deepseek-harness
+        with:
+          variant: workstation
+          arch: ${{ matrix.arch }}
+          refresh-system-packages: "true"
+
+  merge:
+    needs: [prepare, verify]
+    if: always() && needs.prepare.outputs.pr != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: write
+      actions: write
+    steps:
+      # Load trusted orchestration code from the run's original main commit.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Record verification, squash merge and dispatch both releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_HEAD: ${{ needs.prepare.outputs.head }}
+          CANDIDATE_BASE: ${{ needs.prepare.outputs.base }}
+          CANDIDATE_PR: ${{ needs.prepare.outputs.pr }}
+          CANDIDATE_CHECK: ${{ needs.prepare.outputs.check }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+        run: python3 deepseek-harness-builder/scripts/component-update-pr.py finish

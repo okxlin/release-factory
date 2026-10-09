@@ -49,6 +49,16 @@ cp -- "${source_dockerfile}" "${missing_x_crypto_pin}"
 sed -i '/^ARG X_CRYPTO_VERSION$/d' "${missing_x_crypto_pin}"
 expect_failure 'missing-x-crypto-pin' "${missing_x_crypto_pin}" 'required ARG X_CRYPTO_VERSION is missing'
 
+missing_x_net_override="${tmp_dir}/missing-x-net-override.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_x_net_override}"
+sed -i '/--replace.*golang.org\/x\/net=/d' "${missing_x_net_override}"
+expect_failure 'missing-x-net-override' "${missing_x_net_override}" 'the Caddy x/net security override'
+
+missing_x_net_verification="${tmp_dir}/missing-x-net-verification.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_x_net_verification}"
+sed -i '/grep -Eq.*x\/net.*X_NET_VERSION/d' "${missing_x_net_verification}"
+expect_failure 'missing-x-net-verification' "${missing_x_net_verification}" 'the Caddy x/net module verification'
+
 missing_npm_pin="${tmp_dir}/missing-npm-pin.Dockerfile"
 cp -- "${source_dockerfile}" "${missing_npm_pin}"
 sed -i '/^ARG NPM_VERSION$/d' "${missing_npm_pin}"

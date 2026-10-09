@@ -88,6 +88,7 @@ def main():
                 for component in ("node", "go", "pnpm"):
                     output.write(f"{component}_version={args[component.upper() + '_VERSION']}\n")
                 output.write(f"dsh_version={args['DSH_VERSION']}\n")
+                output.write(f"dsh_source_version={args['DSH_SOURCE_VERSION']}\n")
         print(json.dumps(args, indent=2) if options.format == "json" else lines)
         return 0
     except (OSError, ValueError, TypeError, KeyError) as exc:
