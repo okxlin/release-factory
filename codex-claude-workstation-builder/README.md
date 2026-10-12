@@ -51,9 +51,9 @@ Build-time versions can be overridden with `--build-arg`:
 docker build \
   --build-arg NODE_MAJOR=24 \
   --build-arg NPM_VERSION=12.0.2 \
-  --build-arg GO_VERSION=1.27.0 \
-  --build-arg GO_SHA256_AMD64=675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685 \
-  --build-arg GO_SHA256_ARM64=51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda \
+  --build-arg GO_VERSION=1.27.2 \
+  --build-arg GO_SHA256_AMD64=ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5 \
+  --build-arg GO_SHA256_ARM64=94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8 \
   --build-arg RUST_VERSION=stable \
   --build-arg BUN_VERSION=latest \
   --build-arg DENO_VERSION=latest \
@@ -73,7 +73,7 @@ docker build \
 - Web IDE: code-server with Codex/Claude, Python/Ruff, YAML/TOML, Docker, EditorConfig, Prettier, ESLint, and Chinese language extensions
 - JavaScript/TypeScript: Node.js 24, npm 12.0.2, pnpm latest and Yarn stable via Corepack, TypeScript 5, Bun latest, Deno latest
 - Python: Python 3, venv, pip, pipx, pytest, uv/uvx, ruff, black, mypy, Python build headers
-- Systems: Go 1.27.0, Rust stable, Java 21 LTS, Maven, Docker CLI, Buildx, Compose plugin
+- Systems: Go 1.27.2, Rust stable, Java 21 LTS, Maven, Docker CLI, Buildx, Compose plugin
 - Tooling: git, gh, ripgrep, fd, jq, yq, shellcheck, shfmt, actionlint, pre-commit, yamllint, direnv
 - Debugging: curl, httpie, dig, nc, lsof, strace, htop, iotop, nethogs, ncdu
 - Proxy cores: mihomo/clash-meta, sing-box, and Xray are resolved to current upstream releases by CI and built from immutable source commits
