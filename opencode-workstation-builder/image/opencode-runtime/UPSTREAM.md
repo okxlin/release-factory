@@ -15,6 +15,15 @@ DCP is installed in the user's configuration/cache when enabled; its AGPL-3.0-or
 license and source are available at
 https://github.com/Opencode-DCP/opencode-dynamic-context-pruning.
 
+The default DCP cache pins `seroval` to 1.6.9 (MIT) through npm overrides,
+fixing CVE-2026-104845 and CVE-2026-104846 without changing the DCP release.
+`prepare-dcp-dependencies.py` seeds the override before OpenCode installs the
+plugin and refreshes existing default caches with lifecycle scripts disabled.
+Explicit custom DCP package selections retain their own dependency policy.
+OpenCode's package cache and Arborist install behavior are verified against
+https://github.com/anomalyco/opencode/blob/5cd8e68fdd72b27818d26d168b9c7a06b359567e/packages/core/src/npm.ts.
+CI scans the installed userland tree in addition to the image.
+
 Update the version and both optional dependencies together, then regenerate the
 lock with `npm install --package-lock-only --ignore-scripts`. Verify both native
 architectures, the default plugin path, and the image/userland vulnerability scans.

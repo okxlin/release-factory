@@ -9,7 +9,7 @@
       "id": "CVE-2026-93748",
       "package": "http-cache-semantics",
       "installed_version": "4.2.0",
-      "path": "app/node_modules/.pnpm/npm@11.20.0/node_modules/npm/node_modules/http-cache-semantics/package.json",
+      "path": "app/node_modules/.pnpm/npm@12.1.0/node_modules/npm/node_modules/http-cache-semantics/package.json",
       "type": "node-pkg",
       "profiles": [
         "sandbox"
