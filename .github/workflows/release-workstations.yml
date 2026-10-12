@@ -92,6 +92,7 @@ jobs:
             python3 codex-claude-workstation-builder/scripts/test-resolve-proxy-core-versions.py
           else
             python3 opencode-workstation-builder/scripts/test-bootstrap-opencode-userland.py
+            python3 opencode-workstation-builder/scripts/test-prepare-dcp-dependencies.py
           fi
       - name: Resolve proxy sources once for both architectures
         if: inputs.variant == 'codex'

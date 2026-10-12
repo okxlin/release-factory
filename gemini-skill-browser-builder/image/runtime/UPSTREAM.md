@@ -15,6 +15,12 @@ Its existing dependencies are updated here without adding another runtime librar
   lifecycle scripts remain disabled, and image build/smoke verify native loading
   and a PNG transformation.
   https://github.com/lovell/sharp/releases/tag/v0.35.0
+- The 2026-10-12 security refresh pins MCP SDK 1.32.1 and sharp 0.35.5,
+  and resolves proxy-addr 2.0.8. Sharp includes fixed librsvg 2.63.2. The SDK's
+  OAuth client issuer-binding migration does not affect MCP servers or stdio clients.
+  https://github.com/advisories/GHSA-6qxp-vccf-f47h
+  https://github.com/advisories/GHSA-jqcg-44mw-7w3h
+  https://github.com/advisories/GHSA-wq5f-xc86-pv6w
 - Node 24 LTS is selected because Node 20 ended maintenance on 2026-04-30.
   https://github.com/nodejs/Release/blob/main/schedule.json
 

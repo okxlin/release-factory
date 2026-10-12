@@ -25,6 +25,7 @@ install_dcp() {
   [[ "${DCP_INSTALL}" == "1" ]] || return 0
   : "${DCP_PACKAGE:=$(node -p 'require(process.argv[1]).config.dcpPackage' "${OPENCODE_BASELINE_DIR}/package.json")}"
   ensure_config_dir
+  python3 /app/scripts/prepare-dcp-dependencies.py "${DCP_PACKAGE}"
   log 'installing Dynamic Context Pruning plugin'
   if [[ "${DCP_GLOBAL}" == "1" ]]; then
     opencode plugin "${DCP_PACKAGE}" --global
