@@ -165,11 +165,11 @@ def needs_build(labels, upstream_sha, recipe_digest, now, max_age_days):
     return False, "same immutable inputs and build is less than seven days old"
 
 
-def needs_publication(repositories, tag, upstream_sha, recipe_digest, now, max_age_days):
+def needs_publication(repositories, tag, upstream_sha, recipe_digest, now, max_age_days, *, publish_latest=True):
     tested_config = None
     for repository in repositories:
         registry = Registry(repository)
-        for release_tag in (tag, "latest"):
+        for release_tag in (tag, "latest") if publish_latest else (tag,):
             image = registry.image(release_tag)
             rebuild, reason = needs_build(None if image is None else image[1], upstream_sha, recipe_digest, now, max_age_days)
             if rebuild:
@@ -180,10 +180,23 @@ def needs_publication(repositories, tag, upstream_sha, recipe_digest, now, max_a
     return False, "all registry tags reference the same fresh image"
 
 
+def release_tag(requested):
+    pattern = r"v?[0-9][A-Za-z0-9._-]{0,118}"
+    if requested and not re.fullmatch(pattern, requested):
+        raise ValueError("invalid upstream release tag")
+    release = github("releases/tags/" + urllib.parse.quote(requested, safe="") if requested else "releases/latest")
+    tag = release["tag_name"]
+    if (not re.fullmatch(pattern, tag) or release.get("draft") or release.get("prerelease")
+            or requested and tag != requested):
+        raise ValueError("expected the requested stable upstream release")
+    return tag
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository", action="append", help="Publication repository; repeat to check mirrors")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--upstream-tag", default="", help="Rebuild one stable release without updating latest")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--github-output", type=Path)
     args = parser.parse_args()
@@ -193,9 +206,8 @@ def main():
     components = json.loads((ROOT / "openclaw-builder/configs/components.json").read_text())
     if components.get("schema_version") != 1 or components.get("max_build_age_days") != 7:
         raise ValueError("invalid OpenClaw component policy")
-    tag = github("releases/latest")["tag_name"]
-    if not re.fullmatch(r"v?[0-9][A-Za-z0-9._-]{0,118}", tag):
-        raise ValueError("invalid upstream release tag")
+    tag = release_tag(args.upstream_tag)
+    publish_latest = not args.upstream_tag
     upstream_sha = github("commits/" + urllib.parse.quote(tag, safe=""))["sha"]
     if not SHA.fullmatch(upstream_sha):
         raise ValueError("invalid upstream commit")
@@ -217,13 +229,13 @@ def main():
         rebuild, reason = True, "forced verification/rebuild"
     else:
         rebuild, reason = needs_publication(repositories, tag + "-sandbox", upstream_sha, digest, now,
-                                            components["max_build_age_days"])
+                                            components["max_build_age_days"], publish_latest=publish_latest)
     build_args.update(SECURITY_REFRESH=now.strftime("%G-%V"), OPENCLAW_INSTALL_DOCKER_CLI="1",
                       OPENCLAW_IMAGE_APT_PACKAGES="libgnutls30", OPENCLAW_PREFER_PNPM="1",
                       GIT_COMMIT=upstream_sha, OPENCLAW_DOCKER_BUILD_VERSION=tag.removeprefix("v"))
     result = {"skip": str(not rebuild).lower(), "reason": reason, "upstream_tag": tag,
               "upstream_sha": upstream_sha, "recipe_digest": digest, "created": now.isoformat(),
-              "image_tag": tag + "-sandbox", "build_args": build_args}
+              "image_tag": tag + "-sandbox", "publish_latest": str(publish_latest).lower(), "build_args": build_args}
     args.output.write_text(json.dumps(result, indent=2) + "\n")
     if args.github_output:
         with args.github_output.open("a") as output:

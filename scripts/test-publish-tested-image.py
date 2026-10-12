@@ -169,7 +169,7 @@ class OpenClawWorkflowTests(unittest.TestCase):
                 env = {**os.environ, "PATH": tmp + os.pathsep + os.environ["PATH"],
                        "CALL_LOG": str(root / "calls.json"), "FAIL_AT": str(fail_at), "RUNNER_TEMP": tmp,
                        "IMAGE": "sha256:" + "a" * 64, "GITHUB_SHA": "b" * 40,
-                       "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1", "IMAGE_TAG": "v1-sandbox",
+                       "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1", "IMAGE_TAG": "v1-sandbox", "PUBLISH_LATEST": "true",
                        "REPOSITORY": "ghcr.io/okxlin/openclaw-sandbox", "DOCKERHUB_NAMESPACE": "okxlin"}
                 result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0 if fail_at == 0 else 1, result.stderr)
