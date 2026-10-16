@@ -86,6 +86,16 @@ assert.equal(after.stdout.toString(), 'sandbox works');
 console.log('PASS: OpenClaw provisions, executes, lists and recreates its sandbox; workspace persists, root is read only, network/capabilities/socket are isolated');
 """
 
+FOREIGN_OWNER_PROBE = r"""
+import assert from 'node:assert/strict';
+import {resolveSandboxContext} from '/app/dist/plugin-sdk/agent-harness-runtime.js';
+const config = {agents: {defaults: {sandbox: {mode: 'all', scope: 'session'}}}};
+await assert.rejects(resolveSandboxContext({config, agentId: 'main',
+  sessionKey: 'agent:main:rf-smoke', workspaceDir: '/workspace/agent'}),
+  error => error.code === 'GATEWAY_STATE_OWNER_REQUIRED');
+console.log('PASS: standalone sandbox SDK rejects the live Gateway state owner');
+"""
+
 
 def main(image):
     components = json.loads((ROOT / "openclaw-builder/configs/components.json").read_text())
@@ -94,7 +104,7 @@ def main(image):
         if docker("image", "inspect", dependency, check=False).returncode:
             docker("pull", "--quiet", dependency, timeout=300)
     owner = "rf-openclaw-" + uuid.uuid4().hex[:12]
-    daemon, gateway = owner + "-daemon", owner + "-gateway"
+    daemon, gateway, offline = owner + "-daemon", owner + "-gateway", owner + "-offline"
     volumes = [owner + suffix for suffix in ("-socket", "-data", "-workspace", "-state")]
     sandbox_tag = "release-factory-test/sandbox:" + owner
     gateway_tag = "release-factory-test/gateway:" + owner
@@ -146,12 +156,25 @@ def main(image):
         healthy = inner_docker(daemon, "exec", gateway, "node", "/app/openclaw.mjs", "gateway", "health", "--json")
         assert '"ok": true' in healthy.stdout, "authenticated deep health did not succeed"
         print("PASS: gateway liveness, invalid-token rejection and authenticated deep health", flush=True)
-        result = inner_docker(daemon, "exec", gateway, "node", "--input-type=module", "-e", SANDBOX_PROBE, timeout=300)
+        result = inner_docker(daemon, "exec", gateway, "node", "--input-type=module", "-e", FOREIGN_OWNER_PROBE)
         print(result.stdout, end="", flush=True)
         version = inner_docker(daemon, "exec", gateway, "docker", "compose", "version", "--short")
         assert version.stdout.strip(), "bundled Compose must execute"
+        # OpenClaw 2026.10.1 requires exclusive state ownership for standalone
+        # SDK and sandbox recreate calls. Release the real test Gateway owner.
+        # https://github.com/openclaw/openclaw/blob/e178c39e9aae3fa440735217f9aef9574f286677/src/agents/sandbox/state-owner.ts
+        inner_docker(daemon, "stop", "--time", "60", gateway)
+        stopped = json.loads(inner_docker(daemon, "inspect", gateway).stdout)[0]["State"]
+        assert not stopped["Running"] and stopped["ExitCode"] == 0, "Gateway did not stop gracefully"
+        result = inner_docker(daemon, "run", "--name", offline, "--network", "none",
+               "--label", f"io.release-factory.test={owner}",
+               "-e", "DOCKER_HOST=unix:///docker/docker.sock", "-e", "SMOKE_SANDBOX_IMAGE=" + sandbox_tag,
+               "-v", "/docker:/docker", "-v", "/workspace:/workspace",
+               "-v", "/home/node/.openclaw:/home/node/.openclaw",
+               "--entrypoint", "node", gateway_tag, "--input-type=module", "-e", SANDBOX_PROBE, timeout=300)
+        print(result.stdout, end="", flush=True)
     except BaseException:
-        for name in (gateway,):
+        for name in (gateway, offline):
             logs = inner_docker(daemon, "logs", "--tail", "40", name, check=False)
             print((logs.stdout + logs.stderr).replace(token, "[test token]")[-12000:], file=sys.stderr)
         logs = docker("logs", "--tail", "40", daemon, check=False)
@@ -160,9 +183,10 @@ def main(image):
     finally:
         daemon_label = docker("inspect", "--format", '{{index .Config.Labels "io.release-factory.test"}}', daemon, check=False)
         if daemon_label.stdout.strip() == owner:
-            gateway_label = inner_docker(daemon, "inspect", "--format", '{{index .Config.Labels "io.release-factory.test"}}', gateway, check=False)
-            if gateway_label.stdout.strip() == owner:
-                inner_docker(daemon, "rm", "-f", "-v", gateway, check=False)
+            for name in (gateway, offline):
+                label = inner_docker(daemon, "inspect", "--format", '{{index .Config.Labels "io.release-factory.test"}}', name, check=False)
+                if label.stdout.strip() == owner:
+                    inner_docker(daemon, "rm", "-f", "-v", name, check=False)
             docker("rm", "-f", "-v", daemon)
         for volume in volumes:
             label = docker("volume", "inspect", "--format", '{{index .Labels "io.release-factory.test"}}', volume, check=False)

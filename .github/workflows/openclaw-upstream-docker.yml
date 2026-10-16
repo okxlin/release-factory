@@ -5,6 +5,10 @@ on:
     - cron: '0 2 * * *'
   workflow_dispatch:
     inputs:
+      upstream_tag:
+        description: "Optional stable release to rebuild; set this to publish only its version tag and preserve latest"
+        default: ""
+        type: string
       force_rebuild:
         description: Rebuild even when source, components and security refresh are unchanged
         default: false
@@ -40,6 +44,7 @@ jobs:
       skip: ${{ steps.inputs.outputs.skip }}
       upstream_sha: ${{ steps.inputs.outputs.upstream_sha }}
       image_tag: ${{ steps.inputs.outputs.image_tag }}
+      publish_latest: ${{ steps.inputs.outputs.publish_latest }}
       build_args: ${{ steps.inputs.outputs.build_args }}
       recipe_digest: ${{ steps.inputs.outputs.recipe_digest }}
       created: ${{ steps.inputs.outputs.created }}
@@ -66,6 +71,7 @@ jobs:
           DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
           RELEASE: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
           FORCE_REBUILD: ${{ github.event_name == 'pull_request' || inputs.force_rebuild }}
+          UPSTREAM_TAG: ${{ inputs.upstream_tag || '' }}
         run: |
           set -euo pipefail
           owner="${OWNER,,}"
@@ -79,6 +85,7 @@ jobs:
             args+=(--repository "$dockerhub_repository")
           fi
           if [[ "$FORCE_REBUILD" == true ]]; then args+=(--force); fi
+          if [[ -n "$UPSTREAM_TAG" ]]; then args+=(--upstream-tag "$UPSTREAM_TAG"); fi
           python3 scripts/resolve-openclaw-inputs.py --repository "$repository" "${args[@]}" \
             --output "$RUNNER_TEMP/openclaw-inputs.json" --github-output "$GITHUB_OUTPUT"
           echo "repository=$repository" >> "$GITHUB_OUTPUT"
@@ -173,6 +180,7 @@ jobs:
           REPOSITORY: ${{ needs.prepare.outputs.repository }}
           DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
           IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
+          PUBLISH_LATEST: ${{ needs.prepare.outputs.publish_latest }}
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ github.token }}
           DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
@@ -187,7 +195,9 @@ jobs:
               --receipt "$RUNNER_TEMP/tested-image-$index/receipt.json"
           done
           # Verify both version tags before advancing either floating tag.
-          for tag in "$IMAGE_TAG" latest; do
+          tags=("$IMAGE_TAG")
+          if [[ "$PUBLISH_LATEST" == true ]]; then tags+=(latest); fi
+          for tag in "${tags[@]}"; do
             for index in "${!repositories[@]}"; do
               python3 scripts/publish-tested-image.py publish --directory "$RUNNER_TEMP/tested-image-$index" \
                 --variant openclaw --repository "${repositories[$index]}" --platforms linux/amd64 \

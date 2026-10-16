@@ -8,9 +8,9 @@ ARG TARGETARCH
 ARG DEBIAN_FRONTEND=noninteractive
 ARG NODE_MAJOR=24
 ARG NPM_VERSION=12.0.2
-ARG GO_VERSION=1.27.0
-ARG GO_SHA256_AMD64=675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685
-ARG GO_SHA256_ARM64=51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda
+ARG GO_VERSION=1.27.2
+ARG GO_SHA256_AMD64=ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5
+ARG GO_SHA256_ARM64=94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8
 ARG RUST_VERSION=stable
 ARG BUN_VERSION=latest
 ARG DENO_VERSION=latest
@@ -368,6 +368,21 @@ RUN [[ "${CODE_SERVER_BASIC_FTP_VERSION}" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]] \
     && tar -xzf "/tmp/${tarball}" --strip-components=1 -C "${ftp_dir}" \
     && node -e 'const [directory, expected] = process.argv.slice(1); if (require(`${directory}/package.json`).version !== expected) throw new Error("unexpected code-server basic-ftp version"); require(directory)' \
         "${ftp_dir}" "${CODE_SERVER_BASIC_FTP_VERSION}" \
+    && rm -f "/tmp/${tarball}"
+
+# Reject command injection via a line terminator following a comment token.
+# https://github.com/ljharb/shell-quote/security/advisories/GHSA-pqg4-j6r4-53mv
+ARG CODE_SERVER_SHELL_QUOTE_VERSION=1.11.0
+RUN [[ "${CODE_SERVER_SHELL_QUOTE_VERSION}" =~ ^1[.][0-9]+[.][0-9]+$ ]] \
+    && quote_dir="/usr/lib/code-server/lib/vscode/node_modules/shell-quote" \
+    && test "$(realpath "${quote_dir}")" = "${quote_dir}" \
+    && test "$(node -p "require('${quote_dir}/package.json').name")" = shell-quote \
+    && tarball="$(npm pack --ignore-scripts --silent --pack-destination /tmp "shell-quote@${CODE_SERVER_SHELL_QUOTE_VERSION}")" \
+    && [[ "${tarball}" == "shell-quote-${CODE_SERVER_SHELL_QUOTE_VERSION}.tgz" ]] \
+    && find "${quote_dir}" -mindepth 1 -delete \
+    && tar -xzf "/tmp/${tarball}" --strip-components=1 -C "${quote_dir}" \
+    && node -e 'const assert = require("node:assert/strict"); const [directory, expected] = process.argv.slice(1); assert.equal(require(`${directory}/package.json`).version, expected); const {quote, parse} = require(directory); assert.deepEqual(parse(quote(["echo", "two words"])), ["echo", "two words"]); for (const newline of ["\n", "\r", "\u2028", "\u2029"]) assert.throws(() => quote(["echo", "ok", {comment: "x"}, `a${newline}id;#`]), TypeError)' \
+        "${quote_dir}" "${CODE_SERVER_SHELL_QUOTE_VERSION}" \
     && rm -f "/tmp/${tarball}"
 
 # ── npm globals and Corepack package managers ──

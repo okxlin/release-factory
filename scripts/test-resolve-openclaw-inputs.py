@@ -6,6 +6,9 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import subprocess
+import tempfile
+import textwrap
 import unittest
 from unittest.mock import patch
 
@@ -168,6 +171,81 @@ class FreshnessTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "401"):
                 MODULE.needs_publication(["ghcr.io/okxlin/openclaw-sandbox", "docker.io/okxlin/openclaw-sandbox"],
                                          "v1-sandbox", "a" * 40, "sha256:" + "b" * 64, self.now, 7)
+
+    def test_historical_rebuild_does_not_check_or_replace_latest(self):
+        with patch.object(MODULE.Registry, "image", return_value=("sha256:" + "c" * 64, self.labels)) as lookup:
+            rebuild, _ = MODULE.needs_publication(
+                ["ghcr.io/okxlin/openclaw-sandbox", "docker.io/okxlin/openclaw-sandbox"],
+                "v2026.10.1-sandbox", "a" * 40, "sha256:" + "b" * 64, self.now, 7,
+                publish_latest=False)
+            self.assertFalse(rebuild)
+            self.assertEqual([call.args[0] for call in lookup.call_args_list], ["v2026.10.1-sandbox"] * 2)
+
+
+class ReleaseSelectionTests(unittest.TestCase):
+    def test_default_tracks_latest_stable_release(self):
+        with patch.object(MODULE, "github", return_value={"tag_name": "v2026.10.2"}) as github:
+            self.assertEqual(MODULE.release_tag(""), "v2026.10.2")
+            github.assert_called_once_with("releases/latest")
+
+    def test_explicit_release_is_resolved_by_exact_tag(self):
+        with patch.object(MODULE, "github", return_value={"tag_name": "v2026.10.1"}) as github:
+            self.assertEqual(MODULE.release_tag("v2026.10.1"), "v2026.10.1")
+            github.assert_called_once_with("releases/tags/v2026.10.1")
+
+    def test_invalid_tag_is_rejected_before_request(self):
+        for tag in ("main", "v2026.10.1/../../latest", "v2026.10.1\n", "--help"):
+            with self.subTest(tag=tag), patch.object(MODULE, "github") as github:
+                with self.assertRaises(ValueError):
+                    MODULE.release_tag(tag)
+                github.assert_not_called()
+
+    def test_drafts_prereleases_and_mismatched_responses_are_rejected(self):
+        for release in ({"tag_name": "v2026.10.1", "draft": True},
+                        {"tag_name": "v2026.10.1", "prerelease": True},
+                        {"tag_name": "v2026.10.2"}):
+            with self.subTest(release=release), patch.object(MODULE, "github", return_value=release):
+                with self.assertRaises(ValueError):
+                    MODULE.release_tag("v2026.10.1")
+
+    def test_resolved_historical_source_and_outputs_stay_bound(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "inputs.json"
+            github_output = Path(temporary) / "github-output"
+            with patch("sys.argv", ["resolver", "--upstream-tag", "v2026.10.1", "--force",
+                                   "--output", str(output), "--github-output", str(github_output)]), \
+                    patch.object(MODULE, "github", side_effect=[{"tag_name": "v2026.10.1"}, {"sha": "a" * 40}]) as github, \
+                    patch.object(MODULE, "pin_image", side_effect=lambda value: value + "@sha256:" + "b" * 64), \
+                    patch("builtins.print"):
+                MODULE.main()
+            result = json.loads(output.read_text())
+            self.assertEqual(result["image_tag"], "v2026.10.1-sandbox")
+            self.assertEqual(result["publish_latest"], "false")
+            self.assertEqual(result["build_args"]["GIT_COMMIT"], "a" * 40)
+            self.assertEqual(result["build_args"]["OPENCLAW_DOCKER_BUILD_VERSION"], "2026.10.1")
+            self.assertIn("publish_latest=false\n", github_output.read_text())
+            self.assertEqual([call.args[0] for call in github.call_args_list],
+                             ["releases/tags/v2026.10.1", "commits/v2026.10.1"])
+
+
+class PublicationWorkflowTests(unittest.TestCase):
+    def test_actual_publisher_preserves_latest_for_historical_rebuilds(self):
+        workflow = (MODULE.ROOT / ".github/workflows/openclaw-upstream-docker.yml").read_text()
+        step = workflow.split("- name: Publish the verified image without rebuilding", 1)[1]
+        script = textwrap.dedent(step.split("        run: |\n", 1)[1])
+        # Intercept only the external publisher; execute the workflow's real shell control flow.
+        stub = "python3() { printf '%s\\0' \"$@\"; printf '\\n'; };\n"
+        for publish_latest in ("false", "true"):
+            with self.subTest(publish_latest=publish_latest):
+                env = {**os.environ, "IMAGE": "test-image", "REPOSITORY": "ghcr.io/okxlin/openclaw-sandbox",
+                       "DOCKERHUB_NAMESPACE": "fixture", "IMAGE_TAG": "v2026.10.1-sandbox",
+                       "PUBLISH_LATEST": publish_latest, "GITHUB_SHA": "a" * 40,
+                       "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1", "RUNNER_TEMP": "/tmp"}
+                result = subprocess.run(["bash", "-c", stub + script], env=env, capture_output=True, text=True, check=True)
+                commands = [line.split("\0") for line in result.stdout.splitlines()]
+                tags = [command[command.index("--image-tag") + 1] for command in commands if command[1] == "publish"]
+                expected = ["v2026.10.1-sandbox"] * 2 + (["latest"] * 2 if publish_latest == "true" else [])
+                self.assertEqual(tags, expected)
 
 
 if __name__ == "__main__":
