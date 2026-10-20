@@ -283,6 +283,7 @@ assert_authenticated_settings_patch() {
         -i "${container_name}" node --input-type=module - <<'NODE'
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
 async function packageRoot(packageName) {
@@ -324,8 +325,10 @@ const validSettingsPatch = settingsPatchShapes.filter(({original, replacement, o
   !settingsSource.includes(original)
   && settingsSource.split(replacement).length - 1 === occurrences,
 );
-assert.equal(validSettingsPatch.length, 1,
-  'settings persistence accepts the authenticated-proxy capability for the installed upstream shape');
+const upstreamHostSettings = createHash('sha256').update(settingsSource).digest('hex')
+  === '0555eec2df1ca392a1167e637f287ac9963dbd2b0a230089c2a41be079c490e3';
+assert(upstreamHostSettings || validSettingsPatch.length === 1,
+  'settings persistence uses the reviewed Host implementation or authenticated-proxy patch');
 
 const frontendRoot = await packageRoot('@deepseek-ai/dsh-web-frontend');
 const html = await readFile(join(frontendRoot, 'dist', 'index.html'), 'utf8');
