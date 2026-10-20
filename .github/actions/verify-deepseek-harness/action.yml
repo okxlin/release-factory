@@ -87,6 +87,10 @@ runs:
       shell: bash
       run: node deepseek-harness-builder/scripts/test-patch-dsh-telemetry.mjs
 
+    - name: Verify authenticated settings compatibility
+      shell: bash
+      run: node --test deepseek-harness-builder/scripts/test-patch-dsh-authenticated-settings.mjs
+
     - name: Build native dependency-audit stage
       uses: docker/build-push-action@v7
       with:
