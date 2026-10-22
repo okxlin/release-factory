@@ -39,6 +39,20 @@
     "url": "https://registry.npmjs.org/source-map-js/-/source-map-js-1.2.2.tgz",
     "sha512": "2868fff18e37c77e5a6550edb7e27898ad61a0b18750b3187d290e0c93508cd0c2de85b53ea3e8c4cc28d292d4b1633f5041b338dfcdc5e1f2c047cd5cd3f757"
   },
+  "markdown_packages": {
+    "argparse": {
+      "from": "3.0.2",
+      "version": "3.0.3",
+      "url": "https://registry.npmjs.org/argparse/-/argparse-3.0.3.tgz",
+      "sha512": "4a7f7c7ed57729fb0ef317cb3c71baa13f32f9bd32bdbacb8198e03c35ec85aacd635e6d4c08ea22c223bb84b7da797afe211434d138bfec8bd99866f28a0fdf"
+    },
+    "markdown-it": {
+      "from": "15.0.2",
+      "version": "15.0.3",
+      "url": "https://registry.npmjs.org/markdown-it/-/markdown-it-15.0.3.tgz",
+      "sha512": "f80cfb3a3cf78911aef0a60cbc9eb1561bebc4fdde13ebc4b495fbe4ec3cf17069710355ff49465f96729c82017ed444a380c2da3b2f78030369e96d9a6f10bd"
+    }
+  },
   "mcp_packages": {
     "@modelcontextprotocol/core": {
       "from": "2.0.0",
