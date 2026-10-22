@@ -190,6 +190,66 @@ export async function patchSourceMaps(root, pin) {
   await replaceVerifiedDependency('source-map-js', pin, outdated, verifySourceMaps);
 }
 
+// https://github.com/markdown-it/markdown-it/security/advisories/GHSA-gfr2-rv44-r23c
+export function verifyMarkdown(directory) {
+  // Bound the actual hostile render in a child: a vulnerable copy must not hang the build.
+  execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import fs from 'node:fs';
+    import {createRequire} from 'node:module';
+    import path from 'node:path';
+    import {pathToFileURL} from 'node:url';
+    const directory = process.argv[1];
+    const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
+    const require = createRequire(path.join(directory, 'package.json'));
+    for (const MarkdownIt of [require(directory),
+      (await import(pathToFileURL(path.join(directory, pkg.module)))).default]) {
+      const md = new MarkdownIt();
+      assert.equal(md.render('**safe**'), '<p><strong>safe</strong></p>\\n');
+      assert.equal(md.render('[a]: /url "title"\\n\\n[a]'),
+        '<p><a href="/url" title="title">a</a></p>\\n');
+      assert.equal(md.render('[a]: /url "open\\nclose"\\n\\n[a]'),
+        '<p><a href="/url" title="open\\nclose">a</a></p>\\n');
+      for (const input of ['[a]: /u "' + 'x\\n'.repeat(300000),
+        '[a]: /u "' + 'x\\n'.repeat(300000) + '"', '[' + 'a\\n'.repeat(300000)]) {
+        assert.equal(typeof md.render(input), 'string');
+      }
+    }
+  `, directory], {timeout: 5000, stdio: 'pipe'});
+  const version = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'))).version;
+  assert.equal(execFileSync(process.execPath, [path.join(directory, 'bin/markdown-it.mjs'), '--version'],
+    {timeout: 5000, encoding: 'utf8'}).trim(), version);
+  console.log(`Verified CVE-2026-111758 Markdown rendering and CLI (${version}): ${directory}`);
+}
+
+export async function patchMarkdownPackages(root, pins) {
+  const store = path.join(fs.realpathSync(root), '.pnpm');
+  const markdown = [];
+  // The fixed Markdown CLI requires argparse >=3.0.3, with no new dependencies.
+  for (const name of ['argparse', 'markdown-it']) {
+    const pin = pins[name];
+    const outdated = [];
+    for (const entry of fs.readdirSync(store)) {
+      if (!entry.startsWith(`${name}@`)) continue;
+      if (name === 'argparse' && !entry.startsWith('argparse@3.')) continue;
+      const directory = path.join(store, entry, 'node_modules', name);
+      assert.equal(fs.realpathSync(directory), directory, 'unexpected Markdown dependency path');
+      const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
+      assert.equal(pkg.name, name);
+      if (pkg.version === pin.from) outdated.push(directory);
+      else assert.equal(pkg.version, pin.version, `unreviewed ${name} version`);
+      if (name === 'markdown-it') markdown.push(directory);
+    }
+    await replaceVerifiedDependency(name, pin, outdated);
+  }
+  for (const directory of markdown) {
+    const require = createRequire(path.join(directory, 'package.json'));
+    const argparse = JSON.parse(fs.readFileSync(require.resolve('argparse/package.json')));
+    assert.equal(argparse.version, pins.argparse.version, 'Markdown CLI resolved the wrong argparse version');
+    verifyMarkdown(directory);
+  }
+}
+
 // Local workaround until upstream releases a fix for CVE-2026-93748.
 // https://github.com/kornelski/http-cache-semantics/issues/56
 // npm's dependency refresh can install 4.3.0, which retains the same unsafe stale path.
@@ -265,6 +325,7 @@ async function main() {
   await patchNpmBundles('/app/node_modules', components.npm_bundled);
   await patchSourceMaps('/app/node_modules', components.source_map_js);
   await patchMcpPackages('/app/node_modules', components.mcp_packages);
+  await patchMarkdownPackages('/app/node_modules', components.markdown_packages);
   const cacheFiles = execFileSync('find', ['/app/node_modules', '-type', 'f', '-path',
     '*/http-cache-semantics/package.json'], {encoding: 'utf8'}).trim();
   for (const file of cacheFiles ? cacheFiles.split('\n') : []) {
