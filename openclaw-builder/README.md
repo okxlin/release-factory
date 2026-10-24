@@ -35,6 +35,13 @@ MCP OAuth 修复同步更新 SDK 1.31.0、client/core 2.2.0，并在实际依赖
 预配置的 OAuth provider 也必须设置 `expectedIssuer`。镜像构建不会修改持久化凭据。
 详见官方迁移说明：<https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-6qxp-vccf-f47h>。
 
+运行时依赖替换使用 `components.json` 中的官方 npm tarball 和 SHA-512，保留 pnpm 消费者链接。
+同样的依赖修补在 UI/A2UI 打包前执行，并使 A2UI 旧 bundle 缓存失效，避免内联旧代码。
+Zod 使用 4.6.6 完整包；原 3.25.76 目录的默认入口仍指向 v3，以保持 A2UI 和 JSON Schema 转换兼容。
+构建为 v3 的 `.max()`、`.length()`、`.size()` 补上元素解析前的超限拒绝，v4 使用上游修复；
+未声明上界的容器保持原有语义。来源、路径及本地兼容修改记录在镜像的
+`/usr/share/doc/release-factory/openclaw-runtime-deps.json`。
+
 镜像扫描采用 `configs/trivy-policy.json`：可修复 CRITICAL 阻断，应用目录的 HIGH/CRITICAL 阻断，
 其余开发工具和系统包 HIGH 保留报告。测试和扫描通过后将同一个镜像推送到两个仓库，不再二次构建。
 两端暂存镜像均验证通过后才发布版本标签；两端版本标签均验证通过后才更新 `latest`。
