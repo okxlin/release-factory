@@ -21,6 +21,13 @@ Its existing dependencies are updated here without adding another runtime librar
   https://github.com/advisories/GHSA-6qxp-vccf-f47h
   https://github.com/advisories/GHSA-jqcg-44mw-7w3h
   https://github.com/advisories/GHSA-wq5f-xc86-pv6w
+- The 2026-10-25 security refresh advances Puppeteer Core from 25.10.0 to
+  25.16.0 and Chromium BiDi from 17.0.2 to 157.0.8090-0. Chromium BiDi now
+  declares `zod ^4.6.5`, so the lock uses Zod 4.6.6 without a major-version
+  override. The lock also refreshes body-parser to 2.4.0, fast-uri to 3.1.9,
+  hono to 4.13.14, and ip-address to 10.7.5 within their declared ranges.
+  https://registry.npmjs.org/puppeteer-core/25.16.0
+  https://registry.npmjs.org/chromium-bidi/157.0.8090-0
 - Node 24 LTS is selected because Node 20 ended maintenance on 2026-04-30.
   https://github.com/nodejs/Release/blob/main/schedule.json
 

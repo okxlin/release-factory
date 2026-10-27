@@ -45,6 +45,11 @@
       "module": "google.golang.org/grpc",
       "version_arg": "PROXY_GRPC_VERSION",
       "max_version": "1.83.2"
+    },
+    {
+      "module": "github.com/klauspost/compress",
+      "version_arg": "MIHOMO_COMPRESS_VERSION",
+      "max_version": "1.18.7"
     }
   ],
   "go_version_arg": "GO_VERSION"

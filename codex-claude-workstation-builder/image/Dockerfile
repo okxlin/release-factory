@@ -8,9 +8,9 @@ ARG TARGETARCH
 ARG DEBIAN_FRONTEND=noninteractive
 ARG NODE_MAJOR=24
 ARG NPM_VERSION=12.0.2
-ARG GO_VERSION=1.27.2
-ARG GO_SHA256_AMD64=ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5
-ARG GO_SHA256_ARM64=94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8
+ARG GO_VERSION=1.27.3
+ARG GO_SHA256_AMD64=65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
+ARG GO_SHA256_ARM64=a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49
 ARG RUST_VERSION=stable
 ARG BUN_VERSION=latest
 ARG DENO_VERSION=latest
@@ -32,6 +32,7 @@ ARG PROXY_X_NET_VERSION=0.58.0
 ARG PROXY_X_TEXT_VERSION=0.41.0
 ARG PROXY_X_MOD_VERSION=0.41.0
 ARG PROXY_GRPC_VERSION=1.83.2
+ARG MIHOMO_COMPRESS_VERSION=1.18.7
 ARG PNPM_VERSION=latest
 ARG YARN_VERSION=stable
 ARG RUFF_VERSION=latest
@@ -273,6 +274,7 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
     && build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     && (cd /tmp/proxy-build/mihomo \
         && go mod edit \
+            -require="github.com/klauspost/compress@v${MIHOMO_COMPRESS_VERSION}" \
             -require="golang.org/x/crypto@v${PROXY_X_CRYPTO_VERSION}" \
             -require="golang.org/x/net@v${PROXY_X_NET_VERSION}" \
             -require="golang.org/x/text@v${PROXY_X_TEXT_VERSION}" \
@@ -318,6 +320,7 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
         go version -m "/usr/local/bin/${binary}" | grep -Fq $'\tdep\tgoogle.golang.org/grpc\tv'"${PROXY_GRPC_VERSION}" || { echo "${binary} has an unexpected grpc version" >&2; exit 1; }; \
     done \
     && go version -m /usr/local/bin/sing-box | grep -Fq $'\tdep\tgolang.org/x/mod\tv'"${PROXY_X_MOD_VERSION}" \
+    && go version -m /usr/local/bin/mihomo | grep -Fq $'\tdep\tgithub.com/klauspost/compress\tv'"${MIHOMO_COMPRESS_VERSION}" \
     && mihomo_output="$(/usr/local/bin/mihomo -v)" \
     && grep -Fq "Mihomo Meta ${mihomo_version}" <<<"${mihomo_output}" \
     && sing_box_output="$(/usr/local/bin/sing-box version)" \
@@ -342,7 +345,7 @@ RUN [[ "${CODE_SERVER_TAR_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
     && find /tmp -maxdepth 1 -name "${tarball}" -delete
 
 # Patch the HTTP client bundled by VS Code until code-server includes the fix.
-ARG CODE_SERVER_UNDICI_VERSION=7.29.1
+ARG CODE_SERVER_UNDICI_VERSION=7.30.1
 RUN [[ "${CODE_SERVER_UNDICI_VERSION}" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]] \
     && undici_dir="/usr/lib/code-server/lib/vscode/node_modules/undici" \
     && test "$(realpath "${undici_dir}")" = "${undici_dir}" \
@@ -354,6 +357,18 @@ RUN [[ "${CODE_SERVER_UNDICI_VERSION}" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]] \
     && node -e 'const [directory, expected] = process.argv.slice(1); if (require(`${directory}/package.json`).version !== expected) throw new Error("unexpected code-server undici version"); require(directory)' \
         "${undici_dir}" "${CODE_SERVER_UNDICI_VERSION}" \
     && rm -f "/tmp/${tarball}"
+
+# Replace complete, locked dependency trees. Sandbox Runtime keeps Zod's v3
+# entry contract, with the bounded-container security fix backported to v3.
+COPY code-server-security/ /tmp/code-server-security/
+COPY patch-code-server-deps.mjs /tmp/patch-code-server-deps.mjs
+RUN cd /tmp/code-server-security \
+    && npm ci --install-strategy=nested --omit=dev --ignore-scripts --no-audit --no-fund \
+    && npm audit signatures \
+    && npm audit --omit=dev --audit-level=high \
+    && node /tmp/patch-code-server-deps.mjs /usr/lib/code-server /tmp/code-server-security \
+    && rm -rf /tmp/code-server-security /tmp/patch-code-server-deps.mjs
+COPY code-server-security/UPSTREAM.md /usr/share/doc/code-server-security/UPSTREAM.md
 
 # Fix FTP directory/PASV parser denial of service in code-server's proxy dependencies.
 # https://github.com/patrickjuchli/basic-ftp/releases/tag/v6.2.2

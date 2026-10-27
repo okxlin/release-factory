@@ -15,10 +15,17 @@ DCP is installed in the user's configuration/cache when enabled; its AGPL-3.0-or
 license and source are available at
 https://github.com/Opencode-DCP/opencode-dynamic-context-pruning.
 
-The default DCP cache pins `seroval` to 1.6.9 (MIT) through npm overrides,
-fixing CVE-2026-104845 and CVE-2026-104846 without changing the DCP release.
+The default DCP cache pins `seroval` to 1.6.9, `toml` to 5.0.1, and
+`zod` to 4.6.6 (all MIT) through npm overrides. This fixes the reviewed serializer,
+TOML parser, and Zod advisories without changing the DCP release.
 `prepare-dcp-dependencies.py` seeds the override before OpenCode installs the
 plugin and refreshes existing default caches with lifecycle scripts disabled.
+OpenCode also installs `@opencode-ai/plugin` in its configuration directories;
+the script pins that consumer's Zod and Effect/TOML dependencies separately,
+preserving unrelated plugin overrides and dependency majors.
+TOML 5 retains `parse(content)` and rejects unsafe integer values rather than
+rounding them, as documented in
+https://github.com/BinaryMuse/toml-node/blob/v5.0.1/CHANGELOG.md.
 Explicit custom DCP package selections retain their own dependency policy.
 OpenCode's package cache and Arborist install behavior are verified against
 https://github.com/anomalyco/opencode/blob/5cd8e68fdd72b27818d26d168b9c7a06b359567e/packages/core/src/npm.ts.

@@ -76,7 +76,6 @@ jobs:
           print('matrix=' + json.dumps({'include': [{'arch': p.split('/')[1], 'runner': runners[p]} for p in platforms]}))
           PY
       - uses: actions/setup-node@v7
-        if: inputs.variant == 'opencode'
         with:
           node-version: '24'
       - name: Verify contracts and publication regressions
@@ -90,6 +89,7 @@ jobs:
             bash codex-claude-workstation-builder/scripts/test-paseo-contract.sh
             bash codex-claude-workstation-builder/scripts/test-proxy-core-contract.sh
             python3 codex-claude-workstation-builder/scripts/test-resolve-proxy-core-versions.py
+            node --test codex-claude-workstation-builder/scripts/test-code-server-deps.mjs
           else
             python3 opencode-workstation-builder/scripts/test-bootstrap-opencode-userland.py
             python3 opencode-workstation-builder/scripts/test-prepare-dcp-dependencies.py
