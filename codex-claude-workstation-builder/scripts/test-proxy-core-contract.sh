@@ -61,6 +61,7 @@ require_pattern '^ARG PROXY_X_NET_VERSION='
 require_pattern '^ARG PROXY_X_TEXT_VERSION='
 require_pattern '^ARG PROXY_X_MOD_VERSION='
 require_pattern '^ARG PROXY_GRPC_VERSION='
+require_pattern '^ARG MIHOMO_COMPRESS_VERSION='
 
 [ -f "${RESOLVER}" ] || fail "resolver is missing: ${RESOLVER}"
 [ -f "${POLICY}" ] || fail "policy is missing: ${POLICY}"
@@ -80,6 +81,8 @@ require_text 'golang.org/x/net@v${PROXY_X_NET_VERSION}'
 require_text 'golang.org/x/text@v${PROXY_X_TEXT_VERSION}'
 require_text 'golang.org/x/mod@v${PROXY_X_MOD_VERSION}'
 require_text 'google.golang.org/grpc@v${PROXY_GRPC_VERSION}'
+require_text 'github.com/klauspost/compress@v${MIHOMO_COMPRESS_VERSION}'
+require_text 'go version -m /usr/local/bin/mihomo'
 require_text 'go version -m "/usr/local/bin/${binary}"'
 require_text 'Mihomo Meta ${mihomo_version}'
 require_text 'sing-box version ${sing_box_version}'
