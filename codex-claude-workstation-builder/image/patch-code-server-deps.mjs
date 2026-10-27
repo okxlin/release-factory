@@ -199,17 +199,20 @@ export function patchCodeServerDeps(root, staging) {
       plan.backup = path.join(temporary, `original-${index}`);
       fs.cpSync(plan.source, plan.candidate, {recursive: true, dereference: false});
       if (plan.api) {prepareZod(plan.candidate, plan.api); verifyZod(plan.candidate, plan.api);}
+      // overlayfs rejects renaming directories from a previous image layer.
+      // Copy every backup before replacing any target; backups live in this layer.
+      fs.cpSync(plan.directory, plan.backup, {recursive: true, dereference: false});
     }
     for (const plan of plans) {
       console.log(`Replacing ${plan.relative} with ${plan.name}@${plan.version}${plan.api ? ' (' + plan.api + ')' : ''}`);
-      fs.renameSync(plan.directory, plan.backup);
       replaced.push(plan);
+      fs.rmSync(plan.directory, {recursive: true});
       fs.renameSync(plan.candidate, plan.directory);
     }
     verifyCodeServerDeps(root);
   } catch (error) {
     for (const plan of replaced.reverse()) {
-      if (fs.existsSync(plan.directory)) fs.renameSync(plan.directory, plan.candidate);
+      if (fs.existsSync(plan.directory)) fs.rmSync(plan.directory, {recursive: true});
       fs.renameSync(plan.backup, plan.directory);
     }
     throw error;

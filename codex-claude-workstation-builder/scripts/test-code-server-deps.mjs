@@ -75,7 +75,18 @@ test('repairs real code-server dependency layouts and preserves the sandbox v3 c
     fs.writeFileSync(contentTypePackage, originalContentType);
     unchanged();
 
-    patchCodeServerDeps(root, staging);
+    const lowerLayerDirectories = new Set([...versions.keys()].map(relative => path.join(root, relative)));
+    const rename = fs.renameSync;
+    try {
+      // Reproduce overlayfs: directories from an older image layer cannot be renamed.
+      fs.renameSync = (source, destination) => {
+        if (lowerLayerDirectories.has(source)) {
+          throw Object.assign(new Error('EXDEV: cannot rename an old image-layer directory'), {code: 'EXDEV'});
+        }
+        return rename(source, destination);
+      };
+      patchCodeServerDeps(root, staging);
+    } finally {fs.renameSync = rename;}
     const sandboxPackage = JSON.parse(fs.readFileSync(path.join(root,
       'lib/vscode/node_modules/@vscode/sandbox-runtime/node_modules/zod/package.json')));
     assert.equal(sandboxPackage.main, './v3/index.cjs');
