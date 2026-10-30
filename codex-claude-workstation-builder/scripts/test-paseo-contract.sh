@@ -115,8 +115,26 @@ if (lock.packages?.["node_modules/@getpaseo/cli"]?.version !== "0.3.1") {
 if (packageJson.overrides?.["fast-uri"] !== "3.1.8") {
   throw new Error("package.json must pin the fast-uri security override to 3.1.8");
 }
+if (packageJson.overrides?.["zod"] !== "4.6.6") {
+  throw new Error("package.json must pin the Zod security override to 4.6.6");
+}
+if (packageJson.overrides?.["@modelcontextprotocol/sdk"]?.express?.["body-parser"] !== "2.4.0") {
+  throw new Error("package.json must pin MCP Express body-parser to 2.4.0");
+}
+if (packageJson.overrides?.["@getpaseo/server"]?.express?.["body-parser"] !== "1.20.9") {
+  throw new Error("package.json must pin Paseo Express body-parser to 1.20.9");
+}
 if (lock.packages?.["node_modules/fast-uri"]?.version !== "3.1.8") {
   throw new Error("package-lock does not resolve fast-uri 3.1.8");
+}
+if (lock.packages?.["node_modules/zod"]?.version !== "4.6.6") {
+  throw new Error("package-lock does not resolve zod 4.6.6");
+}
+if (lock.packages?.["node_modules/@modelcontextprotocol/sdk/node_modules/body-parser"]?.version !== "2.4.0") {
+  throw new Error("package-lock does not resolve MCP body-parser 2.4.0");
+}
+if (lock.packages?.["node_modules/body-parser"]?.version !== "1.20.9") {
+  throw new Error("package-lock does not resolve Paseo body-parser 1.20.9");
 }
 
 const installScripts = [];

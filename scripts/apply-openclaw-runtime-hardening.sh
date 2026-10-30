@@ -5,7 +5,7 @@ usage() {
   cat <<'EOF'
 Usage: apply-openclaw-runtime-hardening.sh [OPENCLAW_SOURCE_DIR]
 
-Apply the runtime-only hardening needed by the OpenClaw sandbox image.
+Apply dependency and runtime hardening needed by the OpenClaw sandbox image.
 The transformation is idempotent and follows Dockerfile stage/path semantics
 instead of depending on upstream line numbers or package-manager versions.
 EOF
@@ -101,6 +101,14 @@ function normalize_line(value) {
 
 function has_continuation_path(value, path) {
   return normalize_line(value) == path " " "\\"
+}
+
+function is_vendored_patch_mount(value) {
+  return value ~ /^RUN[[:space:]]+--mount=type=bind,source=\.release-factory-runtime,target=\/tmp\/release-factory-runtime[[:space:]]+\\$/
+}
+
+function is_build_source_copy(value) {
+  return value ~ /^COPY[[:space:]]+\.[[:space:]]+\.[[:space:]]*$/
 }
 
 function fail(message) {
@@ -217,6 +225,13 @@ function emit_docker_toolchain_overlay(indent) {
     from_count++
   }
 
+  if ($0 ~ /^FROM[[:space:]]+.*[[:space:]]+AS[[:space:]]+build[[:space:]]*$/) {
+    in_build = 1
+    build_stages++
+  } else if ($0 ~ /^FROM[[:space:]]+/) {
+    in_build = 0
+  }
+
   if ($0 ~ /^FROM[[:space:]]+.*[[:space:]]+AS[[:space:]]+runtime-assets[[:space:]]*$/) {
     in_runtime_assets = 1
     runtime_assets_stages++
@@ -240,6 +255,29 @@ function emit_docker_toolchain_overlay(indent) {
     }
     if (has_continuation_path($0, "/app/node_modules/openclaw")) {
       openclaw_anchor_count++
+    }
+  }
+
+  if (in_build) {
+    if (is_build_source_copy($0)) {
+      build_source_copy_count++
+      build_source_copy_line = NR
+    }
+    if (is_vendored_patch_mount($0)) {
+      build_patch_mount_count++
+      build_patch_mount_line = NR
+    }
+    if (normalize_line($0) == "node /tmp/release-factory-runtime/patch-vendored-deps.mjs --build " "\\") {
+      build_patch_command_count++
+      build_patch_command_line = NR
+    }
+    if (normalize_line($0) == "&& rm -f extensions/canvas/src/host/a2ui/.bundle.hash") {
+      build_bundle_cache_count++
+      build_bundle_cache_line = NR
+    }
+    if (!first_build_bundle_line && $0 !~ /^[[:space:]]*#/ &&
+        $0 ~ /pnpm[[:space:]]+(canvas:a2ui:bundle|ui:build|build:docker)([[:space:];]|$)/) {
+      first_build_bundle_line = NR
     }
   }
 
@@ -269,8 +307,11 @@ function emit_docker_toolchain_overlay(indent) {
   if ($0 ~ /^RUN[[:space:]]+--mount=type=bind,from=openclaw-runtime-docker-tools,source=\/out,target=\/tmp\/openclaw-runtime-docker-tools[[:space:]]/) {
     docker_toolchain_install_count++
   }
-  if ($0 ~ /^RUN[[:space:]]+--mount=type=bind,source=\.release-factory-runtime,/) {
+  if (in_runtime && is_vendored_patch_mount($0)) {
     vendored_patch_count++
+  }
+  if (in_runtime && normalize_line($0) == "node /tmp/release-factory-runtime/patch-vendored-deps.mjs") {
+    vendored_patch_command_count++
   }
   if ($0 ~ /^RUN[[:space:]]+--mount=type=bind,source=\.release-factory-runtime\/prune-native-typescript\.mjs,/) {
     native_typescript_prune_count++
@@ -278,6 +319,28 @@ function emit_docker_toolchain_overlay(indent) {
 }
 
 END {
+  if (build_stages != 1) {
+    fail("expected exactly one FROM ... AS build stage")
+  }
+  if (build_source_copy_count != 1) {
+    fail("expected exactly one full COPY . . anchor in the build stage")
+  }
+  if (first_build_bundle_line && first_build_bundle_line <= build_source_copy_line) {
+    fail("build bundle command precedes the full source COPY anchor")
+  }
+  if (build_patch_mount_count > 1 || build_patch_command_count > 1 || build_bundle_cache_count > 1) {
+    fail("OpenClaw build dependency hardening is duplicated")
+  }
+  if (build_patch_mount_count != build_patch_command_count || build_patch_mount_count != build_bundle_cache_count) {
+    fail("OpenClaw build dependency hardening is only partially present")
+  }
+  if (build_patch_mount_count == 1 &&
+      (build_patch_mount_line <= build_source_copy_line ||
+       build_patch_command_line != build_patch_mount_line + 1 ||
+       build_bundle_cache_line != build_patch_command_line + 1 ||
+       (first_build_bundle_line && build_bundle_cache_line >= first_build_bundle_line))) {
+    fail("OpenClaw build dependency hardening must follow source COPY and precede bundle commands")
+  }
   if (runtime_assets_stages != 1) {
     fail("expected exactly one FROM ... AS runtime-assets stage")
   }
@@ -302,6 +365,12 @@ END {
   if (docker_toolchain_stage_count != docker_toolchain_install_count) {
     fail("OpenClaw Docker toolchain hardening is only partially present")
   }
+  if (vendored_patch_count > 1 || vendored_patch_command_count > 1) {
+    fail("OpenClaw runtime dependency hardening is duplicated")
+  }
+  if (vendored_patch_count != vendored_patch_command_count) {
+    fail("OpenClaw runtime dependency hardening is only partially present")
+  }
   if (from_count == 0) {
     fail("OpenClaw Dockerfile has no FROM stage")
   }
@@ -309,6 +378,7 @@ END {
     exit 1
   }
 
+  in_build = 0
   in_runtime_assets = 0
   in_runtime = 0
   vitest_inserted = 0
@@ -327,6 +397,12 @@ END {
       in_runtime_assets = 1
     } else if (line ~ /^FROM[[:space:]]+/) {
       in_runtime_assets = 0
+    }
+
+    if (line ~ /^FROM[[:space:]]+.*[[:space:]]+AS[[:space:]]+build[[:space:]]*$/) {
+      in_build = 1
+    } else if (line ~ /^FROM[[:space:]]+/) {
+      in_build = 0
     }
 
     if (line ~ /^FROM[[:space:]]+base-runtime([[:space:]]+AS[[:space:]]+[A-Za-z0-9_.-]+)?[[:space:]]*$/) {
@@ -368,6 +444,13 @@ END {
     }
 
     print line
+    if (in_build && is_build_source_copy(line) && build_patch_mount_count == 0) {
+      print "# Patch dependencies before bundling their code into Canvas and the UI."
+      print "RUN --mount=type=bind,source=.release-factory-runtime,target=/tmp/release-factory-runtime \\"
+      print "    node /tmp/release-factory-runtime/patch-vendored-deps.mjs --build \\"
+      print "    && rm -f extensions/canvas/src/host/a2ui/.bundle.hash"
+      print ""
+    }
     if (line ~ /^FROM[[:space:]]+.*[[:space:]]+AS[[:space:]]+runtime-assets[[:space:]]*$/ && native_typescript_prune_count == 0) {
       print "# Optional peers retain the development-only native compiler even in a production install."
       print "RUN --mount=type=bind,source=.release-factory-runtime/prune-native-typescript.mjs,target=/tmp/prune-native-typescript.mjs \\"

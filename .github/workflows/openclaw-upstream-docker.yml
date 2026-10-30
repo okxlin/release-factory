@@ -54,12 +54,16 @@ jobs:
         with:
           persist-credentials: false
       - uses: docker/setup-buildx-action@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
       - name: Validate registry freshness, policy and publication contracts
         run: |
           python3 scripts/test-resolve-openclaw-inputs.py
           bash scripts/test-apply-openclaw-runtime-hardening.sh
           node --test scripts/test-openclaw-npm-bundle.mjs scripts/test-openclaw-cache-semantics.mjs scripts/test-openclaw-source-map.mjs scripts/test-openclaw-mcp-auth.mjs
           node --test scripts/test-openclaw-markdown.mjs
+          node --test scripts/test-openclaw-runtime-packages.mjs scripts/test-openclaw-zod-compat.mjs
           node --test scripts/test-openclaw-native-typescript.mjs
           python3 scripts/test-evaluate-trivy-policy.py
           python3 scripts/test-registry-image.py

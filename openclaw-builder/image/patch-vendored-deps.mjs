@@ -50,22 +50,159 @@ export async function patchNpmBundles(root, pins) {
       assert.equal(fs.realpathSync(directory), directory, 'unexpected bundled npm dependency path');
       const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
       assert.equal(pkg.name, name);
-      if (pkg.version === pin.from) outdated.push(directory);
-      else {
-        assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
-        const fixed = pin.version.split('.').map(Number);
-        assert.ok(pkg.version.split('.').map(Number).reduce((order, value, index) =>
-          order || value - fixed[index], 0) >= 0, `unexpected vulnerable ${name} version`);
-      }
+      if (pinFromVersions(pin).includes(pkg.version)) outdated.push(directory);
+      else assert.equal(pkg.version, pin.version, `unreviewed bundled ${name} version`);
     }
     await replaceVerifiedDependency(name, pin, outdated);
   }
 }
 
-async function replaceVerifiedDependency(name, pin, outdated, verify = () => {}) {
+function pinFromVersions(pin) {
+  const versions = Array.isArray(pin.from) ? pin.from : [pin.from];
+  assert.ok(versions.length > 0);
+  for (const version of versions) assert.match(version, /^\d+\.\d+\.\d+$/);
+  return versions;
+}
+
+function assertDependencyPin(name, pin) {
   assert.match(pin.version, /^\d+\.\d+\.\d+$/);
   assert.equal(pin.url, `https://registry.npmjs.org/${name}/-/${name.split('/').at(-1)}-${pin.version}.tgz`);
   assert.match(pin.sha512, /^[a-f0-9]{128}$/);
+  pinFromVersions(pin);
+}
+
+function packageDirectory(store, entry, name, message) {
+  const directory = path.join(store, entry, 'node_modules', name);
+  assert.equal(fs.realpathSync(directory), directory, message);
+  return directory;
+}
+
+function prepareZod(directory, compatibility) {
+  // 4.6.6 fixes bounded v4 containers; A2UI still consumes the v3 API.
+  // Keep its entry contract and backport the same early size rejection to v3.
+  // https://github.com/colinhacks/zod/pull/6652
+  const packageFile = path.join(directory, 'package.json');
+  const pkg = JSON.parse(fs.readFileSync(packageFile));
+  assert.equal(pkg.name, 'zod');
+  assert.equal(pkg.version, '4.6.6');
+  assert.ok(pkg.exports && typeof pkg.exports === 'object');
+  if (compatibility === 'v3') {
+    pkg.exports['.'] = structuredClone(pkg.exports['./v3']);
+    pkg.main = './v3/index.cjs';
+    pkg.module = './v3/index.js';
+    pkg.types = './v3/index.d.cts';
+  }
+  pkg['release-factory'] = {source: 'zod@4.6.6', root: compatibility ?? 'v4', patches: ['v3-bounded-container-gate']};
+  fs.writeFileSync(packageFile, `${JSON.stringify(pkg, null, 2)}\n`);
+
+  const patches = [
+    ['v3/types.js', 'INVALID'],
+    ['v3/types.cjs', 'parseUtil_js_1.INVALID'],
+    ['src/v3/types.ts', 'INVALID'],
+  ];
+  for (const [relative, invalid] of patches) {
+    const file = path.join(directory, relative);
+    assert.equal(fs.realpathSync(file), file, 'unexpected zod v3 source path');
+    let source = fs.readFileSync(file, 'utf8');
+    for (const field of ['exactLength', 'maxLength', 'maxSize']) {
+      const anchor = new RegExp(`message: def\\.${field}\\.message,\\n[ \\t]*}\\);\\n([ \\t]*)status\\.dirty\\(\\);`, 'g');
+      assert.equal([...source.matchAll(anchor)].length, 1, `missing zod v3 ${field} patch anchor: ${relative}`);
+      source = source.replace(anchor, (matched, indent) => matched + '\n' + indent +
+        (field === 'exactLength' ? `if (tooBig) return ${invalid};` : `return ${invalid};`));
+    }
+    fs.writeFileSync(file, source);
+  }
+  return pkg;
+}
+
+export function verifyZod(directory, compatibility = 'v4') {
+  // A fresh process also avoids Node's package-entry cache after an in-place replacement.
+  execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import {createRequire} from 'node:module';
+    import path from 'node:path';
+    const directory = process.argv[1];
+    const zod = createRequire(path.join(directory, 'package.json'))(directory);
+    const object = zod.object({name: zod.string()});
+    assert.deepEqual(object.parse({name: 'openclaw'}), {name: 'openclaw'});
+    assert.equal(object.safeParse({name: 42}).success, false);
+    if (process.argv[2] === 'v3') assert.equal(object._def.typeName, 'ZodObject');
+    const result = zod.array(zod.string()).max(2).safeParse(new Array(10000).fill(1));
+    assert.equal(result.success, false);
+    assert.equal(result.error.issues.length, 1, 'bounded zod container parsed every oversized element');
+  `, directory, compatibility], {timeout: 10000, stdio: 'pipe'});
+  console.log(`Verified CVE-2023-54404 bounded container guard (${compatibility}): ${directory}`);
+}
+
+export function verifyRuntimePackage(name, directory, compatibility) {
+  const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
+  assert.equal(pkg.name, name);
+  const require = createRequire(path.join(directory, 'package.json'));
+  if (name === 'qs') {
+    assert.equal(require(directory).parse('safe=value').safe, 'value');
+  } else if (name === 'body-parser') {
+    const parser = require(directory);
+    assert.equal(typeof parser.json, 'function');
+    assert.equal(typeof parser.urlencoded, 'function');
+    assert.equal(typeof parser.json(), 'function');
+    assert.equal(JSON.parse(fs.readFileSync(require.resolve('qs/package.json'))).version, '6.16.1');
+  } else if (name === 'dompurify') {
+    const createDOMPurify = require(directory);
+    assert.equal(typeof createDOMPurify, 'function');
+    assert.equal(createDOMPurify.version, pkg.version);
+  } else if (name === 'undici') {
+    const undici = require(directory);
+    assert.equal(typeof undici.fetch, 'function');
+    assert.equal(typeof undici.request, 'function');
+  } else if (name === 'zod') {
+    verifyZod(directory, compatibility);
+  } else {
+    assert.fail(`unreviewed runtime dependency: ${name}`);
+  }
+}
+
+export async function patchRuntimePackages(root, pins) {
+  root = fs.realpathSync(root);
+  const store = path.join(root, '.pnpm');
+  const evidence = [];
+  for (const [name, pin] of Object.entries(pins)) {
+    assert.ok(['qs', 'body-parser', 'dompurify', 'undici', 'zod'].includes(name), `unreviewed runtime dependency: ${name}`);
+    assertDependencyPin(name, pin);
+    const fromVersions = pinFromVersions(pin);
+    const directories = [];
+    const outdated = new Map(fromVersions.map(version => [version, []]));
+    const prefix = `${name.replaceAll('/', '+')}@`;
+    for (const entry of fs.readdirSync(store)) {
+      if (!entry.startsWith(prefix)) continue;
+      const directory = packageDirectory(store, entry, name, `unexpected ${name} dependency path`);
+      const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
+      assert.equal(pkg.name, name);
+      directories.push({directory, entry});
+      if (outdated.has(pkg.version)) outdated.get(pkg.version).push(directory);
+      else assert.equal(pkg.version, pin.version, `unreviewed ${name} version`);
+    }
+    for (const from of fromVersions) {
+      const targets = outdated.get(from);
+      if (!targets.length) continue;
+      await replaceVerifiedDependency(name, pin, targets, directory => {
+        if (!['body-parser', 'qs'].includes(name)) verifyRuntimePackage(name, directory, pin.compatibility?.[from]);
+      }, directory => {
+        if (name === 'zod') prepareZod(directory, pin.compatibility?.[from]);
+      });
+    }
+    for (const target of directories) {
+      const compatibility = pin.compatibility?.[target.entry.match(/^[^@]+@([^_]+)/)?.[1]];
+      verifyRuntimePackage(name, target.directory, compatibility);
+      const pkg = JSON.parse(fs.readFileSync(path.join(target.directory, 'package.json')));
+      evidence.push({name, version: pkg.version, source: pin.url, sha512: pin.sha512,
+        path: path.relative(root, target.directory), changes: pkg['release-factory'] ?? null});
+    }
+  }
+  return evidence;
+}
+
+async function replaceVerifiedDependency(name, pin, outdated, verify = () => {}, prepare = () => {}) {
+  assertDependencyPin(name, pin);
   if (!outdated.length) return;
   const temporary = fs.mkdtempSync('/tmp/openclaw-npm-bundle-');
   try {
@@ -87,14 +224,16 @@ async function replaceVerifiedDependency(name, pin, outdated, verify = () => {})
     const pkg = JSON.parse(fs.readFileSync(path.join(replacement, 'package.json')));
     assert.equal(pkg.name, name);
     assert.equal(pkg.version, pin.version);
+    prepare(replacement);
     verify(replacement);
     for (const directory of outdated) {
+      const from = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'))).version;
       const {uid, gid} = fs.statSync(directory);
       fs.rmSync(directory, {recursive: true});
       fs.cpSync(replacement, directory, {recursive: true});
       execFileSync('chown', ['-R', `${uid}:${gid}`, directory]);
       verify(directory);
-      console.log(`Replace verified dependency ${name} ${pin.from} -> ${pin.version}: ${directory}`);
+      console.log(`Replace verified dependency ${name} ${from} -> ${pin.version}: ${directory}`);
     }
   } finally {
     fs.rmSync(temporary, {recursive: true});
@@ -322,7 +461,17 @@ export function patchCacheSemantics(directory) {
 
 async function main() {
   const components = JSON.parse(fs.readFileSync(new URL('./components.json', import.meta.url)));
+  if (process.argv[2] === '--build') {
+    // Vite/Rolldown inline these packages into the browser assets before runtime COPY.
+    await patchRuntimePackages('/app/node_modules', components.runtime_packages);
+    await patchMarkdownPackages('/app/node_modules', components.markdown_packages);
+    return;
+  }
+  assert.equal(process.argv.length, 2, 'unexpected dependency patch argument');
   await patchNpmBundles('/app/node_modules', components.npm_bundled);
+  const runtimePatches = await patchRuntimePackages('/app/node_modules', components.runtime_packages);
+  fs.mkdirSync('/usr/share/doc/release-factory', {recursive: true});
+  fs.writeFileSync('/usr/share/doc/release-factory/openclaw-runtime-deps.json', JSON.stringify(runtimePatches, null, 2) + '\n');
   await patchSourceMaps('/app/node_modules', components.source_map_js);
   await patchMcpPackages('/app/node_modules', components.mcp_packages);
   await patchMarkdownPackages('/app/node_modules', components.markdown_packages);

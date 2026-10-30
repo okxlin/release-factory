@@ -8,6 +8,17 @@
     "@getpaseo/cli": "0.3.1"
   },
   "overrides": {
-    "fast-uri": "3.1.8"
+    "fast-uri": "3.1.8",
+    "@modelcontextprotocol/sdk": {
+      "express": {
+        "body-parser": "2.4.0"
+      }
+    },
+    "@getpaseo/server": {
+      "express": {
+        "body-parser": "1.20.9"
+      }
+    },
+    "zod": "4.6.6"
   }
 }
