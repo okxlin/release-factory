@@ -33,6 +33,7 @@ ARG PROXY_X_TEXT_VERSION=0.41.0
 ARG PROXY_X_MOD_VERSION=0.41.0
 ARG PROXY_GRPC_VERSION=1.83.2
 ARG MIHOMO_COMPRESS_VERSION=1.18.7
+ARG SING_BOX_GO_JOSE_VERSION=4.1.6
 ARG PNPM_VERSION=latest
 ARG YARN_VERSION=stable
 ARG RUFF_VERSION=latest
@@ -288,6 +289,7 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
     && sing_box_ldflags="$(cat /tmp/proxy-build/sing-box/release/LDFLAGS)" \
     && (cd /tmp/proxy-build/sing-box \
         && go mod edit \
+            -require="github.com/go-jose/go-jose/v4@v${SING_BOX_GO_JOSE_VERSION}" \
             -require="golang.org/x/crypto@v${PROXY_X_CRYPTO_VERSION}" \
             -require="golang.org/x/net@v${PROXY_X_NET_VERSION}" \
             -require="golang.org/x/text@v${PROXY_X_TEXT_VERSION}" \
@@ -320,6 +322,7 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
         go version -m "/usr/local/bin/${binary}" | grep -Fq $'\tdep\tgoogle.golang.org/grpc\tv'"${PROXY_GRPC_VERSION}" || { echo "${binary} has an unexpected grpc version" >&2; exit 1; }; \
     done \
     && go version -m /usr/local/bin/sing-box | grep -Fq $'\tdep\tgolang.org/x/mod\tv'"${PROXY_X_MOD_VERSION}" \
+    && go version -m /usr/local/bin/sing-box | grep -Fq $'\tdep\tgithub.com/go-jose/go-jose/v4\tv'"${SING_BOX_GO_JOSE_VERSION}"$'\t' \
     && go version -m /usr/local/bin/mihomo | grep -Fq $'\tdep\tgithub.com/klauspost/compress\tv'"${MIHOMO_COMPRESS_VERSION}" \
     && mihomo_output="$(/usr/local/bin/mihomo -v)" \
     && grep -Fq "Mihomo Meta ${mihomo_version}" <<<"${mihomo_output}" \

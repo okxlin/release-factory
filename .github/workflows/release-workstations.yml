@@ -123,6 +123,7 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: test "$(dpkg --print-architecture)" = "$ARCH"
       - uses: docker/setup-buildx-action@v4
+        id: buildx
       - name: Build the native image once
         id: build
         uses: docker/build-push-action@v7
@@ -141,6 +142,16 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=${{ inputs.variant }}-${{ matrix.arch }}
           cache-to: type=gha,mode=min,scope=${{ inputs.variant }}-${{ matrix.arch }}
+      - name: Reclaim this builder's cache before runtime scans
+        env:
+          BUILDER: ${{ steps.buildx.outputs.name }}
+          IMAGE: ${{ steps.build.outputs.imageid }}
+        run: |
+          set -euo pipefail
+          docker buildx du --builder "$BUILDER"
+          docker buildx prune --builder "$BUILDER" --all --force
+          test "$(docker image inspect --format '{{.Id}}' "$IMAGE")" = "$IMAGE"
+          df -h "$RUNNER_TEMP" /var/lib/docker
       - name: Exercise authentication, default runtime and persistent storage
         env:
           IMAGE: ${{ steps.build.outputs.imageid }}

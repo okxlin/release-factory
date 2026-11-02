@@ -69,6 +69,15 @@ class MergeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "incomplete"):
             automation.validate_diff(bad_diff)
 
+    def test_python_hash_lock_is_part_of_the_component_candidate(self):
+        diff = copy.deepcopy(DIFF)
+        diff["files"] = [{"filename": filename, "status": "modified"} for filename in [
+            "deepseek-harness-builder/image/components.lock.json",
+            "deepseek-harness-builder/image/dsh-source.json",
+            "deepseek-harness-builder/image/python-requirements.lock",
+        ]]
+        automation.validate_diff(diff)
+
     def test_history_pagination_includes_newest_human_commit(self):
         first = dict(DIFF, total_commits=2, commits=copy.deepcopy(DIFF["commits"]))
         last = {"commits": [{"committer": {"login": "okxlin"}}]}
