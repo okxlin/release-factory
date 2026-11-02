@@ -14,11 +14,13 @@ const cli = '@deepseek-ai/dsh'
 const codex = '@deepseek-ai/dsh-subagent-codex'
 const claude = '@deepseek-ai/dsh-subagent-claude-code'
 const hook = '@deepseek-ai/dsh-hooks-codex'
+const cua = '@deepseek-ai/dsh-cua-bundle'
+const macos = '@deepseek-ai/dsh-experimental-cua-macos'
 const fixture = (name, fields = {}) => ({
   path: `/packs/${name.replace('/', '-')}.tgz`,
   manifest: { name, version: '0.0.0-source-test.1', ...fields },
 })
-const names = packages => selectRuntimePackages(packages).map(p => p.manifest.name).sort()
+const names = (packages, target) => selectRuntimePackages(packages, target).map(p => p.manifest.name).sort()
 
 test('keeps the CLI runtime closure, including local vendor, optional and required peers', () => {
   const packages = [
@@ -60,6 +62,51 @@ test('optional peer metadata does not hide a direct dependency', () => {
   ]), [cli, 'shared'].sort())
 })
 
+test('selects optional native providers for the target OS and CPU', () => {
+  const packages = [
+    fixture(cli, { dependencies: { [cua]: '*' } }),
+    fixture(cua, { optionalDependencies: { [macos]: '*', 'linux-x64': '*', 'linux-arm64': '*' } }),
+    fixture(macos, { os: ['darwin'], dependencies: { 'macos-helper': '*' } }),
+    fixture('macos-helper'),
+    fixture('linux-x64', { os: ['linux'], cpu: ['x64'] }),
+    fixture('linux-arm64', { os: ['linux'], cpu: ['arm64'] }),
+  ]
+  for (const arch of ['x64', 'arm64']) {
+    const target = { platform: 'linux', arch }
+    assert.deepEqual(names(packages, target), [cli, cua, `linux-${arch}`].sort())
+    assert.deepEqual(names(packages.toReversed(), target), names(packages, target))
+  }
+  assert.deepEqual(names(packages, { platform: 'darwin', arch: 'arm64' }),
+    [cli, cua, macos, 'macos-helper'].sort())
+})
+
+test('honors npm platform allowlists, exclusions and optional dependency overrides', () => {
+  const packages = [
+    fixture(cli, {
+      dependencies: { excluded: '*' },
+      optionalDependencies: { excluded: '*', allowed: '*', negative: '*', any: '*', wrong: '*' },
+    }),
+    fixture('excluded', { os: ['linux', '!linux'] }),
+    fixture('allowed', { os: 'linux', cpu: ['x64', '!arm64'] }),
+    fixture('negative', { os: ['!darwin'], cpu: ['!arm64'] }),
+    fixture('any', { os: ['any'], cpu: 'any' }),
+    fixture('wrong', { cpu: ['arm64'] }),
+  ]
+  assert.deepEqual(names(packages, { platform: 'linux', arch: 'x64' }),
+    [cli, 'allowed', 'negative', 'any'].sort())
+})
+
+test('rejects incompatible required packages and peers without silently dropping them', () => {
+  const target = { platform: 'linux', arch: 'x64' }
+  for (const field of ['dependencies', 'peerDependencies']) {
+    assert.throws(() => selectRuntimePackages([
+      fixture(cli, { [field]: { [macos]: '*' } }), fixture(macos, { os: ['darwin'] }),
+    ], target), /unsupported.*dsh-experimental-cua-macos.*required by.*@deepseek-ai\/dsh/)
+  }
+  assert.throws(() => selectRuntimePackages([fixture(cli, { os: ['darwin'] })], target),
+    /unsupported.*@deepseek-ai\/dsh.*linux\/x64/)
+})
+
 test('rejects a missing CLI, duplicate package names and malformed identities', () => {
   assert.throws(() => selectRuntimePackages([fixture('other')]), /missing.*@deepseek-ai\/dsh/)
   assert.throws(() => selectRuntimePackages([fixture(cli), fixture(cli)]), /duplicate/)
@@ -75,12 +122,16 @@ test('installs unpublished local tarballs offline without opt-in plugins or life
   const version = '0.0.0-source-test.1'
   const packages = [
     fixture(cli, {
-      dependencies: { [hook]: version, 'source-only-vendor': version },
+      dependencies: { [hook]: version, [cua]: version, 'source-only-vendor': version },
       devDependencies: { [codex]: version },
       peerDependencies: { [claude]: version },
       peerDependenciesMeta: { [claude]: { optional: true } },
     }),
     fixture(hook),
+    fixture(cua, { optionalDependencies: { [macos]: version } }),
+    fixture(macos, {
+      os: [process.platform === 'darwin' ? 'linux' : 'darwin'],
+    }),
     fixture('source-only-vendor', {
       peerDependencies: { [hook]: version },
       scripts: { postinstall: 'node -e "require(\'node:fs\').writeFileSync(\'install-ran\', \'yes\')"' },
@@ -110,17 +161,17 @@ test('installs unpublished local tarballs offline without opt-in plugins or life
       NPM_CONFIG_REGISTRY: 'http://127.0.0.1:9',
     },
   })
-  assert.match(output, /installing 3\/5 local packages/)
-  for (const name of [cli, hook, 'source-only-vendor']) {
+  assert.match(output, /installing 4\/7 local packages/)
+  for (const name of [cli, hook, cua, 'source-only-vendor']) {
     const installed = join(runtime, 'node_modules', name)
     assert.equal(JSON.parse(readFileSync(join(installed, 'package.json'))).version, version)
     assert.equal(readFileSync(join(installed, 'index.js'), 'utf8'), 'module.exports = "local-source-patch"\n')
     assert.equal(existsSync(join(installed, 'install-ran')), false)
   }
-  for (const name of [codex, claude, '@openai/codex', '@anthropic-ai/claude-agent-sdk']) {
+  for (const name of [macos, codex, claude, '@openai/codex', '@anthropic-ai/claude-agent-sdk']) {
     assert.equal(existsSync(join(runtime, 'node_modules', name)), false, name)
   }
   const lock = JSON.parse(readFileSync(join(runtime, 'node_modules/.package-lock.json')))
-  assert.equal(Object.keys(lock.packages).length, 3)
+  assert.equal(Object.keys(lock.packages).length, 4)
   assert.ok(Object.values(lock.packages).every(pkg => pkg.resolved.startsWith('file:')))
 })
