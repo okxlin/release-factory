@@ -61,6 +61,26 @@ cp -- "${source_dockerfile}" "${missing_x_net_verification}"
 sed -i '/grep -Eq.*x\/net.*X_NET_VERSION/d' "${missing_x_net_verification}"
 expect_failure 'missing-x-net-verification' "${missing_x_net_verification}" 'the Caddy x/net module verification'
 
+missing_go_jose_source="${tmp_dir}/missing-go-jose-source.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_go_jose_source}"
+sed -i '/--replace.*go-jose\/v3@/d' "${missing_go_jose_source}"
+expect_failure 'missing-go-jose-source' "${missing_go_jose_source}" 'the patched go-jose v3 source replacement'
+
+missing_go_jose_regression="${tmp_dir}/missing-go-jose-regression.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_go_jose_regression}"
+sed -i '/go test.*TestReleaseFactory/d' "${missing_go_jose_regression}"
+expect_failure 'missing-go-jose-regression' "${missing_go_jose_regression}" 'the go-jose RSA/JWK behavior regressions before linking'
+
+missing_go_jose_v4_override="${tmp_dir}/missing-go-jose-v4-override.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_go_jose_v4_override}"
+sed -i '/--replace.*go-jose\/v4=/d' "${missing_go_jose_v4_override}"
+expect_failure 'missing-go-jose-v4-override' "${missing_go_jose_v4_override}" 'the Caddy go-jose v4 security override'
+
+missing_go_jose_v4_verification="${tmp_dir}/missing-go-jose-v4-verification.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_go_jose_v4_verification}"
+sed -i '/grep -Eq.*go-jose\/v4.*GO_JOSE_VERSION/d' "${missing_go_jose_v4_verification}"
+expect_failure 'missing-go-jose-v4-verification' "${missing_go_jose_v4_verification}" 'the Caddy go-jose v4 module verification'
+
 missing_npm_pin="${tmp_dir}/missing-npm-pin.Dockerfile"
 cp -- "${source_dockerfile}" "${missing_npm_pin}"
 sed -i '/^ARG NPM_VERSION$/d' "${missing_npm_pin}"

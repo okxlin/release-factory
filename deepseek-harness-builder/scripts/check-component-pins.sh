@@ -409,6 +409,27 @@ require_literal \
     "https://github.com/greenpau/go-authcrunch/archive/refs/tags/v\${GO_AUTHCRUNCH_VERSION}.tar.gz" \
     'the go-authcrunch source URL tied to GO_AUTHCRUNCH_VERSION'
 require_literal \
+    'https://github.com/go-jose/go-jose/archive/refs/tags/v${GO_JOSE_V3_VERSION}.tar.gz' \
+    'the go-jose v3 source URL tied to its version pin'
+require_literal \
+    '"${GO_JOSE_V3_SOURCE_SHA256}"' \
+    'the go-jose v3 source checksum verification'
+require_literal \
+    'git apply --check --unidiff-zero /tmp/go-jose-v3-rsa-bounds.patch' \
+    'the reviewed go-jose v3 backport check'
+require_literal \
+    "go test -count=1 -timeout=30s -run '^TestReleaseFactory' ." \
+    'the go-jose RSA/JWK behavior regressions before linking'
+require_literal \
+    'github.com/go-jose/go-jose/v3@v${GO_JOSE_V3_VERSION}=/usr/src/go-jose-${GO_JOSE_V3_VERSION}' \
+    'the patched go-jose v3 source replacement'
+require_literal \
+    'github.com/go-jose/go-jose/v4=github.com/go-jose/go-jose/v4@v${GO_JOSE_VERSION}' \
+    'the Caddy go-jose v4 security override'
+require_literal \
+    'grep -Eq "github\.com/go-jose/go-jose/v4[[:space:]]+v${GO_JOSE_VERSION}"' \
+    'the Caddy go-jose v4 module verification'
+require_literal \
     "\"\${CADDY_SOURCE_ARCHIVE_SHA256}\"" \
     'the Caddy source checksum verification'
 require_literal \
