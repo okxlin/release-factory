@@ -19,6 +19,8 @@
 
 构建版本、基础镜像 digest、源码和工具校验和集中保存在 [`image/components.lock.json`](image/components.lock.json)。Python 依赖使用独立的 [`image/python-requirements.lock`](image/python-requirements.lock)，旧版 npm 路径保留自己的 [package.json](image/package.json) 和 [pnpm-lock.yaml](image/pnpm-lock.yaml)。[`image/dsh-source.json`](image/dsh-source.json) 把源码归档绑定到确定的 commit 和 SHA-256。本地构建与 CI 都通过 `scripts/component-inputs.py` 解析参数，常规组件更新无需手改 Dockerfile 指令。源码构建当前仍由 npm 安装本地打包的 runtime tarball，依赖审计检查这棵实际安装树。
 
+pytest 更新会在 Linux、Python 3.12 环境中使用 PyPI wheel 重新生成 Python 依赖锁文件。解析器保留已固定的传递依赖，确认版本兼容后，再一并写入组件版本与 wheel 哈希。
+
 影响 DeepSeek Harness 构建输入的 PR 会运行组件契约检查，拒绝浮动基础镜像标签、错误 checksum、缺失的锁定输入和不匹配的源码 URL。另一个 PR 工作流分别使用原生 `ubuntu-24.04`（amd64）与 `ubuntu-24.04-arm` runner 构建两个变体。两个架构都执行生产依赖审计、完整鉴权和 passthrough smoke、Caddy 检查及 Trivy 策略；Workstation 还会实际执行编译器和宿主内核沙箱探测。PR job 不接收 registry 凭据。
 
 发布工作流只解析一次选定的源码或 npm release，再复用同一个[验证 action](../.github/actions/verify-deepseek-harness/action.yml)。成功的 job 导出已测试镜像，并记录归档 checksum、镜像 config ID、架构、变体、DSH 版本、工作流代码 revision 和 run ID。[发布 job](../.github/workflows/release-deepseek-harness.yml) 在首次推送前校验全部归档和加载后的镜像，再用已核验的 registry digest 组装多架构标签，不重新构建。两个仓库都必须成功；两个版本标签均验证后才更新浮动标签。跨仓库写入不具备原子性，发布任务会排队，避免自动取消正在进行的发布。

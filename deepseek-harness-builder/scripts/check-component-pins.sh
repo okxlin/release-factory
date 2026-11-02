@@ -5,6 +5,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 dockerfile="${script_dir}/../image/Dockerfile"
 components_file="${script_dir}/../image/components.lock.json"
 source_file="${script_dir}/../image/dsh-source.json"
+python_requirements_file="${script_dir}/../image/python-requirements.lock"
 failures=0
 
 usage() {
@@ -17,6 +18,7 @@ Options:
   --dockerfile FILE  Dockerfile to validate
   --components-file FILE  Component lock file to validate
   --source-file FILE      Source release metadata to validate
+  --python-requirements-file FILE  Hash-locked Python requirements to validate
   -h, --help         Show this help
 EOF
 }
@@ -45,6 +47,11 @@ while [[ $# -gt 0 ]]; do
         --source-file)
             require_value "$1" "$#"
             source_file="$2"
+            shift 2
+            ;;
+        --python-requirements-file)
+            require_value "$1" "$#"
+            python_requirements_file="$2"
             shift 2
             ;;
         -h|--help)
@@ -133,6 +140,26 @@ component_inputs="$(python3 "${script_dir}/component-inputs.py" \
 while IFS='=' read -r arg_name arg_value; do
     arg_values["${arg_name}"]="${arg_value}"
 done <<< "${component_inputs}"
+if ! python3 - "${python_requirements_file}" "${arg_values[PYTEST_VERSION]:-}" <<'PYREQUIREMENTS'
+import re
+import sys
+from pathlib import Path
+
+versions = {}
+for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    match = re.fullmatch(r"([A-Za-z0-9_.-]+)==([A-Za-z0-9.!+]+) --hash=sha256:[a-f0-9]{64}", line)
+    if not match:
+        sys.exit("Python requirements must use exact versions and SHA-256 hashes")
+    name = re.sub(r"[-_.]+", "-", match[1]).lower()
+    if name in versions:
+        sys.exit("Python requirements lock contains a duplicate package")
+    versions[name] = match[2]
+if versions.get("pytest") != sys.argv[2]:
+    sys.exit(f"Python requirements lock must pin pytest=={sys.argv[2]}")
+PYREQUIREMENTS
+then
+    fail 'Python requirements lock is inconsistent with the component inputs'
+fi
 for line in "${docker_lines[@]}"; do
     if arg_remainder="$(instruction_remainder "${line}" ARG)" \
         && [[ "${arg_remainder}" =~ ^[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)(=([^[:space:]#]*))?[[:space:]]*(#.*)?$ ]]; then

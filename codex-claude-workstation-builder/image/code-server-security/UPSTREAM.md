@@ -7,7 +7,8 @@ and the existing high-severity audit threshold are checked before replacement.
 - [body-parser 2.4.0](https://www.npmjs.com/package/body-parser/v/2.4.0): MIT.
   Its nested dependencies travel with the replacement, including compatible
   qs, content-type and iconv-lite versions.
-- [follow-redirects 1.16.1](https://www.npmjs.com/package/follow-redirects/v/1.16.1): MIT.
+- [follow-redirects 1.16.2](https://www.npmjs.com/package/follow-redirects/v/1.16.2): MIT.
+  Fixes [GHSA-mrwp-f3q8-3g9p](https://github.com/advisories/GHSA-mrwp-f3q8-3g9p).
 - [Zod 4.6.6](https://www.npmjs.com/package/zod/v/4.6.6): MIT.
   VS Code and Copilot keep the v4 entry point. Sandbox Runtime keeps the v3
   entry point, including CommonJS, ESM and types. The bundled v3 implementation

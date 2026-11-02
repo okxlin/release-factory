@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const targets = [
   {relative: 'node_modules/body-parser', name: 'body-parser', from: '2.3.0', version: '2.4.0'},
-  {relative: 'node_modules/follow-redirects', name: 'follow-redirects', from: '1.16.0', version: '1.16.1'},
+  {relative: 'node_modules/follow-redirects', name: 'follow-redirects', from: '1.16.0', version: '1.16.2'},
   {relative: 'lib/vscode/node_modules/zod', name: 'zod', from: '4.4.3', version: '4.6.6', api: 'v4'},
   {relative: 'lib/vscode/node_modules/@github/copilot-sdk/node_modules/zod', name: 'zod', from: '4.3.6', version: '4.6.6', api: 'v4'},
   {relative: 'lib/vscode/node_modules/@vscode/sandbox-runtime/node_modules/zod', name: 'zod', from: '3.25.76', version: '4.6.6', api: 'v3'},
