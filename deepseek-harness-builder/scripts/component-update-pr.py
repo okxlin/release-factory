@@ -10,7 +10,8 @@ import subprocess
 from pathlib import Path
 
 BRANCH = "automation/deepseek-harness-components"
-FILES = ["deepseek-harness-builder/image/components.lock.json", "deepseek-harness-builder/image/dsh-source.json"]
+FILES = ["deepseek-harness-builder/image/components.lock.json", "deepseek-harness-builder/image/dsh-source.json",
+         "deepseek-harness-builder/image/python-requirements.lock"]
 BOT = {"name": "github-actions[bot]", "email": "41898282+github-actions[bot]@users.noreply.github.com"}
 RELEASED = "<!-- dsh-component-releases-dispatched -->"
 WORKFLOWS = ["build-deepseek-harness.yml", "build-deepseek-harness-workstation.yml"]
@@ -42,7 +43,7 @@ def validate_pr(pr, repo, allow_merged=False):
 def validate_diff(comparison):
     files = comparison.get("files", [])
     require(files and all(f["filename"] in FILES and f["status"] == "modified" for f in files),
-            "component candidate may only modify the two pin files")
+            "component candidate may only modify the three generated input files")
     commits = comparison.get("commits", [])
     require(len(commits) == comparison.get("total_commits"), "incomplete component commit history")
     require(all((c.get("committer") or {}).get("login") == "github-actions[bot]" for c in commits),

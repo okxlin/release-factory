@@ -6,6 +6,7 @@ checker="${script_dir}/check-component-pins.sh"
 source_dockerfile="${script_dir}/../image/Dockerfile"
 source_components="${script_dir}/../image/components.lock.json"
 source_metadata="${script_dir}/../image/dsh-source.json"
+source_python_requirements="${script_dir}/../image/python-requirements.lock"
 node_digest="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["build_args"]["NODE_IMAGE"].split("@sha256:")[1])' "${source_components}")"
 tmp_dir="$(mktemp -d /tmp/deepseek-harness-component-pins.XXXXXX)"
 
@@ -26,7 +27,8 @@ expect_failure() {
     local output="${tmp_dir}/${name}.output"
 
     if bash "${checker}" --dockerfile "${dockerfile}" \
-        --components-file "${4:-${source_components}}" --source-file "${5:-${source_metadata}}" >"${output}" 2>&1; then
+        --components-file "${4:-${source_components}}" --source-file "${5:-${source_metadata}}" \
+        --python-requirements-file "${6:-${source_python_requirements}}" >"${output}" 2>&1; then
         fail "${name}: checker unexpectedly passed"
     fi
     grep -Fq -- "${expected_message}" "${output}" \
@@ -58,6 +60,26 @@ missing_x_net_verification="${tmp_dir}/missing-x-net-verification.Dockerfile"
 cp -- "${source_dockerfile}" "${missing_x_net_verification}"
 sed -i '/grep -Eq.*x\/net.*X_NET_VERSION/d' "${missing_x_net_verification}"
 expect_failure 'missing-x-net-verification' "${missing_x_net_verification}" 'the Caddy x/net module verification'
+
+missing_go_jose_source="${tmp_dir}/missing-go-jose-source.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_go_jose_source}"
+sed -i '/--replace.*go-jose\/v3@/d' "${missing_go_jose_source}"
+expect_failure 'missing-go-jose-source' "${missing_go_jose_source}" 'the patched go-jose v3 source replacement'
+
+missing_go_jose_regression="${tmp_dir}/missing-go-jose-regression.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_go_jose_regression}"
+sed -i '/go test.*TestReleaseFactory/d' "${missing_go_jose_regression}"
+expect_failure 'missing-go-jose-regression' "${missing_go_jose_regression}" 'the go-jose RSA/JWK behavior regressions before linking'
+
+missing_go_jose_v4_override="${tmp_dir}/missing-go-jose-v4-override.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_go_jose_v4_override}"
+sed -i '/--replace.*go-jose\/v4=/d' "${missing_go_jose_v4_override}"
+expect_failure 'missing-go-jose-v4-override' "${missing_go_jose_v4_override}" 'the Caddy go-jose v4 security override'
+
+missing_go_jose_v4_verification="${tmp_dir}/missing-go-jose-v4-verification.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_go_jose_v4_verification}"
+sed -i '/grep -Eq.*go-jose\/v4.*GO_JOSE_VERSION/d' "${missing_go_jose_v4_verification}"
+expect_failure 'missing-go-jose-v4-verification' "${missing_go_jose_v4_verification}" 'the Caddy go-jose v4 module verification'
 
 missing_npm_pin="${tmp_dir}/missing-npm-pin.Dockerfile"
 cp -- "${source_dockerfile}" "${missing_npm_pin}"
@@ -106,6 +128,21 @@ inconsistent_pnpm="${tmp_dir}/inconsistent-pnpm.Dockerfile"
 cp -- "${source_dockerfile}" "${inconsistent_pnpm}"
 sed -i '0,/^ARG PNPM_VERSION$/s/^ARG PNPM_VERSION$/ARG PNPM_VERSION=99.99.99/' "${inconsistent_pnpm}"
 expect_failure 'inconsistent-pnpm' "${inconsistent_pnpm}" 'ARG PNPM_VERSION default belongs in the component lock'
+
+inconsistent_pytest="${tmp_dir}/inconsistent-pytest.json"
+python3 - "${source_components}" "${inconsistent_pytest}" <<'PYLOCK'
+import json, sys
+lock = json.load(open(sys.argv[1], encoding='utf-8'))
+lock['build_args']['PYTEST_VERSION'] = '99.0.0'
+with open(sys.argv[2], 'w', encoding='utf-8') as output:
+    json.dump(lock, output)
+PYLOCK
+expect_failure 'inconsistent-pytest' "${baseline}" 'Python requirements lock must pin pytest==99.0.0' "${inconsistent_pytest}"
+
+unhashed_python="${tmp_dir}/unhashed-python.lock"
+printf 'pytest==9.1.1\n' >"${unhashed_python}"
+expect_failure 'unhashed-python' "${baseline}" 'Python requirements must use exact versions and SHA-256 hashes' \
+    "${source_components}" "${source_metadata}" "${unhashed_python}"
 
 mixed_case_arg="${tmp_dir}/mixed-case-arg.Dockerfile"
 cp -- "${source_dockerfile}" "${mixed_case_arg}"

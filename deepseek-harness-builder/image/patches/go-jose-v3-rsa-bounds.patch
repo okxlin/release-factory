@@ -1,0 +1,314 @@
+# Backport GHSA-mgcc-cww5-fp2q to the v3 API used by Caddy/Smallstep.
+# Upstream fix: https://github.com/go-jose/go-jose/commit/a0111f82742fa92bceec9ede40845e73319e6230
+diff --git a/jwk.go b/jwk.go
+--- a/jwk.go
++++ b/jwk.go
+@@ -178 +178,8 @@
+-func (k *JSONWebKey) UnmarshalJSON(data []byte) (err error) {
++// Directly unmarshaling a JWK is not safe for untrusted input.
++func (k *JSONWebKey) UnmarshalJSON(data []byte) error {
++	return k.unmarshalJSON(data, true)
++}
++
++// unmarshalJSON rejects private key material before cryptographic validation
++// when parsing a JWS/JWE public header.
++func (k *JSONWebKey) unmarshalJSON(data []byte, allowPrivate bool) (err error) {
+@@ -182,0 +190,6 @@
++	}
++
++	if !allowPrivate &&
++		(raw.K != nil || raw.D != nil || raw.P != nil || raw.Q != nil ||
++			raw.Dp != nil || raw.Dq != nil || raw.Qi != nil) {
++		return errors.New("go-jose/go-jose: JWK contains private parameters")
+@@ -483,0 +497,7 @@
++// MaxRSAModulusBits is the largest RSA modulus size, in bits, that will be
++// accepted when parsing a JWK. Applications that need larger keys can raise
++// this limit.
++//
++// If modifying MaxRSAModulusBits, do it before any parsing occurs.
++var MaxRSAModulusBits = 4096
++
+@@ -488,0 +509,5 @@
++	n := key.N.bigInt()
++	if n.BitLen() > MaxRSAModulusBits {
++		return nil, fmt.Errorf("go-jose/go-jose: invalid RSA key, modulus too large")
++	}
++
+@@ -490 +515 @@
+-		N: key.N.bigInt(),
++		N: n,
+@@ -630,0 +656,10 @@
++	n := key.N.bigInt()
++	if n.BitLen() > MaxRSAModulusBits {
++		return nil, fmt.Errorf("go-jose/go-jose: invalid RSA key, modulus too large")
++	}
++
++	p, q := key.P.bigInt(), key.Q.bigInt()
++	if p.BitLen()+q.BitLen() > n.BitLen()+1 || new(big.Int).Mul(p, q).Cmp(n) != 0 {
++		return nil, errors.New("go-jose/go-jose: invalid RSA private key, p * q != n")
++	}
++
+@@ -633 +668 @@
+-			N: key.N.bigInt(),
++			N: n,
+@@ -636,5 +671,2 @@
+-		D: key.D.bigInt(),
+-		Primes: []*big.Int{
+-			key.P.bigInt(),
+-			key.Q.bigInt(),
+-		},
++		D:      key.D.bigInt(),
++		Primes: []*big.Int{p, q},
+diff --git a/shared.go b/shared.go
+--- a/shared.go
++++ b/shared.go
+@@ -285,3 +285,4 @@
+-	var epk *JSONWebKey
+-	err := json.Unmarshal(*v, &epk)
+-	if err != nil {
++	// RFC 7518 Section 4.6.1.1: the "epk" header is the ephemeral public key
++	// of the originator. Reject private key material before parsing it.
++	epk := new(JSONWebKey)
++	if err := epk.unmarshalJSON(*v, false); err != nil {
+@@ -311,14 +311,0 @@
+-}
+-
+-// getJWK extracts parsed "jwk" from the raw JSON.
+-func (parsed rawHeader) getJWK() (*JSONWebKey, error) {
+-	v := parsed[headerJWK]
+-	if v == nil {
+-		return nil, nil
+-	}
+-	var jwk *JSONWebKey
+-	err := json.Unmarshal(*v, &jwk)
+-	if err != nil {
+-		return nil, err
+-	}
+-	return jwk, nil
+@@ -386,4 +373,8 @@
+-			var jwk *JSONWebKey
+-			err = json.Unmarshal(*v, &jwk)
+-			if err != nil {
+-				err = fmt.Errorf("failed to unmarshal JWK: %v: %#v", err, string(*v))
++			// RFC 7515 Section 4.1.3 and RFC 7516 Section 4.1.5: the "jwk"
++			// header is the public key that corresponds to the key used to
++			// sign the JWS or encrypt the JWE. Reject private key material
++			// before parsing it.
++			jwk := new(JSONWebKey)
++			err = jwk.unmarshalJSON(*v, false)
++			if err != nil {
++				err = fmt.Errorf("failed to unmarshal JWK: %w", err)
+diff --git a/jws.go b/jws.go
+--- a/jws.go
++++ b/jws.go
+@@ -238,0 +239 @@
++		obj.Signatures[i].header = sig.Header
+@@ -269 +269,0 @@
+-		obj.Signatures[i].header = sig.Header
+diff --git a/jwe.go b/jwe.go
+--- a/jwe.go
++++ b/jwe.go
+@@ -154,9 +153,0 @@
+-	// Note: this must be called _after_ we parse the protected header,
+-	// otherwise fields from the protected header will not get picked up.
+-	var err error
+-	mergedHeaders := obj.mergedHeaders(nil)
+-	obj.Header, err = mergedHeaders.sanitized()
+-	if err != nil {
+-		return nil, fmt.Errorf("go-jose/go-jose: cannot sanitize merged headers: %v (%v)", err, mergedHeaders)
+-	}
+-
+@@ -192,0 +184,9 @@
++	}
++
++	// Note: this must be called _after_ we parse the protected header,
++	// otherwise fields from the protected header will not get picked up.
++	mergedHeaders := obj.mergedHeaders(nil)
++	var err error
++	obj.Header, err = mergedHeaders.sanitized()
++	if err != nil {
++		return nil, fmt.Errorf("go-jose/go-jose: cannot sanitize merged headers: %w", err)
+diff --git a/release_factory_headers_test.go b/release_factory_headers_test.go
+new file mode 100644
+--- /dev/null
++++ b/release_factory_headers_test.go
+@@ -0,0 +1,96 @@
++package jose
++
++import (
++	"encoding/base64"
++	"encoding/json"
++	"strings"
++	"testing"
++
++	josejson "github.com/go-jose/go-jose/v3/json"
++)
++
++func TestReleaseFactoryEmbeddedKeys(t *testing.T) {
++	marshal := func(value interface{}) []byte {
++		t.Helper()
++		data, err := json.Marshal(value)
++		if err != nil {
++			t.Fatal(err)
++		}
++		return data
++	}
++	private, err := fromRsaPrivateKey(rsaTestKey)
++	if err != nil {
++		t.Fatal(err)
++	}
++	public := fromRsaPublicKey(&rsaTestKey.PublicKey)
++	stray := fromRsaPublicKey(&rsaTestKey.PublicKey)
++	stray.P, stray.Q = private.P, private.Q
++	for _, fixture := range []struct {
++		name    string
++		key     *rawJSONWebKey
++		private bool
++	}{
++		{"public", public, false}, {"private", private, true},
++		{"stray-private", stray, true}, {"symmetric", &rawJSONWebKey{Kty: "oct", K: newBuffer([]byte("secret"))}, true},
++	} {
++		for _, unprotected := range []bool{false, true} {
++			header := map[string]interface{}{"alg": "RS256"}
++			var extra map[string]interface{}
++			if unprotected {
++				extra = map[string]interface{}{"jwk": fixture.key, "kid": "from-unprotected"}
++			} else {
++				header["jwk"] = fixture.key
++			}
++			protected := base64.RawURLEncoding.EncodeToString(marshal(header))
++			signature := map[string]interface{}{"protected": protected, "signature": "dGVzdA"}
++			if unprotected {
++				signature["header"] = extra
++			}
++			flattened := map[string]interface{}{"payload": "dGVzdA", "protected": protected, "signature": "dGVzdA"}
++			if unprotected {
++				flattened["header"] = extra
++			}
++			messages := map[string]string{
++				"flattened": string(marshal(flattened)),
++				"general":   string(marshal(map[string]interface{}{"payload": "dGVzdA", "signatures": []interface{}{signature}})),
++			}
++			if !unprotected {
++				messages["compact"] = protected + ".dGVzdA.dGVzdA"
++			}
++			for format, message := range messages {
++				parsed, err := ParseSigned(message)
++				if fixture.private {
++					if err == nil || !strings.Contains(err.Error(), "JWK contains private parameters") {
++						t.Errorf("%s/%s/unprotected=%t: private parameters were not rejected before key validation: %v", fixture.name, format, unprotected, err)
++					}
++				} else if err != nil {
++					t.Errorf("%s: public key rejected: %v", format, err)
++				} else if unprotected && (parsed.Signatures[0].Header.KeyID != "from-unprotected" || parsed.Signatures[0].Unprotected.KeyID != "from-unprotected") {
++					t.Errorf("%s: unprotected public header was not retained", format)
++				}
++			}
++		}
++	}
++	privateEPK := josejson.RawMessage(marshal(private))
++	if _, err := (rawHeader{headerEPK: &privateEPK}).getEPK(); err == nil || !strings.Contains(err.Error(), "JWK contains private parameters") {
++		t.Errorf("private EPK was not rejected before validation: %v", err)
++	}
++	publicEPK := josejson.RawMessage(marshal(public))
++	if _, err := (rawHeader{headerEPK: &publicEPK}).getEPK(); err != nil {
++		t.Errorf("public EPK rejected: %v", err)
++	}
++}
++
++// getJWK is used only by signer tests.
++func (parsed rawHeader) getJWK() (*JSONWebKey, error) {
++	v := parsed[headerJWK]
++	if v == nil {
++		return nil, nil
++	}
++	var jwk *JSONWebKey
++	err := josejson.Unmarshal(*v, &jwk)
++	if err != nil {
++		return nil, err
++	}
++	return jwk, nil
++}
+diff --git a/release_factory_rsa_test.go b/release_factory_rsa_test.go
+new file mode 100644
+--- /dev/null
++++ b/release_factory_rsa_test.go
+@@ -0,0 +1,78 @@
++package jose
++
++import (
++	"crypto/rand"
++	"crypto/rsa"
++	"encoding/base64"
++	"encoding/json"
++	"math/big"
++	"strings"
++	"testing"
++)
++
++// Regressions for GHSA-mgcc-cww5-fp2q, backported from the v4.1.6 fix.
++func TestReleaseFactoryRSABounds(t *testing.T) {
++	encode := func(bits int) string {
++		n := new(big.Int).Lsh(big.NewInt(1), uint(bits-1))
++		return base64.RawURLEncoding.EncodeToString(n.SetBit(n, 0, 1).Bytes())
++	}
++	for _, bits := range []int{4095, 4096, 4097} {
++		raw, err := json.Marshal(map[string]string{"kty": "RSA", "n": encode(bits), "e": "AQAB"})
++		if err != nil {
++			t.Fatal(err)
++		}
++		var key JSONWebKey
++		err = json.Unmarshal(raw, &key)
++		if bits <= 4096 && err != nil {
++			t.Errorf("valid %d-bit public key rejected: %v", bits, err)
++		}
++		if bits > 4096 && (err == nil || !strings.Contains(err.Error(), "modulus too large")) {
++			t.Errorf("oversized %d-bit modulus was not rejected before validation: %v", bits, err)
++		}
++	}
++	for _, parameters := range []map[string]string{
++		{"kty": "RSA", "n": encode(4097), "e": "AQAB", "d": "Aw", "p": "Aw", "q": "Aw"},
++		{"kty": "RSA", "n": encode(2049), "e": "AQAB", "d": "Aw", "p": encode(16384), "q": "Aw"},
++	} {
++		raw, err := json.Marshal(parameters)
++		if err != nil {
++			t.Fatal(err)
++		}
++		var key JSONWebKey
++		err = json.Unmarshal(raw, &key)
++		want := "modulus too large"
++		if parameters["n"] == encode(2049) {
++			want = "p * q != n"
++		}
++		if err == nil || !strings.Contains(err.Error(), want) {
++			t.Errorf("private RSA bounds were not checked before validation: want %q, got %v", want, err)
++		}
++	}
++}
++
++func TestReleaseFactoryRSASignature(t *testing.T) {
++	key, err := rsa.GenerateKey(rand.Reader, 2048)
++	if err != nil {
++		t.Fatal(err)
++	}
++	raw, err := json.Marshal(JSONWebKey{Key: key})
++	if err != nil {
++		t.Fatal(err)
++	}
++	var parsed JSONWebKey
++	if err := json.Unmarshal(raw, &parsed); err != nil {
++		t.Fatal(err)
++	}
++	signer, err := NewSigner(SigningKey{Algorithm: RS256, Key: parsed.Key}, nil)
++	if err != nil {
++		t.Fatal(err)
++	}
++	signed, err := signer.Sign([]byte("release-factory RSA compatibility"))
++	if err != nil {
++		t.Fatal(err)
++	}
++	payload, err := signed.Verify(&key.PublicKey)
++	if err != nil || string(payload) != "release-factory RSA compatibility" {
++		t.Fatalf("normal RSA signature failed: %s, %v", payload, err)
++	}
++}

@@ -21,6 +21,10 @@ ARG CADDY_SOURCE_ARCHIVE_SHA256
 ARG CADDY_SECURITY_VERSION
 ARG CEL_GO_VERSION
 ARG GO_AUTHCRUNCH_VERSION
+ARG GO_JOSE_V3_VERSION
+ARG GO_JOSE_V3_SOURCE_SHA256
+ARG GO_JOSE_V3_LICENSE_SHA256
+ARG GO_JOSE_VERSION
 ARG GRPC_VERSION
 ARG KLAUSPOST_COMPRESS_VERSION
 ARG X_CRYPTO_VERSION
@@ -31,6 +35,7 @@ ARG CADDY_RATELIMIT_REF
 COPY patches/caddy-cel-go-v0.30.patch /tmp/caddy-cel-go-v0.30.patch
 COPY patches/caddy-cel-go-module-relocation.patch /tmp/caddy-cel-go-module-relocation.patch
 COPY patches/go-authcrunch-disable-openpgp.patch /tmp/go-authcrunch-disable-openpgp.patch
+COPY patches/go-jose-v3-rsa-bounds.patch /tmp/go-jose-v3-rsa-bounds.patch
 
 # Apply the reviewed CEL fixes to older Caddy sources, or verify that newer
 # sources already contain those exact changes. Unknown source shapes fail.
@@ -70,11 +75,34 @@ RUN wget -qO /tmp/go-authcrunch.tar.gz \
     && ! grep -R -F 'golang.org/x/crypto/openpgp' pkg/identity \
     && PATH="/usr/local/go/bin:${PATH}" go test ./pkg/identity
 
+# Smallstep still uses the unsupported go-jose v3 API. Backport the official
+# RSA/JWK fix without changing that API, and test the patched source before use.
+RUN wget -qO /tmp/go-jose-v3.tar.gz \
+        "https://github.com/go-jose/go-jose/archive/refs/tags/v${GO_JOSE_V3_VERSION}.tar.gz" \
+    && printf '%s  %s\n' \
+        "${GO_JOSE_V3_SOURCE_SHA256}" \
+        /tmp/go-jose-v3.tar.gz | sha256sum -c - \
+    && tar -xzf /tmp/go-jose-v3.tar.gz -C /usr/src \
+    && cd "/usr/src/go-jose-${GO_JOSE_V3_VERSION}" \
+    && git apply --check --unidiff-zero /tmp/go-jose-v3-rsa-bounds.patch \
+    && git apply --unidiff-zero /tmp/go-jose-v3-rsa-bounds.patch \
+    && PATH="/usr/local/go/bin:${PATH}" go test -count=1 -timeout=30s -run '^TestReleaseFactory' . \
+    && PATH="/usr/local/go/bin:${PATH}" go test -count=1 ./jwt ./cryptosigner \
+    && mkdir -p /licenses \
+    && cp LICENSE /licenses/GO_JOSE_V3_LICENSE \
+    && printf '%s  %s\n' "${GO_JOSE_V3_LICENSE_SHA256}" /licenses/GO_JOSE_V3_LICENSE | sha256sum -c - \
+    && printf '%s  %s\n' "${GO_JOSE_V3_SOURCE_SHA256}" "go-jose-v${GO_JOSE_V3_VERSION}-source.tar.gz" \
+        > /licenses/GO_JOSE_V3_PATCH.txt \
+    && cd /tmp \
+    && sha256sum go-jose-v3-rsa-bounds.patch >> /licenses/GO_JOSE_V3_PATCH.txt
+
 RUN xcaddy build "v${CADDY_VERSION}" \
         --with "github.com/greenpau/caddy-security@v${CADDY_SECURITY_VERSION}" \
         --with "github.com/mholt/caddy-ratelimit@${CADDY_RATELIMIT_REF}" \
         --replace "github.com/caddyserver/caddy/v2=/usr/src/caddy-${CADDY_VERSION}" \
         --replace "github.com/greenpau/go-authcrunch@v${GO_AUTHCRUNCH_VERSION}=/usr/src/go-authcrunch-${GO_AUTHCRUNCH_VERSION}" \
+        --replace "github.com/go-jose/go-jose/v3@v${GO_JOSE_V3_VERSION}=/usr/src/go-jose-${GO_JOSE_V3_VERSION}" \
+        --replace "github.com/go-jose/go-jose/v4=github.com/go-jose/go-jose/v4@v${GO_JOSE_VERSION}" \
         --replace "google.golang.org/grpc=google.golang.org/grpc@v${GRPC_VERSION}" \
         --replace "github.com/klauspost/compress=github.com/klauspost/compress@v${KLAUSPOST_COMPRESS_VERSION}" \
         --replace "golang.org/x/crypto=golang.org/x/crypto@v${X_CRYPTO_VERSION}" \
@@ -87,6 +115,10 @@ RUN xcaddy build "v${CADDY_VERSION}" \
     && ./caddy list-modules | grep -Fx 'http.handlers.rate_limit'
 
 RUN PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "google\.golang\.org/grpc[[:space:]]+v${GRPC_VERSION}" \
+    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "github\.com/go-jose/go-jose/v4[[:space:]]+v${GO_JOSE_VERSION}" \
+    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy \
+        | grep -A1 -E "dep[[:space:]]+github\.com/go-jose/go-jose/v3[[:space:]]+v${GO_JOSE_V3_VERSION}([[:space:]]|$)" \
+        | grep -Eq "=>[[:space:]]+/usr/src/go-jose-${GO_JOSE_V3_VERSION}[[:space:]]+\(devel\)" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "github\\.com/klauspost/compress[[:space:]]+v${KLAUSPOST_COMPRESS_VERSION}" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "cel\.dev/cel-go[[:space:]]+v${CEL_GO_VERSION}" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "golang\.org/x/crypto[[:space:]]+v${X_CRYPTO_VERSION}" \

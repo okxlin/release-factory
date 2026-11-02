@@ -19,6 +19,8 @@
 
 构建版本、基础镜像 digest、源码和工具校验和集中保存在 [`image/components.lock.json`](image/components.lock.json)。Python 依赖使用独立的 [`image/python-requirements.lock`](image/python-requirements.lock)，旧版 npm 路径保留自己的 [package.json](image/package.json) 和 [pnpm-lock.yaml](image/pnpm-lock.yaml)。[`image/dsh-source.json`](image/dsh-source.json) 把源码归档绑定到确定的 commit 和 SHA-256。本地构建与 CI 都通过 `scripts/component-inputs.py` 解析参数，常规组件更新无需手改 Dockerfile 指令。源码构建当前仍由 npm 安装本地打包的 runtime tarball，依赖审计检查这棵实际安装树。
 
+pytest 更新会在 Linux、Python 3.12 环境中使用 PyPI wheel 重新生成 Python 依赖锁文件。解析器保留已固定的传递依赖，确认版本兼容后，再一并写入组件版本与 wheel 哈希。
+
 影响 DeepSeek Harness 构建输入的 PR 会运行组件契约检查，拒绝浮动基础镜像标签、错误 checksum、缺失的锁定输入和不匹配的源码 URL。另一个 PR 工作流分别使用原生 `ubuntu-24.04`（amd64）与 `ubuntu-24.04-arm` runner 构建两个变体。两个架构都执行生产依赖审计、完整鉴权和 passthrough smoke、Caddy 检查及 Trivy 策略；Workstation 还会实际执行编译器和宿主内核沙箱探测。PR job 不接收 registry 凭据。
 
 发布工作流只解析一次选定的源码或 npm release，再复用同一个[验证 action](../.github/actions/verify-deepseek-harness/action.yml)。成功的 job 导出已测试镜像，并记录归档 checksum、镜像 config ID、架构、变体、DSH 版本、工作流代码 revision 和 run ID。[发布 job](../.github/workflows/release-deepseek-harness.yml) 在首次推送前校验全部归档和加载后的镜像，再用已核验的 registry digest 组装多架构标签，不重新构建。两个仓库都必须成功；两个版本标签均验证后才更新浮动标签。跨仓库写入不具备原子性，发布任务会排队，避免自动取消正在进行的发布。
@@ -34,6 +36,8 @@
 发布任务使用已验证的源码版本。合并后若触发发布的 API 调用中断，可重跑失败任务，或由下一次每周/手动更新恢复缺失的发布触发；恢复要求当前锁定文件仍匹配该 PR，不重新发布已被取代的旧组件。实际构建和仓库推送失败仍由发布工作流报告。
 
 Go 跟随官方稳定版本端点 <https://go.dev/VERSION?m=text>，其 Docker Official Image index 固定 digest，用于可复现地选择 `amd64` 和 `arm64`。actionlint 使用该固定 Go 工具链从 checksum 固定的官方源码归档重新构建；其他独立 workstation 工具从各自官方 GitHub Release 下载，并按架构固定 SHA-256 checksum。
+
+源码运行时安装会把受影响的 undici 8.x 固定到 [8.12.2](https://github.com/nodejs/undici/releases/tag/v8.12.2)，Zod 4.x 固定到 [4.6.6](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)，保留原有主版本 API。源码 CI 检查正常的 CJS/ESM schema、超限集合在元素校验前被拒绝、共享 HTTP dispatcher，以及小写、大写和混合大小写摘要算法的响应完整性校验。
 
 workstation 的 Docker CLI、Buildx、Compose 从校验和固定的官方源码重新编译。构建和 smoke 会检查各二进制的 Go 包清单，拒绝 daemon 代码；旧 Docker 模块只允许贡献 `pkg/namesgenerator`。不再为守护进程专属的扫描结果维护本地 Buildx 源码补丁。具体漏洞、包版本、二进制路径、依据及到期日期记录在[安全策略](configs/trivy-policy.json)中。
 

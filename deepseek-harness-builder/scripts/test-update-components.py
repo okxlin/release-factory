@@ -5,7 +5,10 @@ import hashlib
 import importlib.util
 import io
 import json
+import subprocess
+import sys
 import tarfile
+import tempfile
 import unittest
 import urllib.request
 from pathlib import Path
@@ -86,6 +89,66 @@ class RefreshTests(unittest.TestCase):
         for target in ["https://attacker.test/asset", "http://github.com/asset", "https://user@github.com/asset"]:
             with self.assertRaises(ValueError):
                 handler.redirect_request(request, None, 302, "", {}, target)
+
+
+class PythonRequirementsTests(unittest.TestCase):
+    def run_update(self, error=None, wheel_host="files.pythonhosted.org", report_version="1"):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            original = {}
+            for name in ("components.lock.json", "dsh-source.json", "python-requirements.lock"):
+                original[name] = (HERE.parent / "image" / name).read_text(encoding="utf-8")
+                (root / name).write_text(original[name], encoding="utf-8")
+            lock = json.loads(original["components.lock.json"])
+            lock["build_args"]["PYTEST_VERSION"] = "99.0.0"
+            source = json.loads(original["dsh-source.json"])
+
+            def resolve(command, **kwargs):
+                if error:
+                    raise error
+                report = {"version": report_version, "environment": {"python_version": "3.12", "sys_platform": "linux"}, "install": []}
+                for line in original["python-requirements.lock"].splitlines():
+                    name, version = line.split()[0].split("==")
+                    if name == "pytest":
+                        version = "99.0.0"
+                    report["install"].append({
+                        "metadata": {"name": name, "version": version},
+                        "download_info": {"url": f"https://{wheel_host}/{name}-{version}-py3-none-any.whl",
+                                          "archive_info": {"hashes": {"sha256": "a" * 64}}},
+                    })
+                Path(command[command.index("--report") + 1]).write_text(json.dumps(report), encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            with patch.object(updater, "refresh", return_value=(lock, source, ["pytest update"])), \
+                 patch.object(updater.checker, "SourceClient"), \
+                 patch.object(subprocess, "run", side_effect=resolve), \
+                 patch.object(sys, "version_info", (3, 12)), patch.object(sys, "platform", "linux"), \
+                 patch.object(sys, "argv", ["update-components.py", "--image-dir", str(root), "--apply"]):
+                if error or wheel_host != "files.pythonhosted.org" or report_version != "1":
+                    expected = type(error) if error else ValueError
+                    with self.assertRaises(expected):
+                        updater.main()
+                    for name, content in original.items():
+                        self.assertEqual((root / name).read_text(encoding="utf-8"), content)
+                else:
+                    updater.main()
+                    requirements = (root / "python-requirements.lock").read_text(encoding="utf-8")
+                    self.assertIn("pytest==99.0.0 --hash=sha256:" + "a" * 64, requirements)
+                    for line in original["python-requirements.lock"].splitlines()[1:]:
+                        self.assertIn(line.split()[0], requirements)
+                    self.assertEqual(json.loads((root / "components.lock.json").read_text(encoding="utf-8"))["build_args"]["PYTEST_VERSION"], "99.0.0")
+
+    def test_pytest_update_regenerates_hash_lock_before_applying_pins(self):
+        self.run_update()
+
+    def test_resolution_failure_leaves_all_three_inputs_unchanged(self):
+        self.run_update(error=RuntimeError("resolution failed"))
+
+    def test_untrusted_wheel_source_leaves_all_three_inputs_unchanged(self):
+        self.run_update(wheel_host="attacker.test")
+
+    def test_unknown_report_version_leaves_all_three_inputs_unchanged(self):
+        self.run_update(report_version="2")
 
 
 if __name__ == "__main__":

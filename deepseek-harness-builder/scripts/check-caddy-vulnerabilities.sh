@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE="${CADDY_SCAN_IMAGE:-deepseek-harness:ci-amd64}"
 EXPECTED_STRIPPED_BINARY_FINDING="GO-2026-5932"
 EXPECTED_PATCHED_GRPC_FINDING="GO-2026-6443"
@@ -10,7 +11,8 @@ usage() {
     cat <<'EOF'
 Usage: check-caddy-vulnerabilities.sh [--image IMAGE]
 
-Runs govulncheck against the Caddy binary embedded in the image. Caddy's
+Checks the pinned go-jose modules and backport receipt, then runs govulncheck
+against the Caddy binary embedded in the image. Caddy's
 production build is stripped, so govulncheck can fall back to module-level
 findings. The only accepted fallback is GO-2026-5932 when the build-produced Go
 package manifest proves that no openpgp package is linked. GO-2026-6443 is also
@@ -37,7 +39,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-for command_name in docker go govulncheck; do
+for command_name in docker go govulncheck python3; do
     command -v "${command_name}" >/dev/null 2>&1 || {
         printf 'ERROR: required command is missing: %s\n' "${command_name}" >&2
         exit 1
@@ -58,7 +60,7 @@ cleanup() {
     if [[ -n "${container_id}" ]]; then
         docker rm -f "${container_id}" >/dev/null 2>&1 || true
     fi
-    for temp_file in caddy CADDY_GO_PACKAGES.txt; do
+    for temp_file in caddy CADDY_GO_PACKAGES.txt GO_JOSE_V3_PATCH.txt; do
         if [[ -f "${temp_dir}/${temp_file}" ]]; then
             unlink "${temp_dir}/${temp_file}"
         fi
@@ -73,8 +75,53 @@ docker cp "${container_id}:/usr/bin/caddy" "${temp_dir}/caddy" >/dev/null
 docker cp \
     "${container_id}:/usr/share/licenses/deepseek-harness-caddy/CADDY_GO_PACKAGES.txt" \
     "${temp_dir}/CADDY_GO_PACKAGES.txt" >/dev/null
+docker cp \
+    "${container_id}:/usr/share/licenses/deepseek-harness-caddy/GO_JOSE_V3_PATCH.txt" \
+    "${temp_dir}/GO_JOSE_V3_PATCH.txt" >/dev/null
 docker rm "${container_id}" >/dev/null
 container_id=""
+
+# Local module replacements have no upstream release version for scanners.
+# Require the exact source/patch receipt and the replacement in the binary.
+python3 - "${script_dir}/../image/components.lock.json" \
+    "${script_dir}/../image/patches/go-jose-v3-rsa-bounds.patch" \
+    "${temp_dir}/GO_JOSE_V3_PATCH.txt" "${temp_dir}/caddy" <<'PY'
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+lock_file, patch_file, receipt_file, binary = map(Path, sys.argv[1:])
+pins = json.loads(lock_file.read_text())["build_args"]
+receipt = receipt_file.read_text().splitlines()
+expected = [
+    f"{pins['GO_JOSE_V3_SOURCE_SHA256']}  go-jose-v{pins['GO_JOSE_V3_VERSION']}-source.tar.gz",
+    f"{hashlib.sha256(patch_file.read_bytes()).hexdigest()}  go-jose-v3-rsa-bounds.patch",
+]
+if receipt != expected:
+    raise SystemExit("ERROR: Caddy go-jose source/patch receipt does not match the reviewed inputs")
+
+info = subprocess.run(["go", "version", "-m", str(binary)], check=True,
+                      capture_output=True, text=True).stdout
+rows = [line.split() for line in info.splitlines()]
+modules = {}
+for index, row in enumerate(rows):
+    if len(row) >= 3 and row[0] == "dep":
+        replacement = rows[index + 1] if index + 1 < len(rows) and rows[index + 1][:1] == ["=>"] else None
+        modules[row[1]] = (row[2], replacement)
+v3 = modules.get("github.com/go-jose/go-jose/v3")
+if (not v3 or v3[0] != "v" + pins["GO_JOSE_V3_VERSION"] or
+        v3[1] != ["=>", "/usr/src/go-jose-" + pins["GO_JOSE_V3_VERSION"], "(devel)"]):
+    raise SystemExit("ERROR: Caddy go-jose v3 does not use the verified patched source")
+v4 = modules.get("github.com/go-jose/go-jose/v4")
+if not v4:
+    raise SystemExit("ERROR: Caddy go-jose v4 is missing")
+effective = v4[1][1:3] if v4[1] else ["github.com/go-jose/go-jose/v4", v4[0]]
+if effective != ["github.com/go-jose/go-jose/v4", "v" + pins["GO_JOSE_VERSION"]]:
+    raise SystemExit("ERROR: Caddy go-jose v4 does not match the patched version pin")
+print("[caddy-scan] PASS: pinned go-jose v4 and verified RSA/JWK backport for v3")
+PY
 
 grep -Fxq 'golang.org/x/crypto/ssh' "${temp_dir}/CADDY_GO_PACKAGES.txt" || {
     printf 'ERROR: Caddy package manifest does not contain the retained SSH implementation\n' >&2

@@ -50,6 +50,10 @@
       "module": "github.com/klauspost/compress",
       "version_arg": "MIHOMO_COMPRESS_VERSION",
       "max_version": "1.18.7"
+    },
+    {
+      "module": "github.com/go-jose/go-jose/v4",
+      "version_arg": "SING_BOX_GO_JOSE_VERSION"
     }
   ],
   "go_version_arg": "GO_VERSION"

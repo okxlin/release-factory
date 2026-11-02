@@ -8,7 +8,10 @@ import importlib.util
 import io
 import json
 import re
+import subprocess
+import sys
 import tarfile
+import tempfile
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -163,30 +166,83 @@ def refresh(lock, source, policy, client, fetch=download, resolve_image=image_re
     return result, resolved_source, changes
 
 
+def refresh_python_requirements(requirements, version):
+    # pip's target-version option does not change all environment markers.
+    require(sys.version_info[:2] == (3, 12) and sys.platform == "linux",
+            "resolve the Python lock on Linux with Python 3.12")
+    pins = {}
+    for line in requirements.splitlines():
+        match = re.fullmatch(r"([A-Za-z0-9_.-]+)==([A-Za-z0-9.!+]+) --hash=sha256:([a-f0-9]{64})", line)
+        require(match, "invalid hash-locked Python requirement")
+        name, current, _ = match.groups()
+        key = re.sub(r"[-_.]+", "-", name).lower()
+        require(key not in pins, "duplicate Python requirement")
+        pins[key] = (name, version if key == "pytest" else current)
+    require("pytest" in pins, "Python lock must include pytest")
+    with tempfile.TemporaryDirectory(prefix="dsh-python-lock-") as temporary:
+        report = Path(temporary) / "report.json"
+        # https://github.com/pypa/pip/blob/24.0/docs/html/reference/installation-report.md
+        # Resolve existing transitive pins without installing packages or running source builds.
+        subprocess.run([
+            sys.executable, "-m", "pip", "--isolated", "install", "--dry-run", "--ignore-installed",
+            "--only-binary=:all:", "--python-version", "3.12", "--index-url", "https://pypi.org/simple",
+            "--disable-pip-version-check", "--no-cache-dir", "--quiet", "--report", str(report),
+            *[f"{name}=={value}" for name, value in pins.values()],
+        ], check=True, capture_output=True, text=True, timeout=120)
+        resolved = json.loads(report.read_text(encoding="utf-8"))
+    require(resolved.get("version") == "1", "unsupported pip installation report version")
+    require(resolved["environment"]["python_version"] == "3.12"
+            and resolved["environment"]["sys_platform"] == "linux", "unexpected Python resolution environment")
+    hashes = {}
+    for item in resolved["install"]:
+        metadata = item["metadata"]
+        key = re.sub(r"[-_.]+", "-", metadata["name"]).lower()
+        require(key in pins and key not in hashes and metadata["version"] == pins[key][1],
+                "Python dependency set changed; review required")
+        artifact = item["download_info"]
+        url = urllib.parse.urlsplit(artifact["url"])
+        require(url.scheme == "https" and url.hostname == "files.pythonhosted.org"
+                and not url.username and not url.password and url.port in (None, 443)
+                and url.path.endswith("-py3-none-any.whl") and not item.get("is_yanked"),
+                "Python lock requires non-yanked, architecture-independent PyPI wheels")
+        digest = artifact["archive_info"]["hashes"].get("sha256", "")
+        require(re.fullmatch(r"[a-f0-9]{64}", digest), "Python wheel has no SHA-256 digest")
+        hashes[key] = digest
+    require(hashes.keys() == pins.keys(), "incomplete Python dependency resolution")
+    return "".join(f"{name}=={value} --hash=sha256:{hashes[key]}\n"
+                   for key, (name, value) in pins.items())
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image-dir", type=Path, default=HERE.parent / "image")
-    parser.add_argument("--apply", action="store_true", help="write the two generated pin files after all sources validate")
+    parser.add_argument("--apply", action="store_true", help="write the three generated input files after all sources validate")
     parser.add_argument("--summary", type=Path)
     parser.add_argument("--github-output", type=Path)
     args = parser.parse_args()
     root = args.image_dir.resolve(strict=True)
-    paths = [root / name for name in ["components.lock.json", "dsh-source.json"]]
+    paths = [root / name for name in ["components.lock.json", "dsh-source.json", "python-requirements.lock"]]
     for path in paths:
         require(path.is_file() and not path.is_symlink(), "pin file must be a regular file")
-    original = [json.loads(p.read_text()) for p in paths]
+    original = [json.loads(p.read_text(encoding="utf-8")) for p in paths[:2]]
     policy = checker.load_policy(HERE.parent / "configs/component-update-policy.json")
     lock, source, changes = refresh(*original, policy, checker.SourceClient())
+    requirements = paths[2].read_text(encoding="utf-8")
+    pytest = re.findall(r"^pytest==([^ ]+) --hash=sha256:[a-f0-9]{64}$", requirements, re.MULTILINE)
+    require(len(pytest) == 1, "Python lock must pin exactly one pytest version with a SHA-256 digest")
+    if pytest[0] != lock["build_args"]["PYTEST_VERSION"]:
+        requirements = refresh_python_requirements(requirements, lock["build_args"]["PYTEST_VERSION"])
+        changes.append("- python-requirements.lock: resolve pytest and verify its existing dependency closure")
     summary = "## DeepSeek Harness component update\n\n" + ("\n".join(changes) if changes else "All component pins are current.") + "\n"
     print(summary)
     if args.summary:
         args.summary.write_text(summary, encoding="utf-8")
     if args.apply and changes:
-        # All network, archive, license and platform checks finish before either write.
-        for path, value in zip(paths, [lock, source]):
+        # All network, archive, license and platform checks finish before any write.
+        for path, content in zip(paths, [json.dumps(lock, indent=2) + "\n", json.dumps(source, indent=2) + "\n", requirements]):
             temporary = path.with_suffix(path.suffix + ".update-tmp")
             with temporary.open("x", encoding="utf-8") as output:
-                output.write(json.dumps(value, indent=2) + "\n")
+                output.write(content)
             temporary.replace(path)
     if args.github_output:
         with args.github_output.open("a", encoding="utf-8") as output:

@@ -5,6 +5,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 dockerfile="${script_dir}/../image/Dockerfile"
 components_file="${script_dir}/../image/components.lock.json"
 source_file="${script_dir}/../image/dsh-source.json"
+python_requirements_file="${script_dir}/../image/python-requirements.lock"
 failures=0
 
 usage() {
@@ -17,6 +18,7 @@ Options:
   --dockerfile FILE  Dockerfile to validate
   --components-file FILE  Component lock file to validate
   --source-file FILE      Source release metadata to validate
+  --python-requirements-file FILE  Hash-locked Python requirements to validate
   -h, --help         Show this help
 EOF
 }
@@ -45,6 +47,11 @@ while [[ $# -gt 0 ]]; do
         --source-file)
             require_value "$1" "$#"
             source_file="$2"
+            shift 2
+            ;;
+        --python-requirements-file)
+            require_value "$1" "$#"
+            python_requirements_file="$2"
             shift 2
             ;;
         -h|--help)
@@ -133,6 +140,26 @@ component_inputs="$(python3 "${script_dir}/component-inputs.py" \
 while IFS='=' read -r arg_name arg_value; do
     arg_values["${arg_name}"]="${arg_value}"
 done <<< "${component_inputs}"
+if ! python3 - "${python_requirements_file}" "${arg_values[PYTEST_VERSION]:-}" <<'PYREQUIREMENTS'
+import re
+import sys
+from pathlib import Path
+
+versions = {}
+for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    match = re.fullmatch(r"([A-Za-z0-9_.-]+)==([A-Za-z0-9.!+]+) --hash=sha256:[a-f0-9]{64}", line)
+    if not match:
+        sys.exit("Python requirements must use exact versions and SHA-256 hashes")
+    name = re.sub(r"[-_.]+", "-", match[1]).lower()
+    if name in versions:
+        sys.exit("Python requirements lock contains a duplicate package")
+    versions[name] = match[2]
+if versions.get("pytest") != sys.argv[2]:
+    sys.exit(f"Python requirements lock must pin pytest=={sys.argv[2]}")
+PYREQUIREMENTS
+then
+    fail 'Python requirements lock is inconsistent with the component inputs'
+fi
 for line in "${docker_lines[@]}"; do
     if arg_remainder="$(instruction_remainder "${line}" ARG)" \
         && [[ "${arg_remainder}" =~ ^[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)(=([^[:space:]#]*))?[[:space:]]*(#.*)?$ ]]; then
@@ -381,6 +408,27 @@ require_literal \
 require_literal \
     "https://github.com/greenpau/go-authcrunch/archive/refs/tags/v\${GO_AUTHCRUNCH_VERSION}.tar.gz" \
     'the go-authcrunch source URL tied to GO_AUTHCRUNCH_VERSION'
+require_literal \
+    'https://github.com/go-jose/go-jose/archive/refs/tags/v${GO_JOSE_V3_VERSION}.tar.gz' \
+    'the go-jose v3 source URL tied to its version pin'
+require_literal \
+    '"${GO_JOSE_V3_SOURCE_SHA256}"' \
+    'the go-jose v3 source checksum verification'
+require_literal \
+    'git apply --check --unidiff-zero /tmp/go-jose-v3-rsa-bounds.patch' \
+    'the reviewed go-jose v3 backport check'
+require_literal \
+    "go test -count=1 -timeout=30s -run '^TestReleaseFactory' ." \
+    'the go-jose RSA/JWK behavior regressions before linking'
+require_literal \
+    'github.com/go-jose/go-jose/v3@v${GO_JOSE_V3_VERSION}=/usr/src/go-jose-${GO_JOSE_V3_VERSION}' \
+    'the patched go-jose v3 source replacement'
+require_literal \
+    'github.com/go-jose/go-jose/v4=github.com/go-jose/go-jose/v4@v${GO_JOSE_VERSION}' \
+    'the Caddy go-jose v4 security override'
+require_literal \
+    'grep -Eq "github\.com/go-jose/go-jose/v4[[:space:]]+v${GO_JOSE_VERSION}"' \
+    'the Caddy go-jose v4 module verification'
 require_literal \
     "\"\${CADDY_SOURCE_ARCHIVE_SHA256}\"" \
     'the Caddy source checksum verification'
