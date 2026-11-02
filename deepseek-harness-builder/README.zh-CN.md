@@ -37,6 +37,8 @@ pytest 更新会在 Linux、Python 3.12 环境中使用 PyPI wheel 重新生成 
 
 Go 跟随官方稳定版本端点 <https://go.dev/VERSION?m=text>，其 Docker Official Image index 固定 digest，用于可复现地选择 `amd64` 和 `arm64`。actionlint 使用该固定 Go 工具链从 checksum 固定的官方源码归档重新构建；其他独立 workstation 工具从各自官方 GitHub Release 下载，并按架构固定 SHA-256 checksum。
 
+源码运行时安装会把受影响的 undici 8.x 固定到 [8.12.2](https://github.com/nodejs/undici/releases/tag/v8.12.2)，Zod 4.x 固定到 [4.6.6](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)，保留原有主版本 API。源码 CI 检查正常的 CJS/ESM schema、超限集合在元素校验前被拒绝、共享 HTTP dispatcher，以及小写、大写和混合大小写摘要算法的响应完整性校验。
+
 workstation 的 Docker CLI、Buildx、Compose 从校验和固定的官方源码重新编译。构建和 smoke 会检查各二进制的 Go 包清单，拒绝 daemon 代码；旧 Docker 模块只允许贡献 `pkg/namesgenerator`。不再为守护进程专属的扫描结果维护本地 Buildx 源码补丁。具体漏洞、包版本、二进制路径、依据及到期日期记录在[安全策略](configs/trivy-policy.json)中。
 
 镜像会为 `linux/amd64` 和 `linux/arm64` 构建并测试。
