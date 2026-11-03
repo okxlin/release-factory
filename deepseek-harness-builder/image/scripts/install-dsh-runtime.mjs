@@ -7,7 +7,16 @@ import { pathToFileURL } from 'node:url'
 // Release families also contain opt-in plugins and test packages. Only promote
 // the CLI's runtime closure to npm install roots, keeping every selected local
 // tarball so unpublished releases and our source patches do not need npm copies.
-export function selectRuntimePackages(packages) {
+function allowsPlatform(value, rule) {
+  if (!rule) return true
+  const list = typeof rule === 'string' ? [rule] : rule
+  if (list.length === 1 && list[0] === 'any') return true
+  if (list.includes(`!${value}`)) return false
+  const allowed = list.filter(entry => !entry.startsWith('!'))
+  return allowed.length === 0 || allowed.includes(value)
+}
+
+export function selectRuntimePackages(packages, { platform = process.platform, arch = process.arch } = {}) {
   const byName = new Map()
   for (const entry of packages) {
     const { name, version } = entry.manifest
@@ -20,6 +29,10 @@ export function selectRuntimePackages(packages) {
 
   const root = '@deepseek-ai/dsh'
   if (!byName.has(root)) throw new Error(`missing packed CLI: ${root}`)
+  const supportsPlatform = manifest => allowsPlatform(platform, manifest.os) && allowsPlatform(arch, manifest.cpu)
+  if (!supportsPlatform(byName.get(root).manifest)) {
+    throw new Error(`unsupported packed CLI: ${root} for ${platform}/${arch}`)
+  }
   const selected = new Set()
   const pending = [root]
   while (pending.length > 0) {
@@ -27,15 +40,19 @@ export function selectRuntimePackages(packages) {
     if (selected.has(name)) continue
     selected.add(name)
     const manifest = byName.get(name).manifest
-    const dependencies = new Set([
-      ...Object.keys(manifest.dependencies ?? {}),
-      ...Object.keys(manifest.optionalDependencies ?? {}),
-    ])
+    const dependencies = new Map(Object.keys(manifest.dependencies ?? {}).map(name => [name, true]))
+    // npm lets optionalDependencies override entries in dependencies.
+    for (const dependency of Object.keys(manifest.optionalDependencies ?? {})) dependencies.set(dependency, false)
     for (const peer of Object.keys(manifest.peerDependencies ?? {})) {
-      if (manifest.peerDependenciesMeta?.[peer]?.optional !== true) dependencies.add(peer)
+      if (manifest.peerDependenciesMeta?.[peer]?.optional !== true) dependencies.set(peer, true)
     }
-    for (const dependency of dependencies) {
-      if (byName.has(dependency)) pending.push(dependency)
+    for (const [dependency, required] of dependencies) {
+      if (!byName.has(dependency)) continue
+      if (!supportsPlatform(byName.get(dependency).manifest)) {
+        if (required) throw new Error(`unsupported packed package: ${dependency} required by ${name} for ${platform}/${arch}`)
+        continue
+      }
+      pending.push(dependency)
     }
   }
   return [...selected].sort().map(name => byName.get(name))
