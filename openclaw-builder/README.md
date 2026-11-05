@@ -37,7 +37,7 @@ MCP OAuth 修复同步更新 SDK 1.31.0、client/core 2.2.0，并在实际依赖
 
 运行时依赖替换使用 `components.json` 中的官方 npm tarball 和 SHA-512，保留 pnpm 消费者链接。
 同样的依赖修补在 UI/A2UI 打包前执行，并使 A2UI 旧 bundle 缓存失效，避免内联旧代码。
-Zod 使用 4.6.6 完整包；原 3.25.76 目录的默认入口仍指向 v3，以保持 A2UI 和 JSON Schema 转换兼容。
+Zod 使用 [4.6.7 完整包](https://github.com/colinhacks/zod/releases/tag/v4.6.7)；原 3.25.76 目录的默认入口仍指向 v3，以保持 A2UI 和 JSON Schema 转换兼容。
 构建为 v3 的 `.max()`、`.length()`、`.size()` 补上元素解析前的超限拒绝，v4 使用上游修复；
 未声明上界的容器保持原有语义。来源、路径及本地兼容修改记录在镜像的
 `/usr/share/doc/release-factory/openclaw-runtime-deps.json`。

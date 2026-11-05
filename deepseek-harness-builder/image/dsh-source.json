@@ -1,8 +1,8 @@
 {
-  "version": "0.2.2-alpha.2",
+  "version": "0.2.2-rc.1",
   "repository": "deepseek-ai/deepseek-harness",
-  "ref": "dsh-v0.2.2-alpha.2",
-  "commit": "f3803c96974ad4a94195fb97e5c637e9c2a3afe3",
-  "archiveSha256": "798cab9a2acbc886a40ad9f7916e52f9380fbd4b51b41f685f3ed681f77e0ccb",
-  "archiveUrl": "https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/f3803c96974ad4a94195fb97e5c637e9c2a3afe3"
+  "ref": "dsh-v0.2.2-rc.1",
+  "commit": "66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db",
+  "archiveSha256": "0c57d6c420a5f31a8fda7adffde9c146ef229b0afa749698ba193adf6a42be5a",
+  "archiveUrl": "https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db"
 }

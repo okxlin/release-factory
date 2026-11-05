@@ -77,14 +77,14 @@ function packageDirectory(store, entry, name, message) {
   return directory;
 }
 
-function prepareZod(directory, compatibility) {
-  // 4.6.6 fixes bounded v4 containers; A2UI still consumes the v3 API.
+function prepareZod(directory, compatibility, version) {
+  // The reviewed v4 package fixes bounded containers; A2UI still consumes the v3 API.
   // Keep its entry contract and backport the same early size rejection to v3.
   // https://github.com/colinhacks/zod/pull/6652
   const packageFile = path.join(directory, 'package.json');
   const pkg = JSON.parse(fs.readFileSync(packageFile));
   assert.equal(pkg.name, 'zod');
-  assert.equal(pkg.version, '4.6.6');
+  assert.equal(pkg.version, version);
   assert.ok(pkg.exports && typeof pkg.exports === 'object');
   if (compatibility === 'v3') {
     pkg.exports['.'] = structuredClone(pkg.exports['./v3']);
@@ -92,7 +92,7 @@ function prepareZod(directory, compatibility) {
     pkg.module = './v3/index.js';
     pkg.types = './v3/index.d.cts';
   }
-  pkg['release-factory'] = {source: 'zod@4.6.6', root: compatibility ?? 'v4', patches: ['v3-bounded-container-gate']};
+  pkg['release-factory'] = {source: `zod@${version}`, root: compatibility ?? 'v4', patches: ['v3-bounded-container-gate']};
   fs.writeFileSync(packageFile, `${JSON.stringify(pkg, null, 2)}\n`);
 
   const patches = [
@@ -187,7 +187,7 @@ export async function patchRuntimePackages(root, pins) {
       await replaceVerifiedDependency(name, pin, targets, directory => {
         if (!['body-parser', 'qs'].includes(name)) verifyRuntimePackage(name, directory, pin.compatibility?.[from]);
       }, directory => {
-        if (name === 'zod') prepareZod(directory, pin.compatibility?.[from]);
+        if (name === 'zod') prepareZod(directory, pin.compatibility?.[from], pin.version);
       });
     }
     for (const target of directories) {

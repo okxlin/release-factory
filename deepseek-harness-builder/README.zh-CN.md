@@ -15,9 +15,11 @@
 
 留空版本的手动发布会从 DeepSeek Harness GitHub Releases 选择最高的非 draft `dsh-v*` 源码版本，校验对应 tag、commit 和源码归档 SHA-256 后构建，并发布匹配的 `<DSH_VERSION>` 和 `<DSH_VERSION>-workstation` 标签；因此上游源码版本可以在发布到 npm 之前进入镜像。手动显式传入 `dsh-v*` 可以选择指定的源码 release，传入已发布的 npm 版本或 dist-tag 时仍按请求的 npm selector 解析。`image/dsh-source.json` 保留可复现的本地/PR 基线，未来源码 release 不需要修改 Dockerfile。手动工作流也可覆盖发布标签。AppStore `latest` 通道使用浮动标签，编号 AppStore 版本使用匹配的版本标签。
 
-当前提交的源码基线是 [0.2.0-rc.2](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.2)。该基线包含 PTC 包名 `ptc-runtime` 和 workflow 执行器 `workflow-ptc`；使用旧名称的自定义 profile 需要更新。DeepSeek 现在默认使用 Messages 协议；手动配置的旧官方 API 根地址应删除或改为 `https://api.deepseek.com/anthropic`，自定义 provider URL 不受影响。
+当前提交的源码基线是 [0.2.2-rc.1](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-rc.1)。该基线包含 PTC 包名 `ptc-runtime` 和 workflow 执行器 `workflow-ptc`；使用旧名称的自定义 profile 需要更新。DeepSeek 现在默认使用 Messages 协议；手动配置的旧官方 API 根地址应删除或改为 `https://api.deepseek.com/anthropic`，自定义 provider URL 不受影响。
 
 构建版本、基础镜像 digest、源码和工具校验和集中保存在 [`image/components.lock.json`](image/components.lock.json)。Python 依赖使用独立的 [`image/python-requirements.lock`](image/python-requirements.lock)，旧版 npm 路径保留自己的 [package.json](image/package.json) 和 [pnpm-lock.yaml](image/pnpm-lock.yaml)。[`image/dsh-source.json`](image/dsh-source.json) 把源码归档绑定到确定的 commit 和 SHA-256。本地构建与 CI 都通过 `scripts/component-inputs.py` 解析参数，常规组件更新无需手改 Dockerfile 指令。源码构建当前仍由 npm 安装本地打包的 runtime tarball，依赖审计检查这棵实际安装树。
+
+Caddy 使用校验和固定的源码版本编译；[官方 builder 镜像](https://github.com/docker-library/official-images/blob/master/library/caddy) 按同一主次版本线选择并固定 digest，使新源码补丁版无需等待对应 Docker 标签发布。构建仍会检查产物的 Caddy 版本。
 
 pytest 更新会在 Linux、Python 3.12 环境中使用 PyPI wheel 重新生成 Python 依赖锁文件。解析器保留已固定的传递依赖，确认版本兼容后，再一并写入组件版本与 wheel 哈希。
 
@@ -37,7 +39,7 @@ pytest 更新会在 Linux、Python 3.12 环境中使用 PyPI wheel 重新生成 
 
 Go 跟随官方稳定版本端点 <https://go.dev/VERSION?m=text>，其 Docker Official Image index 固定 digest，用于可复现地选择 `amd64` 和 `arm64`。actionlint 使用该固定 Go 工具链从 checksum 固定的官方源码归档重新构建；其他独立 workstation 工具从各自官方 GitHub Release 下载，并按架构固定 SHA-256 checksum。
 
-源码运行时安装会把受影响的 undici 8.x 固定到 [8.12.2](https://github.com/nodejs/undici/releases/tag/v8.12.2)，Zod 4.x 固定到 [4.6.6](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)，保留原有主版本 API。源码 CI 检查正常的 CJS/ESM schema、超限集合在元素校验前被拒绝、共享 HTTP dispatcher，以及小写、大写和混合大小写摘要算法的响应完整性校验。
+源码运行时安装会把受影响的 undici 8.x 固定到 [8.12.3](https://github.com/nodejs/undici/releases/tag/v8.12.3)，Zod 4.x 固定到 [4.6.7](https://github.com/colinhacks/zod/releases/tag/v4.6.7)，保留原有主版本 API。源码 CI 检查正常的 CJS/ESM schema、超限集合在元素校验前被拒绝、共享 HTTP dispatcher，以及小写、大写和混合大小写摘要算法的响应完整性校验。
 
 workstation 的 Docker CLI、Buildx、Compose 从校验和固定的官方源码重新编译。构建和 smoke 会检查各二进制的 Go 包清单，拒绝 daemon 代码；旧 Docker 模块只允许贡献 `pkg/namesgenerator`。不再为守护进程专属的扫描结果维护本地 Buildx 源码补丁。具体漏洞、包版本、二进制路径、依据及到期日期记录在[安全策略](configs/trivy-policy.json)中。
 
