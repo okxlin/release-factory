@@ -48,6 +48,9 @@ jobs:
       - name: Run component-pin checker regression tests
         run: bash deepseek-harness-builder/scripts/test-component-pins.sh
 
+      - name: Verify reviewed Caddy CEL import layouts
+        run: python3 deepseek-harness-builder/scripts/test-caddy-cel-patches.py
+
       - name: Run component-update checker regression tests
         run: python3 deepseek-harness-builder/scripts/test-component-updates.py
 

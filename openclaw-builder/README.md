@@ -42,6 +42,9 @@ Zod 使用 [4.6.7 完整包](https://github.com/colinhacks/zod/releases/tag/v4.6
 未声明上界的容器保持原有语义。来源、路径及本地兼容修改记录在镜像的
 `/usr/share/doc/release-factory/openclaw-runtime-deps.json`。
 
+Joi 使用 18.3.1 修复多邮箱分隔符的二次方正则开销；构建验证默认及自定义分隔符的长空白输入：
+<https://github.com/hapijs/joi/security/advisories/GHSA-4528-x5fx-h6hg>。
+
 镜像扫描采用 `configs/trivy-policy.json`：可修复 CRITICAL 阻断，应用目录的 HIGH/CRITICAL 阻断，
 其余开发工具和系统包 HIGH 保留报告。测试和扫描通过后将同一个镜像推送到两个仓库，不再二次构建。
 两端暂存镜像均验证通过后才发布版本标签；两端版本标签均验证通过后才更新 `latest`。

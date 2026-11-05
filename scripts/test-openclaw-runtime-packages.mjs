@@ -7,7 +7,7 @@ import test from 'node:test';
 import {patchRuntimePackages, verifyRuntimePackage} from '../openclaw-builder/image/patch-vendored-deps.mjs';
 
 const pins = JSON.parse(fs.readFileSync(new URL('../openclaw-builder/configs/components.json', import.meta.url))).runtime_packages;
-const names = ['qs', 'body-parser', 'dompurify', 'undici'];
+const names = ['qs', 'body-parser', 'dompurify', 'undici', 'joi'];
 const run = (source, ...arguments_) => spawnSync(process.execPath, ['--input-type=module', '-e', source, ...arguments_],
   {encoding: 'utf8', timeout: 15000});
 
@@ -147,6 +147,33 @@ const undiciRegression = `
   } finally { await client.destroy(); await new Promise(resolve => server.close(resolve)); }
 `;
 
+// GHSA-4528-x5fx-h6hg: no delimiter must not cause quadratic whitespace splitting.
+const joiRegression = `
+  import assert from 'node:assert/strict';
+  import {createRequire} from 'node:module';
+  import {performance} from 'node:perf_hooks';
+  const Joi = createRequire(import.meta.url)(process.argv[1]);
+  const spaces = ' '.repeat(100000);
+  const mixed = 'joe@example.com' + spaces + 'joe@example.org';
+  for (const [options, value, invalids] of [
+    [{}, spaces, [spaces]], [{}, mixed, [mixed]],
+    [{separator: ';'}, spaces, [spaces]], [{separator: ';'}, mixed, [mixed]],
+    [{separator: ', '}, spaces, ['', '']], [{separator: ', '}, mixed, null],
+  ]) {
+    const schema = Joi.string().email({multiple: true, ...options});
+    const start = performance.now();
+    const {error} = schema.validate(value);
+    assert.ok(performance.now() - start < 1000, 'Joi multiple-email split exceeded one second');
+    if (invalids) {
+      assert.equal(error.details[0].type, 'string.email');
+      assert.deepEqual(error.details[0].context.invalids, invalids);
+      const bounded = schema.max(64).validate(value, {abortEarly: false});
+      assert.ok(bounded.error.details.some(item => item.type === 'string.email'));
+    } else assert.equal(error, undefined);
+  }
+  console.log('Joi linear multiple-email splitting and separators passed');
+`;
+
 function checkPassed(result, signal) {
   assert.equal(result.error, undefined, result.error?.message);
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -180,6 +207,9 @@ test('repairs real runtime packages and preserves pnpm consumers and security pr
     fs.mkdirSync(path.dirname(consumer), {recursive: true});
     fs.symlinkSync(path.relative(path.dirname(consumer), directories['body-parser']), consumer);
     links.set(consumer, fs.readlinkSync(consumer));
+    const joiConsumer = path.join(path.dirname(consumer), 'joi');
+    fs.symlinkSync(path.relative(path.dirname(joiConsumer), directories.joi), joiConsumer);
+    links.set(joiConsumer, fs.readlinkSync(joiConsumer));
 
     const oldBody = run(bodyParserRegression, directories['body-parser']);
     assert.equal(oldBody.status, 1, oldBody.stderr);
@@ -192,6 +222,13 @@ test('repairs real runtime packages and preserves pnpm consumers and security pr
     const oldUndici = run(undiciRegression, directories.undici);
     assert.equal(oldUndici.status, 1, oldUndici.stderr);
     assert.match(oldUndici.stderr, /Unhandled 'error' event|UND_ERR_RES_CONTENT_LENGTH_MISMATCH|ResponseContentLengthMismatchError/);
+    const oldJoi = spawnSync(process.execPath, ['--input-type=module', '-e', joiRegression, directories.joi],
+      {encoding: 'utf8', timeout: 5000});
+    if (oldJoi.error) assert.equal(oldJoi.error.code, 'ETIMEDOUT', oldJoi.error.message);
+    else {
+      assert.equal(oldJoi.status, 1, oldJoi.stderr);
+      assert.match(oldJoi.stderr, /Joi multiple-email split exceeded one second/);
+    }
 
     // A wrong integrity pin must leave the package tree unchanged.
     const badPins = structuredClone(pins);
@@ -212,6 +249,7 @@ test('repairs real runtime packages and preserves pnpm consumers and security pr
       checkPassed(run(domPurifyRegression, directories.dompurify, temporary, mode), /DOMPurify .* protection passed/);
     }
     checkPassed(run(undiciRegression, directories.undici), /without an orphan stream/);
+    checkPassed(run(joiRegression, joiConsumer), /Joi linear multiple-email splitting and separators passed/);
     await patchRuntimePackages(root, pins); // Already fixed packages require no further download.
 
     const packageFile = path.join(directories.dompurify, 'package.json');
