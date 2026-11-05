@@ -159,7 +159,10 @@ def refresh(lock, source, policy, client, fetch=download, resolve_image=image_re
                 pins[f"{name.upper()}_SHA256_{arch.upper()}"] = hashlib.sha256(fetch(location)).hexdigest()
     # Refresh rebuilt official base images even when their version tag is unchanged.
     for version_key, (image_key, image, suffix) in IMAGES.items():
-        reference = resolve_image(image, pins[version_key] + suffix)
+        # xcaddy builds the checksum-locked source; the official builder image
+        # can lag a new patch release. Keep its release line and immutable digest.
+        image_version = pins[version_key].rsplit(".", 1)[0] if image == "caddy" else pins[version_key]
+        reference = resolve_image(image, image_version + suffix)
         if reference != pins[image_key]:
             changes.append(f"- {image_key}: `{pins[image_key]}` → `{reference}`")
             pins[image_key] = reference

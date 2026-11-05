@@ -145,7 +145,8 @@ cleanup() {
 
     if (( status != 0 )) && docker container inspect "${container_name}" >/dev/null 2>&1; then
         printf '[smoke] container logs after failure:\n' >&2
-        docker logs "${container_name}" >&2 || true
+        docker logs "${container_name}" 2>&1 \
+            | sed -E 's/([?&]token=)[^[:space:]"<>]+/\1<REDACTED>/g' >&2 || true
     fi
 
     docker rm -f "${container_name}" >/dev/null 2>&1 || true
@@ -358,16 +359,22 @@ const base = baseRequire(basePath);
 for (const name of ['@deepseek-ai/dsh-session-log-deepseek', '@deepseek-ai/dsh-plugin-package-inventory-deepseek']) {
   if (!Object.hasOwn(base.dependencies ?? {}, name)) continue;
   const { apply, Config } = await import(pathToFileURL(baseRequire.resolve(name)));
+  const contributorRequire = createRequire(baseRequire.resolve(name));
+  const { Context } = await import(pathToFileURL(contributorRequire.resolve('@deepseek-ai/cordis')));
   for (const disabled of ['1', '0', 'false', '']) {
     process.env.DSH_TELEMETRY_DISABLED = disabled;
     let registrations = 0;
-    const context = {
-      baseUrl: pathToFileURL(basePath).href,
-      get() { return undefined; },
-      deepseekLlmApiExtensions: { register() { registrations++; } },
-    };
-    apply(context, Config({ enabled: true }));
-    assert.equal(registrations, disabled ? 0 : 1, `${name}: opt-out=${JSON.stringify(disabled)}`);
+    // Session-log 0.2.2 mounts a Cordis service before registering its request field.
+    const context = new Context();
+    context.baseUrl = pathToFileURL(basePath).href;
+    context.provide('deepseekLlmApiExtensions', { register() { registrations++; } });
+    context.provide('sessions', { get() { return undefined; } });
+    try {
+      await apply(context, Config({ enabled: true }));
+      assert.equal(registrations, disabled ? 0 : 1, `${name}: opt-out=${JSON.stringify(disabled)}`);
+    } finally {
+      await context.fiber.dispose();
+    }
   }
 }
 process.stdout.write('[smoke] PASS: telemetry opt-out blocks session-log and package-inventory upload registration\n');

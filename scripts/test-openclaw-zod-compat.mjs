@@ -58,10 +58,11 @@ const consumerProbe = `
     return object;
   }
   const v3 = await load('zod');
-  const v4 = await load('zod4');
   const object = await check(v3, 'v3');
-  await check(v4, 'v4');
-  for (const name of ['zod', 'zod4']) {
+  for (const name of ['zod4', 'zod46', 'zodCurrent']) {
+    await check(await load(name), 'v4');
+  }
+  for (const name of ['zod', 'zod4', 'zod46']) {
     await check(await load(name + '/v3'), 'v3');
     await check(await load(name + '/v4'), 'v4');
   }
@@ -83,6 +84,7 @@ test('repairs real Zod packages while retaining v3 and v4 pnpm consumers', {time
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-zod-test-'));
   try {
     const dependencies = {zod: '3.25.76', zod4: 'npm:zod@4.6.5',
+      zod46: 'npm:zod@4.6.6', zodCurrent: 'npm:zod@4.6.7',
       '@a2ui/web_core': '0.12.0', 'zod-to-json-schema': '3.25.2'};
     fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({private: true, dependencies}));
     execFileSync('npm', ['install', '--prefix', temporary, '--ignore-scripts', '--package-lock=false',
@@ -90,7 +92,8 @@ test('repairs real Zod packages while retaining v3 and v4 pnpm consumers', {time
     const root = path.join(temporary, 'node_modules');
     const directories = {};
     const links = [];
-    for (const [name, version] of [['zod', '3.25.76'], ['zod4', '4.6.5']]) {
+    for (const [name, version] of [['zod', '3.25.76'], ['zod4', '4.6.5'],
+      ['zod46', '4.6.6'], ['zodCurrent', '4.6.7']]) {
       const original = path.join(root, name);
       const directory = path.join(root, '.pnpm', `zod@${version}`, 'node_modules/zod');
       fs.mkdirSync(path.dirname(directory), {recursive: true});
@@ -110,8 +113,12 @@ test('repairs real Zod packages while retaining v3 and v4 pnpm consumers', {time
       links.push([original, fs.readlinkSync(original)], [link, fs.readlinkSync(link)]);
     }
     for (const [version, directory] of Object.entries(directories)) {
-      assert.throws(() => verifyZod(directory, version.startsWith('3.') ? 'v3' : 'v4'),
-        /bounded zod container parsed every oversized element/);
+      if (['3.25.76', '4.6.5'].includes(version)) {
+        assert.throws(() => verifyZod(directory, version.startsWith('3.') ? 'v3' : 'v4'),
+          /bounded zod container parsed every oversized element/);
+      } else {
+        verifyZod(directory);
+      }
     }
     await assert.rejects(patchRuntimePackages(root, {zod: {...pin, sha512: '0'.repeat(128)}}),
       {code: 'ERR_ASSERTION'});

@@ -77,14 +77,14 @@ function packageDirectory(store, entry, name, message) {
   return directory;
 }
 
-function prepareZod(directory, compatibility) {
-  // 4.6.6 fixes bounded v4 containers; A2UI still consumes the v3 API.
+function prepareZod(directory, compatibility, version) {
+  // The reviewed v4 package fixes bounded containers; A2UI still consumes the v3 API.
   // Keep its entry contract and backport the same early size rejection to v3.
   // https://github.com/colinhacks/zod/pull/6652
   const packageFile = path.join(directory, 'package.json');
   const pkg = JSON.parse(fs.readFileSync(packageFile));
   assert.equal(pkg.name, 'zod');
-  assert.equal(pkg.version, '4.6.6');
+  assert.equal(pkg.version, version);
   assert.ok(pkg.exports && typeof pkg.exports === 'object');
   if (compatibility === 'v3') {
     pkg.exports['.'] = structuredClone(pkg.exports['./v3']);
@@ -92,7 +92,7 @@ function prepareZod(directory, compatibility) {
     pkg.module = './v3/index.js';
     pkg.types = './v3/index.d.cts';
   }
-  pkg['release-factory'] = {source: 'zod@4.6.6', root: compatibility ?? 'v4', patches: ['v3-bounded-container-gate']};
+  pkg['release-factory'] = {source: `zod@${version}`, root: compatibility ?? 'v4', patches: ['v3-bounded-container-gate']};
   fs.writeFileSync(packageFile, `${JSON.stringify(pkg, null, 2)}\n`);
 
   const patches = [
@@ -134,6 +134,30 @@ export function verifyZod(directory, compatibility = 'v4') {
   console.log(`Verified CVE-2023-54404 bounded container guard (${compatibility}): ${directory}`);
 }
 
+export function verifyJoi(directory) {
+  // https://github.com/hapijs/joi/security/advisories/GHSA-4528-x5fx-h6hg
+  execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import {createRequire} from 'node:module';
+    import path from 'node:path';
+    import {performance} from 'node:perf_hooks';
+    const joi = createRequire(path.join(process.argv[1], 'package.json'))(process.argv[1]);
+    const object = joi.object({name: joi.string().required()});
+    assert.deepEqual(object.validate({name: 'openclaw'}).value, {name: 'openclaw'});
+    assert.ok(object.validate({name: 42}).error);
+    for (const options of [{}, {separator: ';'}]) {
+      const email = joi.string().email({multiple: true, ...options});
+      const separator = options.separator || ',';
+      assert.equal(email.validate('joe@example.com' + separator + ' jane@example.org').error, undefined);
+      const start = performance.now();
+      const result = email.max(64).validate(' '.repeat(100000), {abortEarly: false});
+      assert.ok(result.error.details.some(item => item.type === 'string.email'));
+      assert.ok(performance.now() - start < 1000, 'Joi multiple-email split exceeded one second');
+    }
+  `, directory], {timeout: 10000, stdio: 'pipe'});
+  console.log(`Verified CVE-2026-118772 linear multiple-email splitting: ${directory}`);
+}
+
 export function verifyRuntimePackage(name, directory, compatibility) {
   const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
   assert.equal(pkg.name, name);
@@ -156,6 +180,8 @@ export function verifyRuntimePackage(name, directory, compatibility) {
     assert.equal(typeof undici.request, 'function');
   } else if (name === 'zod') {
     verifyZod(directory, compatibility);
+  } else if (name === 'joi') {
+    verifyJoi(directory);
   } else {
     assert.fail(`unreviewed runtime dependency: ${name}`);
   }
@@ -166,7 +192,7 @@ export async function patchRuntimePackages(root, pins) {
   const store = path.join(root, '.pnpm');
   const evidence = [];
   for (const [name, pin] of Object.entries(pins)) {
-    assert.ok(['qs', 'body-parser', 'dompurify', 'undici', 'zod'].includes(name), `unreviewed runtime dependency: ${name}`);
+    assert.ok(['qs', 'body-parser', 'dompurify', 'undici', 'zod', 'joi'].includes(name), `unreviewed runtime dependency: ${name}`);
     assertDependencyPin(name, pin);
     const fromVersions = pinFromVersions(pin);
     const directories = [];
@@ -185,9 +211,10 @@ export async function patchRuntimePackages(root, pins) {
       const targets = outdated.get(from);
       if (!targets.length) continue;
       await replaceVerifiedDependency(name, pin, targets, directory => {
-        if (!['body-parser', 'qs'].includes(name)) verifyRuntimePackage(name, directory, pin.compatibility?.[from]);
+        // These packages need their existing sibling dependencies in the pnpm store.
+        if (!['body-parser', 'qs', 'joi'].includes(name)) verifyRuntimePackage(name, directory, pin.compatibility?.[from]);
       }, directory => {
-        if (name === 'zod') prepareZod(directory, pin.compatibility?.[from]);
+        if (name === 'zod') prepareZod(directory, pin.compatibility?.[from], pin.version);
       });
     }
     for (const target of directories) {

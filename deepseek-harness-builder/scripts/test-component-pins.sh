@@ -41,6 +41,27 @@ cp -- "${source_dockerfile}" "${baseline}"
 bash "${checker}" --dockerfile "${baseline}"
 printf '[component-pins-test] PASS: baseline Dockerfile\n'
 
+caddy_release_line_components="${tmp_dir}/caddy-release-line.components.json"
+caddy_wrong_line_components="${tmp_dir}/caddy-wrong-line.components.json"
+python3 - "${source_components}" "${caddy_release_line_components}" "${caddy_wrong_line_components}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+components = json.loads(Path(sys.argv[1]).read_text())
+pins = components["build_args"]
+digest = pins["CADDY_IMAGE"].split("@sha256:")[1]
+release_line = pins["CADDY_VERSION"].rsplit(".", 1)[0]
+pins["CADDY_IMAGE"] = f"caddy:{release_line}-builder-alpine@sha256:{digest}"
+Path(sys.argv[2]).write_text(json.dumps(components))
+pins["CADDY_IMAGE"] = f"caddy:99.99-builder-alpine@sha256:{digest}"
+Path(sys.argv[3]).write_text(json.dumps(components))
+PY
+bash "${checker}" --dockerfile "${baseline}" --components-file "${caddy_release_line_components}"
+printf '[component-pins-test] PASS: digest-pinned Caddy release-line builder\n'
+expect_failure 'caddy-wrong-release-line' "${baseline}" \
+    'Caddy base-image tag 99.99-builder-alpine does not match ARG CADDY_VERSION' "${caddy_wrong_line_components}"
+
 missing_x_mod_pin="${tmp_dir}/missing-x-mod-pin.Dockerfile"
 cp -- "${source_dockerfile}" "${missing_x_mod_pin}"
 sed -i '/^ARG X_MOD_VERSION$/d' "${missing_x_mod_pin}"

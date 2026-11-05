@@ -58,11 +58,17 @@
       "url": "https://registry.npmjs.org/undici/-/undici-8.12.2.tgz",
       "sha512": "5edb8359576a4cbaf7340c66da5cbdfe153a914b093a01a1d51012ccc05bb30e9a58239a4331dd5be4100df7444637c9d95e6f2f9a513dae117ad3bd51f8af0e"
     },
+    "joi": {
+      "from": ["18.2.9"],
+      "version": "18.3.1",
+      "url": "https://registry.npmjs.org/joi/-/joi-18.3.1.tgz",
+      "sha512": "995f4ce0b961e2f6b7353f74a7b281b5086866a8ecf312d7ec4598138cbf186df22c5e9111b2011074946f4517d495d186ddb0e6d88b4acbe6a587396a48aa23"
+    },
     "zod": {
-      "from": ["3.25.76", "4.3.6", "4.6.5"],
-      "version": "4.6.6",
-      "url": "https://registry.npmjs.org/zod/-/zod-4.6.6.tgz",
-      "sha512": "e149b34141797f1bdf7181e56e30667a353ec3e85b0e7585c78692f24071ee73c11dc3b64aa3dba401bcb276dd83e5ec7b8a5179f47df2182316020c088fd484",
+      "from": ["3.25.76", "4.3.6", "4.6.5", "4.6.6"],
+      "version": "4.6.7",
+      "url": "https://registry.npmjs.org/zod/-/zod-4.6.7.tgz",
+      "sha512": "83c5b60f6914e9af2e9ed734e777d7d6e5412b333bcaa0315bfdf3c24f37fba472176f9228eb95f9cd30043854c335753da19aa66647fab99c5333dffb7086c2",
       "compatibility": {"3.25.76": "v3"}
     }
   },

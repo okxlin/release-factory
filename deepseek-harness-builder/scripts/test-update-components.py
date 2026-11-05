@@ -66,6 +66,26 @@ class RefreshTests(unittest.TestCase):
         self.assertEqual(len(changes), 4)
         self.assertNotEqual(lock, self.lock)
 
+    def test_caddy_source_release_can_precede_its_versioned_builder_image(self):
+        major, minor, patch_version = self.lock["build_args"]["CADDY_VERSION"].split(".")
+        version = f"{major}.{minor}.{int(patch_version) + 1}"
+        builder_tag = f"{major}.{minor}-builder-alpine"
+        self.lock["build_args"]["CADDY_LICENSE_SHA256"] = hashlib.sha256(b"license").hexdigest()
+
+        def fetch(url):
+            return b"license" if url.endswith("/LICENSE") else b"archive"
+
+        def image(name, tag):
+            if name == "caddy":
+                self.assertEqual(tag, builder_tag, "the new patch release has no versioned builder yet")
+                return f"caddy:{tag}@sha256:" + "a" * 64
+            return self.image(name, tag)
+
+        lock, _, _ = self.refresh(["CADDY_VERSION"], version, fetch, image)
+        self.assertEqual(lock["build_args"]["CADDY_VERSION"], version)
+        self.assertEqual(lock["build_args"]["CADDY_SOURCE_ARCHIVE_SHA256"], hashlib.sha256(b"archive").hexdigest())
+        self.assertEqual(lock["build_args"]["CADDY_IMAGE"], f"caddy:{builder_tag}@sha256:" + "a" * 64)
+
     def test_source_archive_is_inspected_without_extraction(self):
         client = Mock()
         client.get_json.return_value = {"sha": "a" * 40}

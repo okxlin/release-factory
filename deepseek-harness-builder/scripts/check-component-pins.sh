@@ -303,7 +303,9 @@ for line_number in "${!docker_lines[@]}"; do
 
             case "${image_name}" in
                 caddy)
-                    [[ "${image_tag}" == "${arg_values[CADDY_VERSION]:-}-builder-alpine" ]] \
+                    caddy_version="${arg_values[CADDY_VERSION]:-}"
+                    [[ "${image_tag}" == "${caddy_version}-builder-alpine" \
+                        || "${image_tag}" == "${caddy_version%.*}-builder-alpine" ]] \
                         || fail "Caddy base-image tag ${image_tag} does not match ARG CADDY_VERSION"
                     ;;
                 python)
