@@ -177,11 +177,15 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-ini
     && rm /tmp/rustup-init.sh
 
 # ── Bun ──
-RUN if [ "${BUN_VERSION}" = "latest" ]; then \
-        curl -fsSL https://bun.sh/install | bash; \
-    else \
-        curl -fsSL https://bun.sh/install | bash -s -- "bun-v${BUN_VERSION#v}"; \
-    fi \
+RUN curl --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 120 \
+        -fsSL https://bun.sh/install -o /tmp/release-factory-bun-install.sh \
+    && if [ "${BUN_VERSION}" = "latest" ]; then set --; else set -- "bun-v${BUN_VERSION#v}"; fi \
+    && for attempt in 1 2 3; do \
+        if bash /tmp/release-factory-bun-install.sh "$@"; then break; fi; \
+        if [ "${attempt}" -eq 3 ]; then exit 1; fi; \
+        sleep "$((attempt * 5))"; \
+       done \
+    && rm /tmp/release-factory-bun-install.sh \
     && mv /root/.bun /opt/bun
 
 # ── Deno ──
@@ -215,7 +219,8 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
         arm64) yq_arch="arm64" ;; \
         *) echo "unsupported architecture for yq install: ${dpkg_arch}" >&2; exit 1 ;; \
     esac \
-    && curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${yq_arch}" -o /usr/local/bin/yq \
+    && curl --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 120 \
+        -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${yq_arch}" -o /usr/local/bin/yq \
     && chmod +x /usr/local/bin/yq
 
 # ── actionlint ──
@@ -227,8 +232,10 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
     esac \
     && actionlint_version="${ACTIONLINT_VERSION#v}" \
     && actionlint_asset="actionlint_${actionlint_version}_linux_${actionlint_arch}.tar.gz" \
-    && curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/${actionlint_asset}" -o "/tmp/${actionlint_asset}" \
-    && curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/actionlint_${actionlint_version}_checksums.txt" -o /tmp/actionlint_checksums.txt \
+    && curl --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 120 \
+        -fsSL "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/${actionlint_asset}" -o "/tmp/${actionlint_asset}" \
+    && curl --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 120 \
+        -fsSL "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/actionlint_${actionlint_version}_checksums.txt" -o /tmp/actionlint_checksums.txt \
     && grep "  ${actionlint_asset}$" /tmp/actionlint_checksums.txt > /tmp/actionlint.sha256 \
     && (cd /tmp && sha256sum -c /tmp/actionlint.sha256) \
     && tar -xzf "/tmp/${actionlint_asset}" -C /tmp actionlint \

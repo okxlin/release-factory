@@ -429,6 +429,20 @@ require_literal \
     'github.com/go-jose/go-jose/v4=github.com/go-jose/go-jose/v4@v${GO_JOSE_VERSION}' \
     'the Caddy go-jose v4 security override'
 require_literal \
+    'github.com/crewjam/saml=github.com/crewjam/saml@v${SAML_VERSION}' \
+    'the Caddy SAML security override'
+require_literal \
+    "-count=1 -timeout=30s -run '^TestReleaseFactorySAML' ." \
+    'the real SAML assertion regressions before accepting the image'
+for saml_test in TestReleaseFactorySAMLRequiredElements TestReleaseFactorySAMLNameIDNamespace; do
+    require_literal \
+        "grep -Eq '^--- PASS: ${saml_test} ' /tmp/saml-security-tests.log" \
+        "the executed ${saml_test} success assertion"
+done
+require_literal \
+    'sha256sum saml-assertions_test.go >> /licenses/SAML_SECURITY_CHECK.txt' \
+    'the SAML assertion regression receipt'
+require_literal \
     'grep -Eq "github\.com/go-jose/go-jose/v4[[:space:]]+v${GO_JOSE_VERSION}"' \
     'the Caddy go-jose v4 module verification'
 require_literal \

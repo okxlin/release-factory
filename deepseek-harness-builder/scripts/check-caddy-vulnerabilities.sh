@@ -6,6 +6,8 @@ IMAGE="${CADDY_SCAN_IMAGE:-deepseek-harness:ci-amd64}"
 EXPECTED_STRIPPED_BINARY_FINDING="GO-2026-5932"
 EXPECTED_PATCHED_GRPC_FINDING="GO-2026-6443"
 EXPECTED_PATCHED_GRPC_VERSION="v1.84.0"
+EXPECTED_FIXED_SAML_FINDING="GO-2026-6909"
+EXPECTED_FIXED_SAML_VERSION="v0.5.2"
 
 usage() {
     cat <<'EOF'
@@ -17,6 +19,8 @@ production build is stripped, so govulncheck can fall back to module-level
 findings. The only accepted fallback is GO-2026-5932 when the build-produced Go
 package manifest proves that no openpgp package is linked. GO-2026-6443 is also
 accepted only for patched gRPC v1.84.0 when the manifest excludes its xDS server.
+GO-2026-6909 is accepted only for reviewed SAML v0.5.2 with a build-produced
+assertion regression receipt; the advisory has not recorded the fixed version.
 EOF
 }
 
@@ -60,7 +64,7 @@ cleanup() {
     if [[ -n "${container_id}" ]]; then
         docker rm -f "${container_id}" >/dev/null 2>&1 || true
     fi
-    for temp_file in caddy CADDY_GO_PACKAGES.txt GO_JOSE_V3_PATCH.txt; do
+    for temp_file in caddy CADDY_GO_PACKAGES.txt GO_JOSE_V3_PATCH.txt SAML_SECURITY_CHECK.txt; do
         if [[ -f "${temp_dir}/${temp_file}" ]]; then
             unlink "${temp_dir}/${temp_file}"
         fi
@@ -78,6 +82,9 @@ docker cp \
 docker cp \
     "${container_id}:/usr/share/licenses/deepseek-harness-caddy/GO_JOSE_V3_PATCH.txt" \
     "${temp_dir}/GO_JOSE_V3_PATCH.txt" >/dev/null
+docker cp \
+    "${container_id}:/usr/share/licenses/deepseek-harness-caddy/SAML_SECURITY_CHECK.txt" \
+    "${temp_dir}/SAML_SECURITY_CHECK.txt" >/dev/null
 docker rm "${container_id}" >/dev/null
 container_id=""
 
@@ -85,14 +92,17 @@ container_id=""
 # Require the exact source/patch receipt and the replacement in the binary.
 python3 - "${script_dir}/../image/components.lock.json" \
     "${script_dir}/../image/patches/go-jose-v3-rsa-bounds.patch" \
-    "${temp_dir}/GO_JOSE_V3_PATCH.txt" "${temp_dir}/caddy" <<'PY'
+    "${temp_dir}/GO_JOSE_V3_PATCH.txt" "${temp_dir}/caddy" \
+    "${script_dir}/../image/tests/saml-assertions_test.go" \
+    "${temp_dir}/SAML_SECURITY_CHECK.txt" "${EXPECTED_FIXED_SAML_VERSION}" <<'PY'
 import hashlib
 import json
 from pathlib import Path
 import subprocess
 import sys
 
-lock_file, patch_file, receipt_file, binary = map(Path, sys.argv[1:])
+lock_file, patch_file, receipt_file, binary, saml_test, saml_receipt = map(Path, sys.argv[1:7])
+reviewed_saml_version = sys.argv[7]
 pins = json.loads(lock_file.read_text())["build_args"]
 receipt = receipt_file.read_text().splitlines()
 expected = [
@@ -121,6 +131,18 @@ effective = v4[1][1:3] if v4[1] else ["github.com/go-jose/go-jose/v4", v4[0]]
 if effective != ["github.com/go-jose/go-jose/v4", "v" + pins["GO_JOSE_VERSION"]]:
     raise SystemExit("ERROR: Caddy go-jose v4 does not match the patched version pin")
 print("[caddy-scan] PASS: pinned go-jose v4 and verified RSA/JWK backport for v3")
+
+saml = modules.get("github.com/crewjam/saml")
+effective = saml[1][1:3] if saml and saml[1] else ["github.com/crewjam/saml", saml[0] if saml else ""]
+if effective != ["github.com/crewjam/saml", reviewed_saml_version] or "v" + pins["SAML_VERSION"] != reviewed_saml_version:
+    raise SystemExit("ERROR: Caddy SAML does not match the reviewed fixed version")
+expected_saml_receipt = [
+    "github.com/crewjam/saml " + reviewed_saml_version,
+    hashlib.sha256(saml_test.read_bytes()).hexdigest() + "  saml-assertions_test.go",
+]
+if saml_receipt.read_text().splitlines() != expected_saml_receipt:
+    raise SystemExit("ERROR: Caddy SAML assertion regression receipt does not match the reviewed inputs")
+print("[caddy-scan] PASS: reviewed SAML " + reviewed_saml_version + " and bound assertion regression receipt")
 PY
 
 grep -Fxq 'golang.org/x/crypto/ssh' "${temp_dir}/CADDY_GO_PACKAGES.txt" || {
@@ -166,13 +188,18 @@ fi
 
 for finding_id in "${finding_ids[@]}"; do
     case "${finding_id}" in
-        "${EXPECTED_STRIPPED_BINARY_FINDING}"|"${EXPECTED_PATCHED_GRPC_FINDING}") ;;
+        "${EXPECTED_STRIPPED_BINARY_FINDING}"|"${EXPECTED_PATCHED_GRPC_FINDING}"|"${EXPECTED_FIXED_SAML_FINDING}") ;;
         *)
             printf 'ERROR: govulncheck reported an unaccepted Caddy finding: %s\n' "${finding_id}" >&2
             exit 1
             ;;
     esac
 done
+
+if printf '%s\n' "${finding_ids[@]}" | grep -Fxq "${EXPECTED_FIXED_SAML_FINDING}"; then
+    printf '[caddy-scan] PASS: %s is fixed in reviewed SAML %s; the advisory fixed range is stale\n' \
+        "${EXPECTED_FIXED_SAML_FINDING}" "${EXPECTED_FIXED_SAML_VERSION}"
+fi
 
 if printf '%s\n' "${finding_ids[@]}" | grep -Fxq "${EXPECTED_PATCHED_GRPC_FINDING}"; then
     grpc_version="$(go version -m "${temp_dir}/caddy" \

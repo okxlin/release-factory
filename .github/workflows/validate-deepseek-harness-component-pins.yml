@@ -51,6 +51,9 @@ jobs:
       - name: Verify reviewed Caddy CEL import layouts
         run: python3 deepseek-harness-builder/scripts/test-caddy-cel-patches.py
 
+      - name: Verify Caddy scanner findings and regression receipts
+        run: python3 deepseek-harness-builder/scripts/test-caddy-vulnerabilities.py
+
       - name: Run component-update checker regression tests
         run: python3 deepseek-harness-builder/scripts/test-component-updates.py
 
