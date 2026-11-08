@@ -177,11 +177,15 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-ini
     && rm /tmp/rustup-init.sh
 
 # ── Bun ──
-RUN if [ "${BUN_VERSION}" = "latest" ]; then \
-        curl -fsSL https://bun.sh/install | bash; \
-    else \
-        curl -fsSL https://bun.sh/install | bash -s -- "bun-v${BUN_VERSION#v}"; \
-    fi \
+RUN curl --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 120 \
+        -fsSL https://bun.sh/install -o /tmp/release-factory-bun-install.sh \
+    && if [ "${BUN_VERSION}" = "latest" ]; then set --; else set -- "bun-v${BUN_VERSION#v}"; fi \
+    && for attempt in 1 2 3; do \
+        if bash /tmp/release-factory-bun-install.sh "$@"; then break; fi; \
+        if [ "${attempt}" -eq 3 ]; then exit 1; fi; \
+        sleep "$((attempt * 5))"; \
+       done \
+    && rm /tmp/release-factory-bun-install.sh \
     && mv /root/.bun /opt/bun
 
 # ── Deno ──

@@ -115,11 +115,24 @@ permits `GO-2026-5932` only when OpenPGP packages are absent and permits
 `GO-2026-6443` only for module version `v1.84.0` with that xDS server package
 absent. Both are accepted only as stripped-binary module-level findings after
 `go tool nm` confirms symbols are unavailable. A clean scan is also accepted;
-every other result fails. References:
+unknown findings and unexpected scan results fail. References:
 
 - <https://pkg.go.dev/vuln/GO-2026-6443>
 - <https://github.com/grpc/grpc-go/security/advisories/GHSA-2v4p-qf9q-27wj>
 - <https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck#hdr-Limitations>
+
+SAML is fixed to reviewed `v0.5.2` for `GO-2026-6909`. The upstream release
+rejects missing Subject, SubjectConfirmationData and Conditions, and binds
+NameID to the SAML assertion namespace. The build runs regression tests against
+the module selected by Caddy, retains its BSD license, and records the version
+and test-file hash in `SAML_SECURITY_CHECK.txt`. The image gate requires that
+exact version in the binary and the matching receipt before accepting this
+finding: the Go advisory currently omits the fixed version and reports all
+releases as affected. Other SAML versions, changed receipts and unknown findings
+fail. This override remains a manual security pin pending advisory correction.
+
+- <https://github.com/crewjam/saml/compare/v0.5.1...v0.5.2>
+- <https://github.com/golang/vulndb/issues/6909>
 
 Source-mode govulncheck also exposes a version-range discrepancy in the Go
 database for historical caddy-security advisories. The Go records for

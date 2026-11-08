@@ -23,6 +23,7 @@ on:
       - '.github/workflows/build-codex-claude-workstation.yml'
       - '.github/workflows/release-workstations.yml'
       - 'scripts/smoke-codex-workstation.py'
+      - 'scripts/test-bun-install.py'
       - 'scripts/trivy-image-gate.sh'
       - 'scripts/evaluate-trivy-policy.py'
       - 'scripts/test-evaluate-trivy-policy.py'

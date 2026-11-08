@@ -241,6 +241,21 @@ cp -- "${source_dockerfile}" "${missing_x_text_verification}"
 sed -i '/grep -Eq.*x\/text.*X_TEXT_VERSION/d' "${missing_x_text_verification}"
 expect_failure 'missing-x-text-verification' "${missing_x_text_verification}" 'the Caddy x/text module verification'
 
+missing_saml_override="${tmp_dir}/missing-saml-override.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_saml_override}"
+sed -i '/--replace.*github.com\/crewjam\/saml/d' "${missing_saml_override}"
+expect_failure 'missing-saml-override' "${missing_saml_override}" 'the Caddy SAML security override'
+
+missing_saml_regression="${tmp_dir}/missing-saml-regression.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_saml_regression}"
+sed -i '/-count=1.*TestReleaseFactorySAML/d' "${missing_saml_regression}"
+expect_failure 'missing-saml-regression' "${missing_saml_regression}" 'the real SAML assertion regressions'
+
+missing_saml_receipt="${tmp_dir}/missing-saml-receipt.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_saml_receipt}"
+sed -i '/sha256sum saml-assertions_test.go/d' "${missing_saml_receipt}"
+expect_failure 'missing-saml-receipt' "${missing_saml_receipt}" 'the SAML assertion regression receipt'
+
 for version in 0.1.5 0.1.5-rc.2; do
     metadata="${tmp_dir}/source-${version}.json"
     python3 - "${source_metadata}" "${metadata}" "${version}" <<'PYSOURCE'
