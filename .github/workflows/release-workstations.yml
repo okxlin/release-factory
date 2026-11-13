@@ -82,6 +82,7 @@ jobs:
         env:
           VARIANT: ${{ inputs.variant }}
         run: |
+          python3 scripts/test-bun-install.py
           python3 scripts/test-registry-image.py
           python3 scripts/test-publish-tested-image.py
           python3 scripts/test-evaluate-trivy-policy.py

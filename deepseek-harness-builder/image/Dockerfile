@@ -25,6 +25,7 @@ ARG GO_JOSE_V3_VERSION
 ARG GO_JOSE_V3_SOURCE_SHA256
 ARG GO_JOSE_V3_LICENSE_SHA256
 ARG GO_JOSE_VERSION
+ARG SAML_VERSION
 ARG GRPC_VERSION
 ARG KLAUSPOST_COMPRESS_VERSION
 ARG X_CRYPTO_VERSION
@@ -36,6 +37,7 @@ COPY patches/caddy-cel-go-v0.30.patch /tmp/caddy-cel-go-v0.30.patch
 COPY patches/caddy-cel-go-module-relocation.patch /tmp/caddy-cel-go-module-relocation.patch
 COPY patches/go-authcrunch-disable-openpgp.patch /tmp/go-authcrunch-disable-openpgp.patch
 COPY patches/go-jose-v3-rsa-bounds.patch /tmp/go-jose-v3-rsa-bounds.patch
+COPY tests/saml-assertions_test.go /tmp/saml-assertions_test.go
 
 # Apply the reviewed CEL fixes to older Caddy sources, or verify that newer
 # sources already contain those exact changes. Unknown source shapes fail.
@@ -103,6 +105,7 @@ RUN xcaddy build "v${CADDY_VERSION}" \
         --replace "github.com/greenpau/go-authcrunch@v${GO_AUTHCRUNCH_VERSION}=/usr/src/go-authcrunch-${GO_AUTHCRUNCH_VERSION}" \
         --replace "github.com/go-jose/go-jose/v3@v${GO_JOSE_V3_VERSION}=/usr/src/go-jose-${GO_JOSE_V3_VERSION}" \
         --replace "github.com/go-jose/go-jose/v4=github.com/go-jose/go-jose/v4@v${GO_JOSE_VERSION}" \
+        --replace "github.com/crewjam/saml=github.com/crewjam/saml@v${SAML_VERSION}" \
         --replace "google.golang.org/grpc=google.golang.org/grpc@v${GRPC_VERSION}" \
         --replace "github.com/klauspost/compress=github.com/klauspost/compress@v${KLAUSPOST_COMPRESS_VERSION}" \
         --replace "golang.org/x/crypto=golang.org/x/crypto@v${X_CRYPTO_VERSION}" \
@@ -116,6 +119,9 @@ RUN xcaddy build "v${CADDY_VERSION}" \
 
 RUN PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "google\.golang\.org/grpc[[:space:]]+v${GRPC_VERSION}" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "github\.com/go-jose/go-jose/v4[[:space:]]+v${GO_JOSE_VERSION}" \
+    && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy \
+        | grep -A1 -E 'dep[[:space:]]+github\.com/crewjam/saml[[:space:]]' \
+        | grep -Eq "=>[[:space:]]+github\.com/crewjam/saml[[:space:]]+v${SAML_VERSION}([[:space:]]|$)" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy \
         | grep -A1 -E "dep[[:space:]]+github\.com/go-jose/go-jose/v3[[:space:]]+v${GO_JOSE_V3_VERSION}([[:space:]]|$)" \
         | grep -Eq "=>[[:space:]]+/usr/src/go-jose-${GO_JOSE_V3_VERSION}[[:space:]]+\(devel\)" \
@@ -132,6 +138,28 @@ RUN PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "google\.g
         | LC_ALL=C sort -u > /licenses/CADDY_GO_PACKAGES.txt \
     && grep -Fx 'golang.org/x/crypto/ssh' /licenses/CADDY_GO_PACKAGES.txt \
     && ! grep -Eq '^golang\.org/x/crypto/openpgp(/|$)' /licenses/CADDY_GO_PACKAGES.txt
+
+# v0.5.2 fixes GO-2026-6909; the advisory currently omits its fixed range.
+# Test the module selected by the actual Caddy build and retain a bound receipt.
+# https://github.com/crewjam/saml/compare/v0.5.1...v0.5.2
+RUN set -- /tmp/buildenv_* \
+    && test "$#" -eq 1 \
+    && saml_dir="$(PATH="/usr/local/go/bin:${PATH}" go list -C "$1" -m \
+        -f '{{if .Replace}}{{.Replace.Dir}}{{else}}{{.Dir}}{{end}}' github.com/crewjam/saml)" \
+    && test -d "${saml_dir}" \
+    && test ! -e /tmp/saml-security-check \
+    && cp -R "${saml_dir}" /tmp/saml-security-check \
+    && cp /tmp/saml-assertions_test.go /tmp/saml-security-check/zz_release_factory_test.go \
+    && if PATH="/usr/local/go/bin:${PATH}" go test -C /tmp/saml-security-check -v \
+        -count=1 -timeout=30s -run '^TestReleaseFactorySAML' . > /tmp/saml-security-tests.log 2>&1; then \
+        cat /tmp/saml-security-tests.log; \
+       else cat /tmp/saml-security-tests.log; exit 1; fi \
+    && grep -Eq '^--- PASS: TestReleaseFactorySAMLRequiredElements ' /tmp/saml-security-tests.log \
+    && grep -Eq '^--- PASS: TestReleaseFactorySAMLNameIDNamespace ' /tmp/saml-security-tests.log \
+    && cp "${saml_dir}/LICENSE" /licenses/SAML_LICENSE \
+    && printf 'github.com/crewjam/saml v%s\n' "${SAML_VERSION}" > /licenses/SAML_SECURITY_CHECK.txt \
+    && cd /tmp \
+    && sha256sum saml-assertions_test.go >> /licenses/SAML_SECURITY_CHECK.txt
 
 RUN mkdir -p /licenses \
     && wget -qO /licenses/CADDY_LICENSE \

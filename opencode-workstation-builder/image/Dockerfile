@@ -137,7 +137,14 @@ RUN if getent group "${USER_GID}" >/dev/null; then \
     && usermod -aG "${docker_group}" "${USERNAME}" \
     && chown -R "${USER_UID}:${USER_GID}" "/home/${USERNAME}"
 
-RUN curl -fsSL https://bun.sh/install | bash -s -- bun-v${BUN_VERSION} \
+RUN curl --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 120 \
+        -fsSL https://bun.sh/install -o /tmp/release-factory-bun-install.sh \
+    && for attempt in 1 2 3; do \
+        if bash /tmp/release-factory-bun-install.sh "bun-v${BUN_VERSION}"; then break; fi; \
+        if [ "${attempt}" -eq 3 ]; then exit 1; fi; \
+        sleep "$((attempt * 5))"; \
+       done \
+    && rm /tmp/release-factory-bun-install.sh \
     && bun --version \
     && chown -R "${USER_UID}:${USER_GID}" /opt/bun
 
@@ -151,8 +158,10 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
        esac \
     && actionlint_version="${ACTIONLINT_VERSION#v}" \
     && actionlint_asset="actionlint_${actionlint_version}_linux_${actionlint_arch}.tar.gz" \
-    && curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/${actionlint_asset}" -o "/tmp/${actionlint_asset}" \
-    && curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/actionlint_${actionlint_version}_checksums.txt" -o /tmp/actionlint_checksums.txt \
+    && curl --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 120 \
+        -fsSL "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/${actionlint_asset}" -o "/tmp/${actionlint_asset}" \
+    && curl --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 120 \
+        -fsSL "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/actionlint_${actionlint_version}_checksums.txt" -o /tmp/actionlint_checksums.txt \
     && grep "  ${actionlint_asset}$" /tmp/actionlint_checksums.txt > /tmp/actionlint.sha256 \
     && (cd /tmp && sha256sum -c /tmp/actionlint.sha256) \
     && tar -xzf "/tmp/${actionlint_asset}" -C /tmp actionlint \
