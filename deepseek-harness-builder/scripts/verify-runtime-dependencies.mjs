@@ -145,6 +145,7 @@ if (component === 'all' || component === 'fflate') {
   }
 
   async function verifyMalformedZip64(entry, mode, zip) {
+    // CI uses --input-type=module for stdin; this bounded eval worker is CJS.
     const worker = new Worker(`
       const { parentPort, workerData } = require('node:worker_threads')
       const { pathToFileURL } = require('node:url')
@@ -159,7 +160,7 @@ if (component === 'all' || component === 'fflate') {
           parentPort.postMessage({ code: error.code, message: error.message })
         }
       })().catch(error => { throw error })
-    `, { eval: true, workerData: { entry, mode, zip: new Uint8Array(zip) },
+    `, { eval: true, execArgv: [], workerData: { entry, mode, zip: new Uint8Array(zip) },
       resourceLimits: { maxOldGenerationSizeMb: 64, maxYoungGenerationSizeMb: 8 } })
     let timer
     try {

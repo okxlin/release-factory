@@ -94,5 +94,14 @@ test('repairs real code-server dependency layouts and preserves the sandbox v3 c
     assert.equal(sandboxPackage.types, './v3/index.d.cts');
     assert.deepEqual(sandboxPackage.exports['.'], sandboxPackage.exports['./v3']);
     patchCodeServerDeps(root, staging);
+
+    // code-server 4.145.2 bundles this newer upstream redirect client.
+    install(root, {'body-parser': '2.3.0', 'follow-redirects': '1.16.2', express: '5.2.1'});
+    const redirectsPackage = path.join(root, 'node_modules/follow-redirects/package.json');
+    const originalRedirects = fs.readFileSync(redirectsPackage);
+    fs.writeFileSync(redirectsPackage, JSON.stringify({...JSON.parse(originalRedirects), version: '1.17.0'}));
+    assert.throws(() => patchCodeServerDeps(root, staging), /unreviewed follow-redirects version/);
+    fs.writeFileSync(redirectsPackage, originalRedirects);
+    patchCodeServerDeps(root, staging);
   } finally {fs.rmSync(temporary, {recursive: true, force: true});}
 });

@@ -19,3 +19,8 @@ Upstream license files remain in each installed package. Patched Zod manifests
 record the source version, entry API and backport. Behavioral checks cover
 oversized and valid containers, both module entry modes, the real Sandbox Runtime
 schemas, and Express JSON/form/error handling.
+
+The integrity-verified code-server 4.145.2 distribution bundles follow-redirects
+1.16.2. The replacement accepts this reviewed source and the earlier 1.16.0
+layout, then verifies 1.16.3 at the installed path. Unknown versions still stop
+the build before any dependency tree is replaced.

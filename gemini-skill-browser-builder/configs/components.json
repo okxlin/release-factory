@@ -20,6 +20,11 @@
         "fancyindex_version": "0.6.0",
         "fancyindex_url": "https://codeload.github.com/aperezdc/ngx-fancyindex/tar.gz/70311f239ec1e88ff79c669d126d08532ddb8554",
         "fancyindex_sha256": "25e820923e7cbe6a020b796137f77fd73391d4681d259a5a93a8feb01c5db89e"
+      },
+      "pip": {
+        "version": "26.2",
+        "url": "https://files.pythonhosted.org/packages/62/36/a3aed958d60531cb442b7ab4596cda7b3621cfb916f8ae1d6769795c7dc1/pip-26.2-py3-none-any.whl",
+        "sha256": "931c303696af6fa3417112103b1cad26890e5a07eccb5b99783700e33f2b8aad"
       }
     }
   }

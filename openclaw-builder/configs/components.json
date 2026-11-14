@@ -35,6 +35,27 @@
       "version": "6.29.1",
       "url": "https://registry.npmjs.org/undici/-/undici-6.29.1.tgz",
       "sha512": "12f46552dfd0a8012f5dd41e44c6147f0390b1fce90f3b7292b1b6a3018413fac1381a18bfdb85dfd673b0d0e1e254c51e14ebd973998ca91882e783d7666618"
+    },
+    "ip-address": {
+      "from": [
+        "10.5.0",
+        "10.7.3",
+        "10.7.4",
+        "10.7.5"
+      ],
+      "version": "10.7.6",
+      "url": "https://registry.npmjs.org/ip-address/-/ip-address-10.7.6.tgz",
+      "sha512": "d342d890ce9bc882daf5e408c7aaa869708ce34c532dde7a019e2fc9a3d6dd84f26f8f556583e8e71b2202ae2db90e78187e11ee055d612709d41ec1efb3ee4e"
+    },
+    "postcss-selector-parser": {
+      "from": [
+        "7.1.4",
+        "7.1.6",
+        "7.2.0"
+      ],
+      "version": "7.2.1",
+      "url": "https://registry.npmjs.org/postcss-selector-parser/-/postcss-selector-parser-7.2.1.tgz",
+      "sha512": "1b0c653204d35f02289be79b0bb6a7de4e916890f09254504277e25ec2cf1a272ef05615fe4ffed7ff58636394dbeafddfc1f6b785f44c3c6889ff873f6ae3cd"
     }
   },
   "runtime_packages": {
@@ -74,6 +95,58 @@
       "url": "https://registry.npmjs.org/zod/-/zod-4.6.7.tgz",
       "sha512": "83c5b60f6914e9af2e9ed734e777d7d6e5412b333bcaa0315bfdf3c24f37fba472176f9228eb95f9cd30043854c335753da19aa66647fab99c5333dffb7086c2",
       "compatibility": {"3.25.76": "v3"}
+    },
+    "hono": {
+      "from": [
+        "4.13.12"
+      ],
+      "version": "4.13.16",
+      "url": "https://registry.npmjs.org/hono/-/hono-4.13.16.tgz",
+      "sha512": "00e2ce121beb57e887f76c570a716bff9fb72a33ca708df13fadd726d5f9b290279339cf7478a3948b144e98bbffd1215aaad309e930e5ce738752be62c570ec"
+    },
+    "@hono/node-server": {
+      "from": [
+        "2.1.3"
+      ],
+      "version": "2.1.6",
+      "url": "https://registry.npmjs.org/@hono/node-server/-/node-server-2.1.6.tgz",
+      "sha512": "a7f287f4c9df35cb26dec47ac7894d826e63f9037812df2cacaade765f4365f5e2c99d54437690d9856914b6ea92d60de4923e0c1f9564528cd8fa84e612ca8d"
+    },
+    "ip-address": {
+      "from": [
+        "10.7.3",
+        "10.7.4",
+        "10.7.5"
+      ],
+      "version": "10.7.6",
+      "url": "https://registry.npmjs.org/ip-address/-/ip-address-10.7.6.tgz",
+      "sha512": "d342d890ce9bc882daf5e408c7aaa869708ce34c532dde7a019e2fc9a3d6dd84f26f8f556583e8e71b2202ae2db90e78187e11ee055d612709d41ec1efb3ee4e"
+    },
+    "seroval": {
+      "from": [
+        "1.6.8"
+      ],
+      "version": "1.6.11",
+      "url": "https://registry.npmjs.org/seroval/-/seroval-1.6.11.tgz",
+      "sha512": "8696fa5e730218dfc0fbbf547fc57bfe24c6932cb26b3367e57d02a02029ed4cbdbd3dd14fc8d9f462dc9f11a85638373fc000adb7b86551eae82f284f66b490"
+    },
+    "is-unsafe": {
+      "from": ["2.0.2"],
+      "version": "2.0.3",
+      "url": "https://registry.npmjs.org/is-unsafe/-/is-unsafe-2.0.3.tgz",
+      "sha512": "6419657330823b6ebbbe07456fa4eade9bfe2e11da0a218c76bf99b2e2fe3a8a6bb8083b4bedd90ecd6f0f444f0b4b92ae48f36eb6b16868ed5f5601c633de15"
+    },
+    "strnum": {
+      "from": ["2.4.2"],
+      "version": "2.5.1",
+      "url": "https://registry.npmjs.org/strnum/-/strnum-2.5.1.tgz",
+      "sha512": "50ce274cb5b34220c1b1e571506c4dd30273224d1453cf508bba4a5f3f6a212a3e961be2262913ba2901b0afe8151969bd81ef49dcf44d5a0bc90fac129630c4"
+    },
+    "fast-xml-parser": {
+      "from": ["5.11.2"],
+      "version": "5.12.0",
+      "url": "https://registry.npmjs.org/fast-xml-parser/-/fast-xml-parser-5.12.0.tgz",
+      "sha512": "fe95f1441b70c58f70f33ed86e0b2f20f3dc3ef143b136c8916c134098733493e8923f936cde9fb6672fe23fe91100ef3823672860f3ba4e41a36a288083a216"
     }
   },
   "source_map_js": {

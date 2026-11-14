@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const targets = [
   {relative: 'node_modules/body-parser', name: 'body-parser', from: '2.3.0', version: '2.4.0'},
-  {relative: 'node_modules/follow-redirects', name: 'follow-redirects', from: '1.16.0', version: '1.16.3'},
+  {relative: 'node_modules/follow-redirects', name: 'follow-redirects', from: ['1.16.0', '1.16.2'], version: '1.16.3'},
   {relative: 'lib/vscode/node_modules/zod', name: 'zod', from: '4.4.3', version: '4.6.7', api: 'v4'},
   {relative: 'lib/vscode/node_modules/@github/copilot-sdk/node_modules/zod', name: 'zod', from: '4.3.6', version: '4.6.7', api: 'v4'},
   {relative: 'lib/vscode/node_modules/@vscode/sandbox-runtime/node_modules/zod', name: 'zod', from: '3.25.76', version: '4.6.7', api: 'v3'},
@@ -186,7 +186,7 @@ export function patchCodeServerDeps(root, staging) {
   const plans = targets.map(target => {
     const directory = path.join(root, target.relative);
     const pkg = packageAt(directory, target.name);
-    assert.ok([target.from, target.version].includes(pkg.version), `unreviewed ${target.name} version: ${pkg.version}`);
+    assert.ok([target.from, target.version].flat().includes(pkg.version), `unreviewed ${target.name} version: ${pkg.version}`);
     const source = path.join(staging, 'node_modules', target.name);
     assert.equal(packageAt(source, target.name).version, target.version);
     return {...target, directory, source};

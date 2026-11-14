@@ -223,6 +223,13 @@ test('applies the reviewed fflate override to a source-only office dependency an
   assert.match(result.stdout, /Verified fflate 0\.8\.3 cjs/)
   assert.match(result.stdout, /Verified fflate 0\.8\.3 esm/)
   console.log(result.stdout.trim())
+  const stdinResult = spawnSync(process.execPath, ['--input-type=module', '-', runtime, 'fflate'], {
+    input: readFileSync(verifier, 'utf8'), encoding: 'utf8', timeout: 10000,
+  })
+  assert.equal(stdinResult.error, undefined, stdinResult.error?.message)
+  assert.equal(stdinResult.status, 0, stdinResult.stderr)
+  assert.match(stdinResult.stdout, /Verified fflate 0\.8\.3 cjs/)
+  assert.match(stdinResult.stdout, /Verified fflate 0\.8\.3 esm/)
   assert.equal(readFileSync(join(runtime, 'node_modules', office, 'index.js'), 'utf8'), 'module.exports = "local-office-source"\n')
   const lock = JSON.parse(readFileSync(join(runtime, 'node_modules/.package-lock.json')))
   assert.deepEqual(Object.keys(lock.packages).sort(), [

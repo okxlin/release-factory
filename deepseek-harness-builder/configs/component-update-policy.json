@@ -58,6 +58,14 @@
       }
     },
     {
+      "name": "OpenTelemetry security override",
+      "pin": "OTEL_VERSION",
+      "source": {
+        "type": "go_module",
+        "module": "go.opentelemetry.io/otel"
+      }
+    },
+    {
       "name": "x/text security override",
       "pin": "X_TEXT_VERSION",
       "source": {
@@ -79,6 +87,14 @@
       "source": {
         "type": "go_module",
         "module": "golang.org/x/crypto"
+      }
+    },
+    {
+      "name": "x/sys security override",
+      "pin": "X_SYS_VERSION",
+      "source": {
+        "type": "go_module",
+        "module": "golang.org/x/sys"
       }
     },
     {
