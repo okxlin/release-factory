@@ -1,2 +1,4 @@
 **
 !gemini-skill-browser-builder/image/**
+!openclaw-builder/image/patch-vendored-deps.mjs
+!openclaw-builder/configs/components.json
