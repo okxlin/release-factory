@@ -8,13 +8,14 @@ import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { Worker } from 'node:worker_threads'
 
 const root = resolve(process.argv[2] ?? '/opt/dsh')
 const component = process.argv[3] ?? 'all'
-assert.ok(['all', 'zod', 'undici'].includes(component), 'expected all, zod or undici')
+assert.ok(['all', 'zod', 'undici', 'fflate'].includes(component), 'expected all, zod, undici or fflate')
 const consumerRequire = name => createRequire(join(root, 'node_modules', name, 'package.json'))
 
-if (component !== 'undici') {
+if (component === 'all' || component === 'zod') {
   const require = consumerRequire('@deepseek-ai/dsh-agent-loop')
   const directory = dirname(require.resolve('zod/package.json'))
   const manifest = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'))
@@ -50,7 +51,7 @@ if (component !== 'undici') {
   }
 }
 
-if (component !== 'zod') {
+if (component === 'all' || component === 'undici') {
   const checked = new Set()
   for (const consumer of ['@deepseek-ai/dsh-web-fetch-http', '@deepseek-ai/dsh-http-proxy']) {
     const require = consumerRequire(consumer)
@@ -89,5 +90,105 @@ if (component !== 'zod') {
       await dispatcher.close()
       await new Promise((done, reject) => server.close(error => error ? reject(error) : done()))
     }
+  }
+}
+
+if (component === 'all' || component === 'fflate') {
+  const require = consumerRequire('@deepseek-ai/libreoffice-kit')
+  const directory = dirname(dirname(require.resolve('fflate')))
+  const manifest = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'))
+  assert.equal(manifest.name, 'fflate')
+
+  // Keep the stored file tiny. ZIP64 sentinels plus its real footer reach the
+  // old parser's unbounded extra-field scan without inflating any large data.
+  // https://github.com/advisories/GHSA-px8p-9vwx-vf98
+  function zip64Fixture(archive, includeExtra) {
+    archive = Buffer.from(archive)
+    const end = archive.length - 22
+    assert.equal(archive.readUInt32LE(end), 0x06054b50)
+    const central = archive.readUInt32LE(end + 16)
+    assert.equal(archive.readUInt32LE(central), 0x02014b50)
+    assert.equal(archive.readUInt16LE(central + 30), 0)
+    assert.equal(archive.readUInt16LE(central + 32), 0)
+    const extra = Buffer.alloc(includeExtra ? 28 : 0)
+    if (includeExtra) {
+      extra.writeUInt16LE(1, 0)
+      extra.writeUInt16LE(24, 2)
+      extra.writeBigUInt64LE(BigInt(archive.readUInt32LE(central + 24)), 4)
+      extra.writeBigUInt64LE(BigInt(archive.readUInt32LE(central + 20)), 12)
+      extra.writeBigUInt64LE(BigInt(archive.readUInt32LE(central + 42)), 20)
+    }
+    const zip = Buffer.concat([archive.subarray(0, end), extra, Buffer.alloc(76), archive.subarray(end)])
+    zip.writeUInt16LE(45, central + 6)
+    zip.writeUInt32LE(0xffffffff, central + 20)
+    zip.writeUInt32LE(0xffffffff, central + 24)
+    zip.writeUInt32LE(0xffffffff, central + 42)
+    zip.writeUInt16LE(extra.length, central + 30)
+    const zip64End = end + extra.length
+    zip.writeUInt32LE(0x06064b50, zip64End)
+    zip.writeBigUInt64LE(44n, zip64End + 4)
+    zip.writeUInt16LE(45, zip64End + 12)
+    zip.writeUInt16LE(45, zip64End + 14)
+    zip.writeBigUInt64LE(1n, zip64End + 24)
+    zip.writeBigUInt64LE(1n, zip64End + 32)
+    zip.writeBigUInt64LE(BigInt(archive.readUInt32LE(end + 12) + extra.length), zip64End + 40)
+    zip.writeBigUInt64LE(BigInt(central), zip64End + 48)
+    zip.writeUInt32LE(0x07064b50, zip64End + 56)
+    zip.writeBigUInt64LE(BigInt(zip64End), zip64End + 64)
+    zip.writeUInt32LE(1, zip64End + 72)
+    const ordinaryEnd = zip64End + 76
+    zip.writeUInt16LE(0xffff, ordinaryEnd + 8)
+    zip.writeUInt16LE(0xffff, ordinaryEnd + 10)
+    zip.writeUInt32LE(0xffffffff, ordinaryEnd + 12)
+    zip.writeUInt32LE(0xffffffff, ordinaryEnd + 16)
+    return zip
+  }
+
+  async function verifyMalformedZip64(entry, mode, zip) {
+    const worker = new Worker(`
+      const { parentPort, workerData } = require('node:worker_threads')
+      const { pathToFileURL } = require('node:url')
+      ;(async () => {
+        const fflate = workerData.mode === 'cjs' ? require(workerData.entry) :
+          await import(pathToFileURL(workerData.entry).href)
+        parentPort.postMessage({ ready: true })
+        try {
+          fflate.unzipSync(workerData.zip)
+          parentPort.postMessage({ accepted: true })
+        } catch (error) {
+          parentPort.postMessage({ code: error.code, message: error.message })
+        }
+      })().catch(error => { throw error })
+    `, { eval: true, workerData: { entry, mode, zip: new Uint8Array(zip) },
+      resourceLimits: { maxOldGenerationSizeMb: 64, maxYoungGenerationSizeMb: 8 } })
+    let timer
+    try {
+      const result = await new Promise((resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('fflate ZIP64 worker failed to start')), 5000)
+        worker.once('error', reject)
+        worker.once('exit', code => reject(new Error(`fflate ZIP64 worker exited without a result: ${code}`)))
+        worker.on('message', message => {
+          if (message.ready) {
+            clearTimeout(timer)
+            timer = setTimeout(() => reject(new Error('fflate ZIP64 parser exceeded two seconds')), 2000)
+          } else resolve(message)
+        })
+      })
+      assert.equal(result.code, 13, 'malformed ZIP64 must be rejected as invalid zip data')
+      assert.equal(result.message, 'invalid zip data')
+    } finally {
+      clearTimeout(timer)
+      await worker.terminate()
+    }
+  }
+
+  for (const [mode, entry] of [['cjs', join(directory, 'lib/node.cjs')], ['esm', join(directory, 'esm/index.mjs')]]) {
+    const fflate = mode === 'cjs' ? require(entry) : await import(pathToFileURL(entry))
+    const data = fflate.strToU8('deepseek-office-fixture')
+    const zip = fflate.zipSync({ 'fixture.txt': [data, { mtime: new Date('2020-01-01T00:00:00Z') }] }, { level: 0 })
+    assert.deepEqual(fflate.unzipSync(zip)['fixture.txt'], data)
+    assert.deepEqual(fflate.unzipSync(zip64Fixture(zip, true))['fixture.txt'], data)
+    await verifyMalformedZip64(entry, mode, zip64Fixture(zip, false))
+    console.log(`Verified fflate ${manifest.version} ${mode}: ZIP/ZIP64 roundtrips and bounded malformed ZIP64 rejection`)
   }
 }

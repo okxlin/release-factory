@@ -6,10 +6,10 @@ import { fileURLToPath } from 'node:url';
 
 const targets = [
   {relative: 'node_modules/body-parser', name: 'body-parser', from: '2.3.0', version: '2.4.0'},
-  {relative: 'node_modules/follow-redirects', name: 'follow-redirects', from: '1.16.0', version: '1.16.2'},
-  {relative: 'lib/vscode/node_modules/zod', name: 'zod', from: '4.4.3', version: '4.6.6', api: 'v4'},
-  {relative: 'lib/vscode/node_modules/@github/copilot-sdk/node_modules/zod', name: 'zod', from: '4.3.6', version: '4.6.6', api: 'v4'},
-  {relative: 'lib/vscode/node_modules/@vscode/sandbox-runtime/node_modules/zod', name: 'zod', from: '3.25.76', version: '4.6.6', api: 'v3'},
+  {relative: 'node_modules/follow-redirects', name: 'follow-redirects', from: '1.16.0', version: '1.16.3'},
+  {relative: 'lib/vscode/node_modules/zod', name: 'zod', from: '4.4.3', version: '4.6.7', api: 'v4'},
+  {relative: 'lib/vscode/node_modules/@github/copilot-sdk/node_modules/zod', name: 'zod', from: '4.3.6', version: '4.6.7', api: 'v4'},
+  {relative: 'lib/vscode/node_modules/@vscode/sandbox-runtime/node_modules/zod', name: 'zod', from: '3.25.76', version: '4.6.7', api: 'v3'},
 ];
 
 function packageAt(directory, name) {
@@ -25,14 +25,14 @@ function prepareZod(directory, api) {
   // Match the reviewed OpenClaw backport, packaged locally for this build context.
   // https://github.com/colinhacks/zod/pull/6652
   const pkg = packageAt(directory, 'zod');
-  assert.equal(pkg.version, '4.6.6');
+  assert.equal(pkg.version, '4.6.7');
   if (api === 'v3') {
     pkg.exports['.'] = structuredClone(pkg.exports['./v3']);
     pkg.main = './v3/index.cjs';
     pkg.module = './v3/index.js';
     pkg.types = './v3/index.d.cts';
   }
-  pkg['release-factory'] = {source: 'zod@4.6.6', root: api, patches: ['v3-bounded-container-gate']};
+  pkg['release-factory'] = {source: 'zod@4.6.7', root: api, patches: ['v3-bounded-container-gate']};
   fs.writeFileSync(path.join(directory, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`);
   for (const [relative, invalid] of [
     ['v3/types.js', 'INVALID'],

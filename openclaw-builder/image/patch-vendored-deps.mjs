@@ -37,15 +37,24 @@ export function verifyArchiveReader(directory) {
 export async function patchNpmBundles(root, pins) {
   root = fs.realpathSync(root);
   const store = path.join(root, '.pnpm');
+  let bundles;
+  if (fs.existsSync(store)) {
+    bundles = fs.readdirSync(store).filter(entry => /^npm@\d/.test(entry))
+      .map(entry => path.join(store, entry, 'node_modules/npm/node_modules'));
+  } else {
+    const npm = path.join(root, 'npm');
+    assert.equal(fs.realpathSync(npm), npm, 'unexpected bundled npm root path');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(npm, 'package.json'))).name, 'npm');
+    bundles = [path.join(npm, 'node_modules')];
+  }
   for (const [name, pin] of Object.entries(pins)) {
     assert.ok(['brace-expansion', 'undici'].includes(name));
     assert.match(pin.version, /^\d+\.\d+\.\d+$/);
     assert.equal(pin.url, `https://registry.npmjs.org/${name}/-/${name}-${pin.version}.tgz`);
     assert.match(pin.sha512, /^[a-f0-9]{128}$/);
     const outdated = [];
-    for (const entry of fs.readdirSync(store)) {
-      if (!/^npm@\d/.test(entry)) continue;
-      const directory = path.join(store, entry, 'node_modules/npm/node_modules', name);
+    for (const bundle of bundles) {
+      const directory = path.join(bundle, name);
       if (!fs.existsSync(directory)) continue;
       assert.equal(fs.realpathSync(directory), directory, 'unexpected bundled npm dependency path');
       const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
@@ -284,7 +293,7 @@ export async function patchMcpPackages(root, pins) {
       const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
       assert.equal(pkg.name, name);
       directories.push(directory);
-      if (pkg.version === pin.from) { outdated.push(directory); originals.push(pkg); }
+      if (pinFromVersions(pin).includes(pkg.version)) { outdated.push(directory); originals.push(pkg); }
     }
     await replaceVerifiedDependency(name, pin, outdated, directory => {
       const replacement = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
@@ -486,9 +495,34 @@ export function patchCacheSemantics(directory) {
   console.log(`Verified CVE-2026-93748 cache protections (${pkg.version}): ${directory}`);
 }
 
+export function patchMcpHttpFetch(root) {
+  // OpenClaw v2026.11.3 wraps the SDK's manual fetch with its own redirect loop.
+  // Reuse its OAuth policy so a tool's POST body stays on the resource origin.
+  const file = path.join(fs.realpathSync(root), 'src/agents/mcp-http-fetch.ts');
+  assert.equal(fs.realpathSync(file), file, 'unexpected MCP HTTP fetch source path');
+  const source = fs.readFileSync(file, 'utf8');
+  const original = '  return buildMcpHttpFetchWithRedirectPolicy(params, "replay");';
+  const replacement = '  return buildMcpHttpFetchWithRedirectPolicy(params, "reject");';
+  const originalHash = 'f144f2e0707d4a81077c759b5cfc3dd9fa432fc6c5317c3599ee9462d8866f26';
+  const patchedHash = 'e88a9f6501cf5897289a8141e32b4a0ea096e35bf70dd6ed73a73820e0ebf7bd';
+  const sha256 = value => createHash('sha256').update(value).digest('hex');
+  if (sha256(source) === patchedHash) {
+    assert.equal(source.split(replacement).length, 2, 'missing MCP HTTP fetch patch anchor');
+    return;
+  }
+  assert.equal(sha256(source), originalHash, 'unreviewed MCP HTTP fetch source');
+  assert.equal(source.split(original).length, 2, 'missing MCP HTTP fetch patch anchor');
+  const patched = source.replace(original, replacement);
+  assert.equal(sha256(patched), patchedHash, 'unexpected MCP HTTP fetch patch result');
+  fs.writeFileSync(file, patched);
+  console.log(`Patched MCP cross-origin tool body replay: ${file}`);
+}
+
 async function main() {
   const components = JSON.parse(fs.readFileSync(new URL('./components.json', import.meta.url)));
   if (process.argv[2] === '--build') {
+    assert.equal(process.argv.length, 3, 'unexpected dependency patch argument');
+    patchMcpHttpFetch('/app');
     // Vite/Rolldown inline these packages into the browser assets before runtime COPY.
     await patchRuntimePackages('/app/node_modules', components.runtime_packages);
     await patchMarkdownPackages('/app/node_modules', components.markdown_packages);
@@ -496,6 +530,7 @@ async function main() {
   }
   assert.equal(process.argv.length, 2, 'unexpected dependency patch argument');
   await patchNpmBundles('/app/node_modules', components.npm_bundled);
+  await patchNpmBundles('/usr/local/lib/node_modules', components.npm_bundled);
   const runtimePatches = await patchRuntimePackages('/app/node_modules', components.runtime_packages);
   fs.mkdirSync('/usr/share/doc/release-factory', {recursive: true});
   fs.writeFileSync('/usr/share/doc/release-factory/openclaw-runtime-deps.json', JSON.stringify(runtimePatches, null, 2) + '\n');
@@ -522,7 +557,7 @@ async function main() {
     assert.ok(directory.startsWith('/app/node_modules/.pnpm/@github+copilot-'));
     const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
     assert.equal(pkg.name, 'adm-zip');
-    if (pkg.version === '0.5.17') outdated.push(directory);
+    if (['0.5.17', '0.6.0'].includes(pkg.version)) outdated.push(directory);
     else verifyArchiveReader(directory); // Keep a newer upstream fix only if it passes the same regression.
   }
   if (!outdated.length) {
@@ -549,7 +584,8 @@ async function main() {
     assert.equal(JSON.parse(fs.readFileSync(path.join(replacement, 'package.json'))).version, pin.version);
     verifyArchiveReader(replacement);
     for (const directory of outdated) {
-      console.log(`Replace verified vendored adm-zip 0.5.17 -> ${pin.version}: ${directory}`);
+      const from = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'))).version;
+      console.log(`Replace verified vendored adm-zip ${from} -> ${pin.version}: ${directory}`);
       const {uid, gid} = fs.statSync(directory);
       fs.rmSync(directory, {recursive: true});
       fs.cpSync(replacement, directory, {recursive: true});

@@ -268,6 +268,41 @@ test('repairs real runtime packages and preserves pnpm consumers and security pr
   }
 });
 
+// The pinned v2026.11.3 source contains both versions, including the newer copy.
+test('upgrades both runtime Undici versions from the current upstream lock', {timeout: 150000}, async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-current-undici-'));
+  try {
+    const versions = ['8.11.2', '8.12.2'];
+    const dependencies = Object.fromEntries(versions.map((version, index) => [`undici-${index}`, `npm:undici@${version}`]));
+    fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({private: true, dependencies}));
+    execFileSync('npm', ['install', '--prefix', temporary, '--ignore-scripts', '--package-lock=false',
+      '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], {timeout: 120000, stdio: 'pipe'});
+    const root = path.join(temporary, 'node_modules');
+    const directories = versions.map((version, index) => {
+      const original = path.join(root, `undici-${index}`);
+      const directory = path.join(root, '.pnpm', `undici@${version}`, 'node_modules/undici');
+      fs.mkdirSync(path.dirname(directory), {recursive: true});
+      fs.renameSync(original, directory);
+      fs.symlinkSync(path.relative(root, directory), original);
+      return {original, directory, link: fs.readlinkSync(original), version};
+    });
+    const unreviewedPins = {undici: {...pins.undici, from: ['8.11.2']}};
+    await assert.rejects(patchRuntimePackages(root, unreviewedPins), /unreviewed|unexpected|vulnerable/);
+    for (const {directory, version} of directories) {
+      assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'package.json'))).version, version);
+    }
+    await patchRuntimePackages(root, {undici: pins.undici});
+    for (const {original, directory, link} of directories) {
+      assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'package.json'))).version, pins.undici.version);
+      assert.equal(fs.readlinkSync(original), link);
+      checkPassed(run(undiciRegression, directory), /without an orphan stream/);
+    }
+    await patchRuntimePackages(root, {undici: pins.undici});
+  } finally {
+    fs.rmSync(temporary, {recursive: true});
+  }
+});
+
 test('builds browser bundles from fixed DOMPurify and both reviewed Zod 4 versions', {timeout: 180000}, async () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-browser-bundle-'));
   try {

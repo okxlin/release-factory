@@ -71,10 +71,14 @@ def prepare(package, baseline, cache, run=subprocess.run, config_dirs=()):
     zod_version = config["dcpZodVersion"]
     if not re.fullmatch(r"4\.\d+\.\d+", zod_version):
         raise ValueError("DCP Zod must be pinned within the reviewed major version")
-    # OpenCode 1.18.30's Npm.add uses this package-specific cache and honors npm
+    babel_version = config["dcpBabelVersion"]
+    if not re.fullmatch(r"7\.\d+\.\d+", babel_version):
+        raise ValueError("DCP Babel must be pinned within the reviewed major version")
+    # OpenCode 1.19.5's Npm.add uses this package-specific cache and honors npm
     # overrides, but skips reification if the plugin is already installed.
-    # https://github.com/anomalyco/opencode/blob/5cd8e68fdd72b27818d26d168b9c7a06b359567e/packages/core/src/npm.ts
-    expected_overrides = {"seroval": version, "toml": toml_version, "zod": zod_version}
+    # https://github.com/anomalyco/opencode/blob/810c0eba1a7348036f8bdf61e6632d0c36c6876c/packages/core/src/npm.ts
+    expected_overrides = {"seroval": version, "toml": toml_version, "zod": zod_version,
+                          "@babel/core": babel_version}
 
     def cache_current(packages):
         package_versions = {}

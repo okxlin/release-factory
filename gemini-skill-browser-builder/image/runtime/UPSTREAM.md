@@ -28,6 +28,14 @@ Its existing dependencies are updated here without adding another runtime librar
   hono to 4.13.14, and ip-address to 10.7.5 within their declared ranges.
   https://registry.npmjs.org/puppeteer-core/25.16.0
   https://registry.npmjs.org/chromium-bidi/157.0.8090-0
+- The 2026-11-15 refresh pins Puppeteer Core 25.17.0 and MCP SDK 1.32.2,
+  and resolves Zod 4.6.7, Hono 4.13.18, node-server 2.1.8 and qs 6.17.1.
+  These keep the existing API majors and fix the reviewed Hono middleware and
+  node-server request-path/WebSocket advisories.
+  https://github.com/puppeteer/puppeteer/releases/tag/puppeteer-v25.17.0
+  https://registry.npmjs.org/@modelcontextprotocol/sdk/1.32.2
+  https://registry.npmjs.org/hono/4.13.18
+  https://registry.npmjs.org/@hono/node-server/2.1.8
 - Node 24 LTS is selected because Node 20 ended maintenance on 2026-04-30.
   https://github.com/nodejs/Release/blob/main/schedule.json
 
@@ -36,6 +44,18 @@ Update this manifest and regenerate `package-lock.json` with
 the production audit, daemon startup, Puppeteer/CDP, native image-processing, and
 profile persistence checks before publication. Build inputs record the resolved
 source commit and base image digest for each candidate.
+
+The remaining low-severity finding is deepmerge 4.3.1 at
+`node_modules/deepmerge`, reached through puppeteer-extra's launch-option merge
+and the user-preferences plugin's preference merge. There is no patched deepmerge
+release for <https://github.com/advisories/GHSA-gcqx-w48m-w2h4>; npm's suggested
+remediation downgrades puppeteer-extra or stealth across a major version.
+At reviewed application commit `31ea00dd10ca624014cc910b2b19d3468222fdc7`,
+`src/daemon/engine.js` constructs launch options locally and both browser entry
+points initialize stealth without caller-supplied preference objects. This does
+not establish safety for arbitrary plugin preferences or future source changes.
+Recheck the finding by 2026-12-15 or when the source ref/plugin configuration changes.
+The production audit threshold remains unchanged.
 
 LinuxServer's Nginx fallback is pinned in `configs/components.json`. Nginx
 1.30.4 fixes CVE-2026-42533 and CVE-2026-60005; Debian's older ABI-specific

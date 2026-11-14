@@ -35,6 +35,10 @@ docker_cli_version="${OPENCLAW_DOCKER_CLI_VERSION:-$(component_default OPENCLAW_
 docker_compose_source_ref="${OPENCLAW_DOCKER_COMPOSE_SOURCE_REF:-$(component_default OPENCLAW_DOCKER_COMPOSE_SOURCE_REF)}"
 docker_compose_version="${OPENCLAW_DOCKER_COMPOSE_VERSION:-$(component_default OPENCLAW_DOCKER_COMPOSE_VERSION)}"
 docker_grpc_version="${OPENCLAW_DOCKER_GRPC_VERSION:-$(component_default OPENCLAW_DOCKER_GRPC_VERSION)}"
+docker_crypto_version="${OPENCLAW_DOCKER_CRYPTO_VERSION:-$(component_default OPENCLAW_DOCKER_CRYPTO_VERSION)}"
+docker_mod_version="${OPENCLAW_DOCKER_MOD_VERSION:-$(component_default OPENCLAW_DOCKER_MOD_VERSION)}"
+docker_net_version="${OPENCLAW_DOCKER_NET_VERSION:-$(component_default OPENCLAW_DOCKER_NET_VERSION)}"
+docker_otel_version="${OPENCLAW_DOCKER_OTEL_VERSION:-$(component_default OPENCLAW_DOCKER_OTEL_VERSION)}"
 
 if [[ -z "${source_dir}" || ! -d "${source_dir}" ]]; then
   echo "ERROR: OpenClaw source directory not found: ${source_dir}" >&2
@@ -68,7 +72,7 @@ for source_ref in "${docker_cli_source_ref}" "${docker_compose_source_ref}"; do
   fi
 done
 
-for tool_version in "${docker_cli_version}" "${docker_compose_version}" "${docker_grpc_version}"; do
+for tool_version in "${docker_cli_version}" "${docker_compose_version}" "${docker_grpc_version}" "${docker_crypto_version}" "${docker_mod_version}" "${docker_net_version}" "${docker_otel_version}"; do
   if [[ ! "${tool_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "ERROR: Docker tool versions must be stable semver values: ${tool_version}" >&2
     exit 1
@@ -92,6 +96,10 @@ awk \
   -v docker_compose_source_ref="${docker_compose_source_ref}" \
   -v docker_compose_version="${docker_compose_version}" \
   -v docker_grpc_version="${docker_grpc_version}" \
+  -v docker_crypto_version="${docker_crypto_version}" \
+  -v docker_mod_version="${docker_mod_version}" \
+  -v docker_net_version="${docker_net_version}" \
+  -v docker_otel_version="${docker_otel_version}" \
  '
 function normalize_line(value) {
   sub(/^[[:space:]]+/, "", value)
@@ -134,6 +142,10 @@ function emit_docker_toolchain_stage() {
   print "ARG OPENCLAW_DOCKER_COMPOSE_SOURCE_REF=\"" docker_compose_source_ref "\""
   print "ARG OPENCLAW_DOCKER_COMPOSE_VERSION=\"" docker_compose_version "\""
   print "ARG OPENCLAW_DOCKER_GRPC_VERSION=\"" docker_grpc_version "\""
+  print "ARG OPENCLAW_DOCKER_CRYPTO_VERSION=\"" docker_crypto_version "\""
+  print "ARG OPENCLAW_DOCKER_MOD_VERSION=\"" docker_mod_version "\""
+  print "ARG OPENCLAW_DOCKER_NET_VERSION=\"" docker_net_version "\""
+  print "ARG OPENCLAW_DOCKER_OTEL_VERSION=\"" docker_otel_version "\""
   print ""
   print "# Build the Docker tools with a patched Go toolchain instead of shipping stale upstream packages."
   print "FROM ${OPENCLAW_DOCKER_TOOLCHAIN_IMAGE} AS openclaw-runtime-docker-tools"
@@ -143,6 +155,10 @@ function emit_docker_toolchain_stage() {
   print "ARG OPENCLAW_DOCKER_COMPOSE_SOURCE_REF"
   print "ARG OPENCLAW_DOCKER_COMPOSE_VERSION"
   print "ARG OPENCLAW_DOCKER_GRPC_VERSION"
+  print "ARG OPENCLAW_DOCKER_CRYPTO_VERSION"
+  print "ARG OPENCLAW_DOCKER_MOD_VERSION"
+  print "ARG OPENCLAW_DOCKER_NET_VERSION"
+  print "ARG OPENCLAW_DOCKER_OTEL_VERSION"
   print "ARG TARGETOS"
   print "ARG TARGETARCH"
   print "ENV GOTOOLCHAIN=local"
@@ -168,10 +184,16 @@ function emit_docker_toolchain_stage() {
   print "      git -C \"${destination}\" checkout --detach --quiet FETCH_HEAD; \\"
   print "      test \"$(git -C \"${destination}\" rev-parse HEAD)\" = \"${source_ref}\"; \\"
   print "    }; \\"
+  print "    patch_docker_modules() { \\"
+  print "      go mod edit -require=golang.org/x/net@v${OPENCLAW_DOCKER_NET_VERSION} -require=golang.org/x/mod@v${OPENCLAW_DOCKER_MOD_VERSION} -require=google.golang.org/grpc@v${OPENCLAW_DOCKER_GRPC_VERSION} \\"
+  print "        -require=go.opentelemetry.io/otel@v${OPENCLAW_DOCKER_OTEL_VERSION} -require=go.opentelemetry.io/otel/sdk@v${OPENCLAW_DOCKER_OTEL_VERSION} -require=go.opentelemetry.io/otel/trace@v${OPENCLAW_DOCKER_OTEL_VERSION}; \\"
+  print "    }; \\"
   print "    fetch_source https://github.com/docker/cli.git \"${OPENCLAW_DOCKER_CLI_SOURCE_REF}\" /go/src/github.com/docker/cli && \\"
   print "    fetch_source https://github.com/docker/compose.git \"${OPENCLAW_DOCKER_COMPOSE_SOURCE_REF}\" /go/src/github.com/docker/compose && \\"
   print "    cd /go/src/github.com/docker/cli && \\"
-  print "    GOOS=\"${TARGETOS}\" GOARCH=\"${TARGETARCH}\" CGO_ENABLED=0 GO111MODULE=auto \\"
+  print "    cp vendor.mod go.mod && cp vendor.sum go.sum && \\"
+  print "    patch_docker_modules && \\"
+  print "    GOFLAGS=-mod=mod GOOS=\"${TARGETOS}\" GOARCH=\"${TARGETARCH}\" CGO_ENABLED=0 GO111MODULE=auto \\"
   print "      GO_LINKMODE=static TARGET=/out VERSION=\"${OPENCLAW_DOCKER_CLI_VERSION}\" \\"
   print "      GITCOMMIT=\"${OPENCLAW_DOCKER_CLI_SOURCE_REF}\" BUILDTIME=1970-01-01T00:00:00Z \\"
   print "      ./scripts/build/binary && \\"
@@ -179,7 +201,7 @@ function emit_docker_toolchain_stage() {
   print "    test -n \"${cli_binary}\" && \\"
   print "    rm -f /out/docker && install -m 0755 \"${cli_binary}\" /out/docker && \\"
   print "    cd /go/src/github.com/docker/compose && \\"
-  print "    go mod edit -require=golang.org/x/crypto@v0.55.0 -require=golang.org/x/mod@v0.40.0 -require=google.golang.org/grpc@v${OPENCLAW_DOCKER_GRPC_VERSION} && \\"
+  print "    go mod edit -require=golang.org/x/crypto@v${OPENCLAW_DOCKER_CRYPTO_VERSION} && patch_docker_modules && \\"
   print "    CGO_ENABLED=0 GOOS=\"${TARGETOS}\" GOARCH=\"${TARGETARCH}\" \\"
   print "      go build -mod=mod -trimpath -tags e2e \\"
   print "      -ldflags \"-w -X github.com/docker/compose/v5/internal.Version=v${OPENCLAW_DOCKER_COMPOSE_VERSION}\" \\"
@@ -189,14 +211,26 @@ function emit_docker_toolchain_stage() {
   print "      echo \"ERROR: Docker toolchain Go version is too old: ${compiler_go_version}\" >&2; \\"
   print "      exit 1; \\"
   print "    fi && \\"
-  print "    if ! go version -m /out/docker-compose | grep -Eq \"dep[[:space:]]+golang.org/x/crypto[[:space:]]+v0\\.55\\.0([[:space:]]|\\$)\"; then \\"
-  print "      echo \"ERROR: rebuilt Compose binary does not contain golang.org/x/crypto v0.55.0\" >&2; \\"
+  print "    if ! go version -m /out/docker-compose | grep -Fq \"$(printf \"dep\\tgolang.org/x/crypto\\tv%s\\t\" \"${OPENCLAW_DOCKER_CRYPTO_VERSION}\")\"; then \\"
+  print "      echo \"ERROR: rebuilt Compose binary does not contain golang.org/x/crypto v${OPENCLAW_DOCKER_CRYPTO_VERSION}\" >&2; \\"
   print "      exit 1; \\"
   print "    fi && \\"
-  print "    if ! go version -m /out/docker-compose | grep -Eq \"dep[[:space:]]+golang.org/x/mod[[:space:]]+v0\\.40\\.0([[:space:]]|\\$)\"; then \\"
-  print "      echo \"ERROR: rebuilt Compose binary does not contain golang.org/x/mod v0.40.0\" >&2; \\"
+  print "    if ! go version -m /out/docker-compose | grep -Fq \"$(printf \"dep\\tgolang.org/x/mod\\tv%s\\t\" \"${OPENCLAW_DOCKER_MOD_VERSION}\")\"; then \\"
+  print "      echo \"ERROR: rebuilt Compose binary does not contain golang.org/x/mod v${OPENCLAW_DOCKER_MOD_VERSION}\" >&2; \\"
   print "      exit 1; \\"
   print "    fi && \\"
+  print "    for tool_binary in /out/docker /out/docker-compose; do \\"
+  print "      if ! go version -m \"${tool_binary}\" | grep -Fq \"$(printf \"dep\\tgolang.org/x/net\\tv%s\\t\" \"${OPENCLAW_DOCKER_NET_VERSION}\")\"; then \\"
+  print "        echo \"ERROR: ${tool_binary} does not contain golang.org/x/net v${OPENCLAW_DOCKER_NET_VERSION}\" >&2; \\"
+  print "        exit 1; \\"
+  print "      fi; \\"
+  print "      for otel_module in go.opentelemetry.io/otel/sdk go.opentelemetry.io/otel/trace; do \\"
+  print "        if ! go version -m \"${tool_binary}\" | grep -Fq \"$(printf \"dep\\t%s\\tv%s\\t\" \"${otel_module}\" \"${OPENCLAW_DOCKER_OTEL_VERSION}\")\"; then \\"
+  print "          echo \"ERROR: ${tool_binary} does not contain ${otel_module} v${OPENCLAW_DOCKER_OTEL_VERSION}\" >&2; \\"
+  print "          exit 1; \\"
+  print "        fi; \\"
+  print "      done; \\"
+  print "    done && \\"
   print "    touch /out/enabled"
   print ""
 }

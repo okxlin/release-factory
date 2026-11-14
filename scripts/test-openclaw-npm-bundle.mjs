@@ -136,3 +136,49 @@ test('rejects a bundle dependency that escapes its npm root', async () => {
     fs.rmSync(temporary, {recursive: true});
   }
 });
+
+test('repairs the real global npm bundle and preserves its CLI', {timeout: 150000}, async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-global-npm-'));
+  try {
+    const components = JSON.parse(fs.readFileSync(new URL('../openclaw-builder/configs/components.json', import.meta.url)));
+    const version = components.build_args.OPENCLAW_NPM_VERSION;
+    fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({private: true, dependencies: {npm: version}}));
+    execFileSync('npm', ['install', '--prefix', temporary, '--ignore-scripts', '--package-lock=false',
+      '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], {timeout: 120000, stdio: 'pipe'});
+    const root = path.join(temporary, 'node_modules');
+    const directory = path.join(root, 'npm');
+    const packageFile = path.join(directory, 'package.json');
+    const originalPackage = fs.readFileSync(packageFile);
+    assert.equal(JSON.parse(originalPackage).version, version);
+    await patchNpmBundles(root, pins);
+    for (const [name, pin] of Object.entries(pins)) {
+      assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'node_modules', name, 'package.json'))).version, pin.version);
+    }
+    assert.deepEqual(fs.readFileSync(packageFile), originalPackage);
+    const cli = execFileSync(process.execPath, [path.join(directory, 'bin/npm-cli.js'), '--version'],
+      {encoding: 'utf8', timeout: 15000});
+    assert.equal(cli.trim(), version);
+    await patchNpmBundles(root, pins);
+  } finally {
+    fs.rmSync(temporary, {recursive: true});
+  }
+});
+
+test('rejects a global npm bundle that escapes its supplied root', async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-global-npm-escape-'));
+  try {
+    const root = path.join(temporary, 'node_modules');
+    const outside = path.join(temporary, 'outside/npm');
+    fs.mkdirSync(root);
+    fs.mkdirSync(path.join(outside, 'node_modules/brace-expansion'), {recursive: true});
+    fs.writeFileSync(path.join(outside, 'package.json'), '{"name":"npm","version":"11.21.2"}');
+    const packageFile = path.join(outside, 'node_modules/brace-expansion/package.json');
+    fs.writeFileSync(packageFile, '{"name":"brace-expansion","version":"5.0.12"}');
+    const original = fs.readFileSync(packageFile);
+    fs.symlinkSync(outside, path.join(root, 'npm'));
+    await assert.rejects(patchNpmBundles(root, pins), /unexpected bundled npm.*path/);
+    assert.deepEqual(fs.readFileSync(packageFile), original);
+  } finally {
+    fs.rmSync(temporary, {recursive: true});
+  }
+});

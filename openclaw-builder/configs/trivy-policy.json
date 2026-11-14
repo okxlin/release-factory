@@ -14,9 +14,9 @@
       "profiles": [
         "sandbox"
       ],
-      "reason": "Local source patch rejects security-zeroed cache reuse before max-stale and stale-while-revalidate. The image build verifies the exact original source hash and executes the advisory regression against every patched copy; package version is retained honestly. Review when upstream publishes a fix.",
+      "reason": "Reviewed against the official npm 12.1.0 and 12.2.0 bundles: the exact original index.js SHA-256 is checked and the native CachePolicy regression rejects unsafe max-stale/stale-while-revalidate reuse after patching while preserving normal reuse. Upstream 4.3.0 still has no fix. Scope is limited to this advisory, package, version and path through the next seven-day security-refresh window; retain the real package version and review again when a fix is published.",
       "reference": "https://github.com/kornelski/http-cache-semantics/issues/56",
-      "expires": "2026-11-03"
+      "expires": "2026-11-22"
     },
     {
       "id": "CVE-2026-93748",
@@ -27,9 +27,9 @@
       "profiles": [
         "sandbox"
       ],
-      "reason": "Local source patch rejects security-zeroed cache reuse before max-stale and stale-while-revalidate. The image build verifies the exact original source hash and executes the advisory regression against every patched copy; package version is retained honestly. Review when upstream publishes a fix.",
+      "reason": "Reviewed against the official npm 12.1.0 and 12.2.0 bundles: the exact original index.js SHA-256 is checked and the native CachePolicy regression rejects unsafe max-stale/stale-while-revalidate reuse after patching while preserving normal reuse. Upstream 4.3.0 still has no fix. Scope is limited to this advisory, package, version and path through the next seven-day security-refresh window; retain the real package version and review again when a fix is published.",
       "reference": "https://github.com/kornelski/http-cache-semantics/issues/56",
-      "expires": "2026-11-03"
+      "expires": "2026-11-22"
     }
   ]
 }

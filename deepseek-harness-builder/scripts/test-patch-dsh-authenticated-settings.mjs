@@ -80,14 +80,13 @@ function loadClient(source, ctx) {
   exports.apply(ctx)
 }
 
-test('reviewed upstream bundle persists remote preferences and preserves Host rejection', async t => {
-  const response = await fetch('https://registry.npmjs.org/@deepseek-ai/dsh-client-ui-settings/-/dsh-client-ui-settings-0.2.1-rc.2.tgz',
+async function verifyReviewedBundle(t, version, integrity) {
+  const response = await fetch(`https://registry.npmjs.org/@deepseek-ai/dsh-client-ui-settings/-/dsh-client-ui-settings-${version}.tgz`,
     { redirect: 'error', signal: AbortSignal.timeout(60000) })
   assert.equal(response.status, 200)
   const archive = Buffer.from(await response.arrayBuffer())
   assert.ok(archive.length < 1024 * 1024)
-  assert.equal(createHash('sha512').update(archive).digest('base64'),
-    'oU8f/0+DsdbgF0XhM+Po7W4PDJmTbhifQVwIoAcKfj29JN/4tLxKqIKS0IRcMbIGD39BGFITne78KIMgrGJy3Q==')
+  assert.equal(createHash('sha512').update(archive).digest('base64'), integrity)
   const source = execFileSync('tar', ['-xzOf', '-', 'package/lib/client.js'], { input: archive, encoding: 'utf8' })
   const f = await fixture(t, source)
   let result = run(f.root)
@@ -138,4 +137,12 @@ test('reviewed upstream bundle persists remote preferences and preserves Host re
   result = run(f.root)
   assert.notEqual(result.status, 0, 'unreviewed upstream source drift must fail closed')
   assert.match(result.stderr, /unexpected settings client source shape/)
-})
+}
+
+for (const [version, integrity] of [
+  ['0.2.1-rc.2', 'oU8f/0+DsdbgF0XhM+Po7W4PDJmTbhifQVwIoAcKfj29JN/4tLxKqIKS0IRcMbIGD39BGFITne78KIMgrGJy3Q=='],
+  ['0.2.2-rc.3', 'TKhhqu88UGr71A90AND+As6ioxRZmaUyLgferrCcKurAlJ7O8mClJZZj8EjsMtjzM1TZy1SOxa23WDsT5IZuvQ=='],
+]) {
+  test(`reviewed ${version} bundle persists remote preferences and preserves Host rejection`,
+    t => verifyReviewedBundle(t, version, integrity))
+}
