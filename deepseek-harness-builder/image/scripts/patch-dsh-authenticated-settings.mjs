@@ -72,12 +72,18 @@ async function patchSettingsMirror() {
   const target = join(packageRoot, 'lib', 'client.js')
   await assertTarget(target, 'settings client patch target')
   const source = await readFile(target, 'utf8')
-  // alpha.5 and rc.2 use the same Host-only ConfigForms implementation. Its
+  // These reviewed bundles use the Host-only ConfigForms implementation. Its
   // authenticated remote reads/writes replace the old host/memory selector.
   // Keep unknown bundles fail-closed, including changes to this new contract.
   // https://github.com/deepseek-ai/deepseek-harness/blob/687f282e8625c6b8d11ff58211a90524be2e4317/packages/client/ui-settings/src/client/index.ts
-  if (createHash('sha256').update(source).digest('hex')
-      === '0555eec2df1ca392a1167e637f287ac9963dbd2b0a230089c2a41be079c490e3') {
+  // rc.3 changes the emitted bundle; its Host persistence and rejection
+  // behavior is checked against the complete checksum-verified browser bundle.
+  // https://github.com/deepseek-ai/deepseek-harness/blob/38a6a5c965aa99ab525161efb7cc5cf1fe62fced/packages/client/ui-settings/src/client/index.ts
+  const reviewedHostBundles = new Set([
+    '0555eec2df1ca392a1167e637f287ac9963dbd2b0a230089c2a41be079c490e3',
+    'ebf76f56c79225a3bf484345305ee042f89ed13edd73cc76f8b16766628a17e6',
+  ])
+  if (reviewedHostBundles.has(createHash('sha256').update(source).digest('hex'))) {
     process.stdout.write(`[dsh-patch] verified upstream Host settings implementation: ${target}\n`)
     return
   }

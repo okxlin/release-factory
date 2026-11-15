@@ -268,6 +268,41 @@ test('repairs real runtime packages and preserves pnpm consumers and security pr
   }
 });
 
+// The pinned v2026.11.3 source contains both versions, including the newer copy.
+test('upgrades both runtime Undici versions from the current upstream lock', {timeout: 150000}, async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-current-undici-'));
+  try {
+    const versions = ['8.11.2', '8.12.2'];
+    const dependencies = Object.fromEntries(versions.map((version, index) => [`undici-${index}`, `npm:undici@${version}`]));
+    fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({private: true, dependencies}));
+    execFileSync('npm', ['install', '--prefix', temporary, '--ignore-scripts', '--package-lock=false',
+      '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], {timeout: 120000, stdio: 'pipe'});
+    const root = path.join(temporary, 'node_modules');
+    const directories = versions.map((version, index) => {
+      const original = path.join(root, `undici-${index}`);
+      const directory = path.join(root, '.pnpm', `undici@${version}`, 'node_modules/undici');
+      fs.mkdirSync(path.dirname(directory), {recursive: true});
+      fs.renameSync(original, directory);
+      fs.symlinkSync(path.relative(root, directory), original);
+      return {original, directory, link: fs.readlinkSync(original), version};
+    });
+    const unreviewedPins = {undici: {...pins.undici, from: ['8.11.2']}};
+    await assert.rejects(patchRuntimePackages(root, unreviewedPins), /unreviewed|unexpected|vulnerable/);
+    for (const {directory, version} of directories) {
+      assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'package.json'))).version, version);
+    }
+    await patchRuntimePackages(root, {undici: pins.undici});
+    for (const {original, directory, link} of directories) {
+      assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'package.json'))).version, pins.undici.version);
+      assert.equal(fs.readlinkSync(original), link);
+      checkPassed(run(undiciRegression, directory), /without an orphan stream/);
+    }
+    await patchRuntimePackages(root, {undici: pins.undici});
+  } finally {
+    fs.rmSync(temporary, {recursive: true});
+  }
+});
+
 test('builds browser bundles from fixed DOMPurify and both reviewed Zod 4 versions', {timeout: 180000}, async () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-browser-bundle-'));
   try {
@@ -337,6 +372,259 @@ test('builds browser bundles from fixed DOMPurify and both reviewed Zod 4 versio
     // cannot repair code already embedded in an asset.
     assert.match(run(zodProbe, oldBundle, 'current', '4.6.5').stderr,
       /bundled Zod parsed every oversized element/);
+  } finally {
+    fs.rmSync(temporary, {recursive: true});
+  }
+});
+
+
+// GHSA-qv5m-9pm6-hqp3: reset a real TCP socket while the upgrade handler awaits authentication.
+const nodeServerResetRegression = `
+  import assert from 'node:assert/strict';
+  import {EventEmitter, once} from 'node:events';
+  import {createRequire} from 'node:module';
+  import {createConnection} from 'node:net';
+  const {createAdaptorServer} = createRequire(import.meta.url)(process.argv[1]);
+  const wss = new EventEmitter();
+  wss.options = {noServer: true};
+  wss.handleUpgrade = () => assert.fail('destroyed socket reached the WebSocket handshake');
+  wss.close = () => {};
+  let entered, release;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  const pendingAuth = new Promise(resolve => { release = resolve; });
+  const server = createAdaptorServer({websocket: {server: wss}, fetch: async (request, env) => {
+    if (request.headers.get('upgrade') === 'websocket') {
+      entered(env.incoming.socket);
+      await pendingAuth;
+      return new Response('denied', {status: 403});
+    }
+    return new Response('healthy');
+  }});
+  await once(server.listen(0, '127.0.0.1'), 'listening');
+  const client = createConnection(server.address().port, '127.0.0.1');
+  client.on('error', () => {});
+  try {
+    await once(client, 'connect');
+    client.write('GET /upgrade HTTP/1.1\\r\\nHost: localhost\\r\\n' +
+      'Connection: Upgrade\\r\\nUpgrade: websocket\\r\\n' +
+      'Sec-WebSocket-Version: 13\\r\\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\\r\\n\\r\\n');
+    const socket = await waiting;
+    const closed = new Promise(resolve => socket.once('close', resolve));
+    client.resetAndDestroy();
+    await closed;
+    release();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(socket.destroyed, true);
+    const response = await fetch('http://127.0.0.1:' + server.address().port + '/health',
+      {headers: {connection: 'close'}});
+    assert.equal(await response.text(), 'healthy');
+    console.log('node-server survived a real TCP reset during asynchronous WebSocket upgrade');
+  } finally {
+    release(); client.destroy(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+`;
+
+test('repairs real Hono, IPv6 and serialization packages with pnpm consumers preserved', {timeout: 180000}, async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-runtime-network-'));
+  const names = ['hono', '@hono/node-server', 'ip-address', 'seroval'];
+  const selected = Object.fromEntries(names.map(name => [name, pins[name]]));
+  try {
+    const dependencies = Object.fromEntries(names.map(name => [name, selected[name].from[0]]));
+    fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({private: true, dependencies}));
+    execFileSync('npm', ['install', '--prefix', temporary, '--ignore-scripts', '--package-lock=false',
+      '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], {timeout: 120000, stdio: 'pipe'});
+    const root = path.join(temporary, 'node_modules');
+    const directories = {};
+    const links = new Map();
+    for (const name of names) {
+      const original = path.join(root, name);
+      const peer = name === '@hono/node-server' ? '_hono@4.13.12' : '';
+      const entry = `${name.replaceAll('/', '+')}@${selected[name].from[0]}${peer}`;
+      const directory = path.join(root, '.pnpm', entry, 'node_modules', name);
+      fs.mkdirSync(path.dirname(directory), {recursive: true});
+      fs.renameSync(original, directory);
+      fs.symlinkSync(path.relative(path.dirname(original), directory), original);
+      directories[name] = directory;
+      links.set(original, fs.readlinkSync(original));
+      if (name === '@hono/node-server') {
+        const sibling = path.join(root, '.pnpm', entry, 'node_modules/hono');
+        fs.symlinkSync(path.relative(path.dirname(sibling), directories.hono), sibling);
+        links.set(sibling, fs.readlinkSync(sibling));
+      }
+    }
+    const oldSignals = {hono: /text\/ping skipped/, '@hono/node-server': /raw backslash path was normalized/,
+      'ip-address': /IPv6 zone parsing exceeded/, seroval: /RegExp serialization can close/};
+    for (const name of names) {
+      assert.throws(() => verifyRuntimePackage(name, directories[name]), error =>
+        name === 'ip-address' && error.code === 'ETIMEDOUT' || oldSignals[name].test(error.stderr?.toString()));
+    }
+    const oldReset = run(nodeServerResetRegression, directories['@hono/node-server']);
+    assert.equal(oldReset.status, 1, oldReset.stderr);
+    assert.match(oldReset.stderr, /Unhandled 'error' event[\s\S]*ECONNRESET|read ECONNRESET/);
+    const bad = structuredClone(selected);
+    bad.hono.sha512 = '0'.repeat(128);
+    await assert.rejects(patchRuntimePackages(root, bad), {code: 'ERR_ASSERTION'});
+    for (const name of names) {
+      assert.equal(JSON.parse(fs.readFileSync(path.join(directories[name], 'package.json'))).version, selected[name].from[0]);
+    }
+    const receipt = await patchRuntimePackages(root, selected);
+    assert.equal(receipt.length, names.length);
+    for (const name of names) {
+      assert.equal(JSON.parse(fs.readFileSync(path.join(directories[name], 'package.json'))).version, selected[name].version);
+    }
+    for (const [link, target] of links) assert.equal(fs.readlinkSync(link), target);
+    checkPassed(run(nodeServerResetRegression, directories['@hono/node-server']), /survived a real TCP reset/);
+    const esm = run(`
+      import assert from 'node:assert/strict';
+      import {once} from 'node:events';
+      import path from 'node:path';
+      import {pathToFileURL} from 'node:url';
+      import vm from 'node:vm';
+      const {Hono} = await import(pathToFileURL(path.join(process.argv[1], 'dist/index.js')));
+      const {csrf} = await import(pathToFileURL(path.join(process.argv[1], 'dist/middleware/csrf/index.js')));
+      const {createAdaptorServer} = await import(pathToFileURL(path.join(process.argv[2], 'dist/index.mjs')));
+      const seroval = await import(pathToFileURL(path.join(process.argv[3], 'dist/index.js')));
+      const app = new Hono();
+      app.use('*', csrf());
+      app.get('/health/:name', c => c.json({name: c.req.param('name')}));
+      app.post('/change', c => c.text('changed'));
+      const server = createAdaptorServer({fetch: app.fetch});
+      await once(server.listen(0, '127.0.0.1'), 'listening');
+      try {
+        const base = 'http://127.0.0.1:' + server.address().port;
+        assert.deepEqual(await (await fetch(base + '/health/openclaw')).json(), {name: 'openclaw'});
+        assert.equal((await fetch(base + '/change', {method: 'POST', body: 'PING',
+          headers: {'content-type': 'text/ping', origin: 'https://foreign.test'}})).status, 403);
+        const value = new Uint8Array([4, 5]);
+        value.constructor = {name: 'Uint8Array([0]);globalThis.serovalInjection=1;//'};
+        for (const serialize of [seroval.serialize, seroval.serializeAsync]) {
+          const output = await serialize(value);
+          assert.equal(output.includes('serovalInjection'), false);
+          assert.deepEqual(Array.from(vm.runInNewContext('(' + output + ')', {atob})), [4, 5]);
+          const regex = new RegExp('(?<named>a)(?<=a)</script>', 'g');
+          const source = await serialize(regex);
+          assert.equal(source.includes('<'), false);
+          assert.equal(vm.runInNewContext('(' + source + ')').source, regex.source);
+        }
+        console.log('ESM Hono/adapter HTTP and seroval serialization passed');
+      } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+    `, directories.hono, directories['@hono/node-server'], directories.seroval);
+    checkPassed(esm, /ESM Hono\/adapter HTTP and seroval serialization passed/);
+    await patchRuntimePackages(root, selected);
+  } finally {
+    fs.rmSync(temporary, {recursive: true});
+  }
+});
+
+// GHSA-474x-hrwr-fgx4 requires stopNodes; the actual mailauth caller uses default XML parsing.
+const fastXmlStopNodesRegression = `
+  import assert from 'node:assert/strict';
+  import fs from 'node:fs';
+  import {createRequire} from 'node:module';
+  import path from 'node:path';
+  import {performance} from 'node:perf_hooks';
+  import {pathToFileURL} from 'node:url';
+  const directory = process.argv[1];
+  const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
+  const {XMLParser} = process.argv[2] === 'cjs' ? createRequire(import.meta.url)(directory) :
+    await import(pathToFileURL(path.join(directory, pkg.module)));
+  const parser = new XMLParser({stopNodes: ['stop']});
+  const start = performance.now();
+  assert.throws(() => parser.parse('<stop>' + '<a '.repeat(100000)), /Unexpected end/);
+  assert.ok(performance.now() - start < 1500, 'XML stop-node parsing exceeded 1.5 seconds');
+  console.log('XML stop-node CPU bound passed');
+`;
+
+const mailauthSvgCompatibility = `
+  import assert from 'node:assert/strict';
+  import {createRequire} from 'node:module';
+  const {validateSvg} = createRequire(import.meta.url)(process.argv[1]);
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" baseProfile="tiny-ps">' +
+    '<title>safe</title><path d="M0 0 L10 10" /></svg>';
+  assert.equal(validateSvg(Buffer.from(svg)), true);
+  for (const [xml, code] of [
+    [svg.replace('<title>safe</title>', ''), 'LOGO_MISSING_TITLE'],
+    [svg.replace('tiny-ps', 'full'), 'INVALID_BASE_PROFILE'],
+    [svg.replace('<path d="M0 0 L10 10" />', '<script>alert(1)</script>'), 'LOGO_INVALID_ELEMENT'],
+    [svg.replace('<path d="M0 0 L10 10" />',
+      '<use xlink:href="https://foreign.test/logo.svg" />'), 'LOGO_INCLUDES_REFERENCE'],
+    ['<svg><a ', 'INVALID_XML_FILE'],
+  ]) assert.throws(() => validateSvg(Buffer.from(xml)), error => error.code === code);
+  console.log('actual mailauth BIMI SVG positive and negative validation passed');
+`;
+
+test('repairs XML stop-node parsing with its required peers and preserves mailauth SVG checks', {timeout: 180000}, async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-xml-runtime-'));
+  try {
+    // Preserve the published graph from the actual v2026.11.3 lock, including ESM peers.
+    const selectedNames = ['is-unsafe', 'strnum', 'fast-xml-parser'];
+    const selected = Object.fromEntries(selectedNames.map(name => [name, pins[name]]));
+    const dependencies = {mailauth: '7.1.1', '@nodable/entities': '3.1.0', 'fast-xml-builder': '1.3.1',
+      'path-expression-matcher': '1.6.2', 'xml-naming': '0.3.0', anynum: '1.0.1',
+      ...Object.fromEntries(selectedNames.map(name => [name, selected[name].from[0]]))};
+    fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({private: true, dependencies}));
+    execFileSync('npm', ['install', '--prefix', temporary, '--ignore-scripts', '--package-lock=false',
+      '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], {timeout: 120000, stdio: 'pipe'});
+    const root = path.join(temporary, 'node_modules');
+    const directories = {};
+    const links = new Map();
+    for (const name of [...selectedNames, 'mailauth']) {
+      const original = path.join(root, name);
+      const version = dependencies[name];
+      assert.equal(JSON.parse(fs.readFileSync(path.join(original, 'package.json'))).version, version);
+      const directory = path.join(root, '.pnpm', `${name}@${version}`, 'node_modules', name);
+      fs.mkdirSync(path.dirname(directory), {recursive: true});
+      fs.renameSync(original, directory);
+      fs.symlinkSync(path.relative(root, directory), original);
+      directories[name] = directory;
+      links.set(original, fs.readlinkSync(original));
+    }
+    for (const [consumer, name] of [['fast-xml-parser', 'is-unsafe'], ['fast-xml-parser', 'strnum'],
+      ['mailauth', 'fast-xml-parser']]) {
+      const link = path.join(path.dirname(directories[consumer]), name);
+      fs.symlinkSync(path.relative(path.dirname(link), directories[name]), link);
+      links.set(link, fs.readlinkSync(link));
+    }
+    const svgEntry = path.join(directories.mailauth, 'lib/bimi/validate-svg.js');
+    const originalSvgSource = fs.readFileSync(svgEntry);
+    const mailauthPackage = fs.readFileSync(path.join(directories.mailauth, 'package.json'));
+    checkPassed(run(mailauthSvgCompatibility, svgEntry), /actual mailauth BIMI SVG/);
+    for (const mode of ['cjs', 'esm']) {
+      const old = spawnSync(process.execPath, ['--input-type=module', '-e', fastXmlStopNodesRegression,
+        directories['fast-xml-parser'], mode], {encoding: 'utf8', timeout: 2000});
+      if (old.error) assert.equal(old.error.code, 'ETIMEDOUT', old.error.message);
+      else {
+        assert.equal(old.status, 1, old.stderr);
+        assert.match(old.stderr, /XML stop-node parsing exceeded/);
+      }
+    }
+    const badPins = structuredClone(selected);
+    badPins['is-unsafe'].sha512 = '0'.repeat(128);
+    await assert.rejects(patchRuntimePackages(root, badPins), {code: 'ERR_ASSERTION'});
+    for (const name of selectedNames) {
+      assert.equal(JSON.parse(fs.readFileSync(path.join(directories[name], 'package.json'))).version,
+        selected[name].from[0]);
+    }
+    await patchRuntimePackages(root, selected);
+    for (const name of selectedNames) {
+      assert.equal(JSON.parse(fs.readFileSync(path.join(directories[name], 'package.json'))).version,
+        selected[name].version);
+      verifyRuntimePackage(name, directories[name]);
+    }
+    for (const [link, original] of links) assert.equal(fs.readlinkSync(link), original);
+    for (const mode of ['cjs', 'esm']) {
+      checkPassed(run(fastXmlStopNodesRegression, directories['fast-xml-parser'], mode), /XML stop-node CPU bound passed/);
+    }
+    checkPassed(run(mailauthSvgCompatibility, svgEntry), /actual mailauth BIMI SVG/);
+    assert.deepEqual(fs.readFileSync(svgEntry), originalSvgSource);
+    assert.deepEqual(fs.readFileSync(path.join(directories.mailauth, 'package.json')), mailauthPackage);
+    await patchRuntimePackages(root, selected);
+    const packageFile = path.join(directories['fast-xml-parser'], 'package.json');
+    const originalPackage = fs.readFileSync(packageFile);
+    fs.writeFileSync(packageFile, JSON.stringify({...JSON.parse(originalPackage), version: '5.12.1'}));
+    await assert.rejects(patchRuntimePackages(root, selected), /unreviewed fast-xml-parser version/);
+    fs.writeFileSync(packageFile, originalPackage);
   } finally {
     fs.rmSync(temporary, {recursive: true});
   }

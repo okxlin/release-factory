@@ -31,6 +31,12 @@ RUN apt-get update \
     && node --version \
     && rm -rf /var/lib/apt/lists/*
 
+COPY openclaw-builder/image/patch-vendored-deps.mjs /tmp/patch-npm-bundles.mjs
+COPY openclaw-builder/configs/components.json /tmp/npm-bundle-components.json
+RUN node --input-type=module -e 'import fs from "node:fs"; import {patchNpmBundles} from "/tmp/patch-npm-bundles.mjs"; await patchNpmBundles("/usr/local/lib/node_modules", JSON.parse(fs.readFileSync("/tmp/npm-bundle-components.json", "utf8")).npm_bundled);' \
+    && npm --version \
+    && rm /tmp/patch-npm-bundles.mjs /tmp/npm-bundle-components.json
+
 RUN --mount=type=bind,source=gemini-skill-browser-builder/image/runtime,target=/tmp/runtime \
     bash /tmp/runtime/install.sh 1000:1000
 

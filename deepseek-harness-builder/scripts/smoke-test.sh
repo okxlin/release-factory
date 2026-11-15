@@ -326,8 +326,10 @@ const validSettingsPatch = settingsPatchShapes.filter(({original, replacement, o
   !settingsSource.includes(original)
   && settingsSource.split(replacement).length - 1 === occurrences,
 );
-const upstreamHostSettings = createHash('sha256').update(settingsSource).digest('hex')
-  === '0555eec2df1ca392a1167e637f287ac9963dbd2b0a230089c2a41be079c490e3';
+const upstreamHostSettings = [
+  '0555eec2df1ca392a1167e637f287ac9963dbd2b0a230089c2a41be079c490e3',
+  'ebf76f56c79225a3bf484345305ee042f89ed13edd73cc76f8b16766628a17e6',
+].includes(createHash('sha256').update(settingsSource).digest('hex'));
 assert(upstreamHostSettings || validSettingsPatch.length === 1,
   'settings persistence uses the reviewed Host implementation or authenticated-proxy patch');
 

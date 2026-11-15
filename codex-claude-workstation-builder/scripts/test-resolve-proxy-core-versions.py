@@ -153,10 +153,10 @@ class ProxyCoreResolverTests(unittest.TestCase):
         self.assertIn({"module": "golang.org/x/mod", "version_arg": "PROXY_X_MOD_VERSION"}, policy["go_modules"])
         self.assertIn({"module": "github.com/go-jose/go-jose/v4", "version_arg": "SING_BOX_GO_JOSE_VERSION"}, policy["go_modules"])
         grpc_policy = next(item for item in policy["go_modules"] if item["module"] == "google.golang.org/grpc")
-        self.assertEqual(grpc_policy["max_version"], "1.83.2")
+        self.assertEqual(grpc_policy["max_version"], "1.85.0")
         compress_policy = next(item for item in policy["go_modules"] if item["module"] == "github.com/klauspost/compress")
         self.assertEqual(compress_policy["version_arg"], "MIHOMO_COMPRESS_VERSION")
-        self.assertEqual(compress_policy["max_version"], "1.18.7")
+        self.assertEqual(compress_policy["max_version"], "1.20.4")
 
 
 if __name__ == "__main__":

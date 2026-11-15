@@ -110,6 +110,78 @@ class RegistryTests(unittest.TestCase):
                     registry.get("blobs", digest)
                 self.assertEqual(http.call_count, 1)
 
+    def test_rejected_blob_redirect_reports_host_without_signed_credentials(self):
+        registry = MODULE.Registry("docker.io/okxlin/openclaw-sandbox")
+        registry.token = "hub-token"
+        digest = "sha256:" + "a" * 64
+        location = "https://user:signed-password@unreviewed-cdn.example/private-config?token=signed-secret"
+        with patch.object(MODULE, "http", return_value=(307, {"location": location}, b"")) as http:
+            with self.assertRaises(ValueError) as failure:
+                registry.get("blobs", digest)
+        message = str(failure.exception)
+        self.assertIn("registry-1.docker.io", message)
+        self.assertIn("unreviewed-cdn.example", message)
+        for sensitive in ("signed-password", "private-config", "signed-secret", "hub-token"):
+            self.assertNotIn(sensitive, message)
+        self.assertEqual(http.call_count, 1)
+
+    def test_relative_blob_redirect_is_resolved_before_destination_validation(self):
+        body = b'{"os":"linux"}'
+        digest = "sha256:" + hashlib.sha256(body).hexdigest()
+        for repository, location, expected in (
+            ("ghcr.io/okxlin/openclaw-sandbox", "//pkg-containers.githubusercontent.com/config?signature=fixture",
+             "https://pkg-containers.githubusercontent.com/config?signature=fixture"),
+            ("docker.io/okxlin/openclaw-sandbox", "//production.cloudfront.docker.com/config?signature=fixture",
+             "https://production.cloudfront.docker.com/config?signature=fixture"),
+            ("ghcr.io/okxlin/openclaw-sandbox", "?signature=fixture",
+             f"https://ghcr.io/v2/okxlin/openclaw-sandbox/blobs/{digest}?signature=fixture"),
+            ("docker.io/okxlin/openclaw-sandbox", f"./{digest}?signature=fixture",
+             f"https://registry-1.docker.io/v2/okxlin/openclaw-sandbox/blobs/{digest}?signature=fixture"),
+        ):
+            registry = MODULE.Registry(repository)
+            registry.token = "registry-token"
+            with self.subTest(repository=repository, location=location), patch.object(
+                MODULE, "http", side_effect=[(307, {"location": location}, b""), (200, {}, body)]
+            ) as http:
+                self.assertEqual(registry.get("blobs", digest), {"os": "linux"})
+                self.assertEqual(http.call_args_list[-1].args, (expected, {}))
+
+    def test_relative_blob_redirect_cannot_retarget_or_loop(self):
+        body = b'{"os":"linux"}'
+        digest = "sha256:" + hashlib.sha256(body).hexdigest()
+        blob_path = f"/v2/okxlin/openclaw-sandbox/blobs/{digest}"
+        self.registry.token = "registry-token"
+        for location in ("//example.org/config", "../manifests/latest", "../../../../token",
+                         "//user:pass@ghcr.io" + blob_path, "//ghcr.io:8443" + blob_path,
+                         "http://ghcr.io" + blob_path, "?signature=fixture#fragment", "", "?token=bad\nvalue"):
+            with self.subTest(location=location), patch.object(
+                MODULE, "http", return_value=(307, {"location": location}, b"")
+            ) as http:
+                with self.assertRaisesRegex(ValueError, "redirect"):
+                    self.registry.get("blobs", digest)
+                self.assertEqual(http.call_count, 1)
+        for response in ((307, {"location": "https://example.org/config"}, b""), (200, {}, b"{}")):
+            with self.subTest(response=response), patch.object(MODULE, "http", side_effect=[
+                (307, {"location": "?signature=fixture"}, b""), response
+            ]) as http:
+                with self.assertRaisesRegex(ValueError, "lookup failed|digest mismatch"):
+                    self.registry.get("blobs", digest)
+                self.assertEqual(http.call_count, 2)
+                self.assertEqual(http.call_args_list[-1].args[1], {})
+
+    def test_malformed_blob_redirect_cannot_log_signed_url_parts(self):
+        digest = "sha256:" + "a" * 64
+        for location in ("https://unreviewed-cdn.example:signed-secret/private-config",
+                         "https://[signed-secret/private-config"):
+            with self.subTest(location=location), patch.object(
+                MODULE, "http", return_value=(307, {"location": location}, b"")
+            ) as http:
+                with self.assertRaisesRegex(ValueError, "unexpected registry blob redirect") as failure:
+                    self.registry.get("blobs", digest)
+                self.assertNotIn("signed-secret", str(failure.exception))
+                self.assertNotIn("private-config", str(failure.exception))
+                self.assertEqual(http.call_count, 1)
+
     def test_config_platform_is_checked(self):
         config = {"os": "linux", "architecture": "amd64", "config": {"Labels": {"test": "ok"}}}
         body = json.dumps(config).encode()

@@ -1,6 +1,13 @@
 # syntax=docker/dockerfile:1
 ARG BASE_IMAGE
 ARG NODE_IMAGE
+ARG GO_TOOLS_IMAGE=docker.io/library/golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea
+FROM ${GO_TOOLS_IMAGE} AS docker-plugins
+COPY gemini-skill-browser-builder/image/runtime/build-workstation-go-tools.sh /tmp/build-workstation-go-tools.sh
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    bash /tmp/build-workstation-go-tools.sh plugins
+
 FROM ${NODE_IMAGE} AS node-runtime
 FROM ${BASE_IMAGE} AS nginx-module
 USER root
@@ -38,11 +45,41 @@ ARG SECURITY_REFRESH=manual
 RUN apt-get update \
     && for package in google-chrome-stable chromium chromium-browser locales; do apt-mark hold "$package" 2>/dev/null || true; done \
     && apt-get upgrade -y \
+    && apt-get purge -y docker-buildx-plugin docker-compose-plugin \
     && apt-get install -y --no-install-recommends curl ca-certificates git gnupg \
     && ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -sf /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
     && node --version \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=docker-plugins /out/cli-plugins/ /usr/libexec/docker/cli-plugins/
+COPY --from=docker-plugins /out/licenses/ /usr/share/doc/release-factory-go-tools/
+RUN docker buildx version | grep -F 'github.com/docker/buildx v0.39.0 ' \
+    && docker compose version | grep -F 'Docker Compose version v5.7.1'
+
+RUN --mount=type=bind,source=gemini-skill-browser-builder/configs/components.json,target=/tmp/browser-components.json \
+    pip_version="$(node -p "require('/tmp/browser-components.json').variants.linuxserver.pip.version")" \
+    && pip_url="$(node -p "require('/tmp/browser-components.json').variants.linuxserver.pip.url")" \
+    && pip_sha256="$(node -p "require('/tmp/browser-components.json').variants.linuxserver.pip.sha256")" \
+    && pip_stage="$(mktemp -d /tmp/release-factory-pip.XXXXXXXX)" \
+    && pip_wheel="${pip_stage}/pip-${pip_version}-py3-none-any.whl" \
+    && curl --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 --retry-all-errors \
+        --connect-timeout 20 --max-time 180 -fsSLo "${pip_wheel}" "${pip_url}" \
+    && printf '%s  %s\n' "${pip_sha256}" "${pip_wheel}" | sha256sum -c - \
+    && printf 'pip @ file://%s --hash=sha256:%s\n' "${pip_wheel}" "${pip_sha256}" > "${pip_stage}/requirements.txt" \
+    && /lsiopy/bin/python -m pip install --disable-pip-version-check --no-input --no-cache-dir \
+        --no-index --no-deps --no-compile --require-hashes --upgrade --requirement "${pip_stage}/requirements.txt" \
+    && /lsiopy/bin/python -m pip --version \
+    && /lsiopy/bin/python -c 'import pip, sys; assert pip.__version__ == sys.argv[1], pip.__version__' "${pip_version}" \
+    && /lsiopy/bin/python -m pip check \
+    && rm "${pip_stage}/requirements.txt" "${pip_wheel}" \
+    && rmdir "${pip_stage}"
+
+COPY openclaw-builder/image/patch-vendored-deps.mjs /tmp/patch-npm-bundles.mjs
+COPY openclaw-builder/configs/components.json /tmp/npm-bundle-components.json
+RUN node --input-type=module -e 'import fs from "node:fs"; import {patchNpmBundles} from "/tmp/patch-npm-bundles.mjs"; await patchNpmBundles("/usr/local/lib/node_modules", JSON.parse(fs.readFileSync("/tmp/npm-bundle-components.json", "utf8")).npm_bundled);' \
+    && npm --version \
+    && rm /tmp/patch-npm-bundles.mjs /tmp/npm-bundle-components.json
 
 # Debian's stable nginx currently lacks fixes already shipped by nginx.org.
 # Keep a newer base package when available; the fallback is integrity-pinned.

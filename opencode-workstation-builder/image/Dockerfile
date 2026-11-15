@@ -1,13 +1,27 @@
 # syntax=docker/dockerfile:1.7
+ARG GO_TOOLS_IMAGE=docker.io/library/golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea
+FROM ${GO_TOOLS_IMAGE} AS workstation-go-tools
+ARG ACTIONLINT_VERSION=1.7.12
+ARG ACTIONLINT_SOURCE_SHA256=454800bd4f854592bcfe79b161f71d56e35940eb7016e48a26dd356adc9d400a
+COPY build-workstation-go-tools.sh /tmp/build-workstation-go-tools.sh
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    ACTIONLINT_VERSION="${ACTIONLINT_VERSION}" ACTIONLINT_SOURCE_SHA256="${ACTIONLINT_SOURCE_SHA256}" \
+    bash /tmp/build-workstation-go-tools.sh all
+
 FROM node:24-bookworm-slim
+
+COPY --from=workstation-go-tools /out/bin/ /usr/local/bin/
+COPY --from=workstation-go-tools /out/cli-plugins/ /usr/libexec/docker/cli-plugins/
+COPY --from=workstation-go-tools /out/licenses/ /usr/share/doc/release-factory-go-tools/
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-ARG BUN_VERSION=1.4.0
+ARG BUN_VERSION=1.4.4
 ARG ACTIONLINT_VERSION=1.7.12
-ARG GO_VERSION=1.27.0
-ARG GO_SHA256_AMD64=675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685
-ARG GO_SHA256_ARM64=51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda
+ARG GO_VERSION=1.27.4
+ARG GO_SHA256_AMD64=7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
+ARG GO_SHA256_ARM64=3392582988a273a87ab5043ee1b2c9c17a2c3c00580bf9326c47a2e0aaaeac92
 ARG USERNAME=opencode
 ARG USER_UID=1000
 ARG USER_GID=1000
@@ -41,7 +55,6 @@ RUN apt-get update \
         fd-find \
         g++ \
         gcc \
-        gh \
         git \
         gnupg \
         jq \
@@ -89,16 +102,6 @@ RUN apt-get update \
         pigz \
         yq \
         tldr \
-    && install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
-    && chmod a+r /etc/apt/keyrings/docker.asc \
-    && . /etc/os-release \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian ${VERSION_CODENAME} stable" > /etc/apt/sources.list.d/docker.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        docker-ce-cli \
-        docker-buildx-plugin \
-        docker-compose-plugin \
     && npm install -g @code-yeongyu/comment-checker corepack npm pnpm yarn \
     && ln -sf /usr/local/lib/node_modules/@code-yeongyu/comment-checker/cli.js /usr/local/bin/comment-checker \
     && mkdir -p /usr/local/lib/docker/cli-plugins \
@@ -149,25 +152,6 @@ RUN curl --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max
     && chown -R "${USER_UID}:${USER_GID}" /opt/bun
 
 ENV BUN_VERSION=${BUN_VERSION}
-
-RUN dpkg_arch="$(dpkg --print-architecture)" \
-    && case "${dpkg_arch}" in \
-         amd64) actionlint_arch='amd64' ;; \
-         arm64) actionlint_arch='arm64' ;; \
-         *) echo "unsupported architecture for actionlint install: ${dpkg_arch}" >&2; exit 1 ;; \
-       esac \
-    && actionlint_version="${ACTIONLINT_VERSION#v}" \
-    && actionlint_asset="actionlint_${actionlint_version}_linux_${actionlint_arch}.tar.gz" \
-    && curl --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 120 \
-        -fsSL "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/${actionlint_asset}" -o "/tmp/${actionlint_asset}" \
-    && curl --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 120 \
-        -fsSL "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/actionlint_${actionlint_version}_checksums.txt" -o /tmp/actionlint_checksums.txt \
-    && grep "  ${actionlint_asset}$" /tmp/actionlint_checksums.txt > /tmp/actionlint.sha256 \
-    && (cd /tmp && sha256sum -c /tmp/actionlint.sha256) \
-    && tar -xzf "/tmp/${actionlint_asset}" -C /tmp actionlint \
-    && install -m 0755 /tmp/actionlint /usr/local/bin/actionlint \
-    && actionlint --version \
-    && rm -f "/tmp/${actionlint_asset}" /tmp/actionlint_checksums.txt /tmp/actionlint.sha256 /tmp/actionlint
 
 RUN dpkg_arch="$(dpkg --print-architecture)" \
     && case "${dpkg_arch}" in \

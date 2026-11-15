@@ -364,8 +364,12 @@ ARG DOCKER_BUILDX_VERSION
 ARG DOCKER_COMPOSE_VERSION
 ARG DOCKER_VERSION
 ARG GO_VERSION
+ARG GRPC_VERSION
 ARG MOBY_GO_ARCHIVE_VERSION
+ARG OTEL_VERSION
+ARG X_CRYPTO_VERSION
 ARG X_MOD_VERSION
+ARG X_NET_VERSION
 
 ADD --checksum=sha256:${DOCKER_ARCHIVE_SHA256} \
     https://codeload.github.com/docker/cli/tar.gz/refs/tags/v${DOCKER_VERSION} /tmp/docker-cli.tar.gz
@@ -389,8 +393,20 @@ RUN mkdir -p \
 
 WORKDIR /usr/src/docker-cli
 
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 ./scripts/with-go-mod.sh go build -mod=vendor -trimpath \
+# Preserve the CLI source while replacing its stale vendored Go dependencies.
+RUN cp vendor.mod go.mod \
+    && cp vendor.sum go.sum \
+    && go mod edit \
+        -require="golang.org/x/net@v${X_NET_VERSION}" \
+        -require="golang.org/x/mod@v${X_MOD_VERSION}" \
+        -require="google.golang.org/grpc@v${GRPC_VERSION}" \
+        -require="go.opentelemetry.io/otel@v${OTEL_VERSION}" \
+        -require="go.opentelemetry.io/otel/sdk@v${OTEL_VERSION}" \
+        -require="go.opentelemetry.io/otel/trace@v${OTEL_VERSION}"
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -mod=mod -trimpath \
         -ldflags="-s -w \
             -X github.com/docker/cli/cli/version.Version=${DOCKER_VERSION} \
             -X github.com/docker/cli/cli/version.GitCommit=v${DOCKER_VERSION} \
@@ -398,7 +414,12 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
         -o /out/docker ./cmd/docker \
     && /out/docker --version | grep -F "Docker version ${DOCKER_VERSION}," \
     && go version -m /out/docker | grep -F "go${GO_VERSION}" \
-    && CGO_ENABLED=0 ./scripts/with-go-mod.sh go list -mod=vendor -deps ./cmd/docker \
+    && go version -m /out/docker | grep -Eq \
+        "golang\\.org/x/net[[:space:]]+v${X_NET_VERSION}([[:space:]]|$)" \
+    && for module in go.opentelemetry.io/otel/sdk go.opentelemetry.io/otel/trace; do \
+        go version -m /out/docker | grep -F "$(printf 'dep\t%s\tv%s\t' "${module}" "${OTEL_VERSION}")"; \
+    done \
+    && CGO_ENABLED=0 go list -mod=mod -deps ./cmd/docker \
         > /licenses/DOCKER_CLI_GO_PACKAGES.txt
 
 WORKDIR /usr/src/docker-buildx
@@ -407,7 +428,9 @@ WORKDIR /usr/src/docker-buildx
 # legacy Docker module contributes only namesgenerator, not daemon AuthZ code.
 # go-archive and x/mod fixes still apply to code used by these clients.
 RUN go mod edit -require="github.com/moby/go-archive@v${MOBY_GO_ARCHIVE_VERSION}" \
+    && go mod edit -require="golang.org/x/crypto@v${X_CRYPTO_VERSION}" \
     && go mod edit -require="golang.org/x/mod@v${X_MOD_VERSION}" \
+    && go mod edit -require="golang.org/x/net@v${X_NET_VERSION}" \
     && go mod tidy
 
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -425,6 +448,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         "github\\.com/moby/go-archive[[:space:]]+v${MOBY_GO_ARCHIVE_VERSION}([[:space:]]|$)" \
     && go version -m /out/docker-buildx | grep -Eq \
         "golang\\.org/x/mod[[:space:]]+v${X_MOD_VERSION}([[:space:]]|$)" \
+    && go version -m /out/docker-buildx | grep -Eq \
+        "golang\\.org/x/net[[:space:]]+v${X_NET_VERSION}([[:space:]]|$)" \
     && CGO_ENABLED=0 go list -mod=mod -deps ./cmd/buildx \
         > /licenses/DOCKER_BUILDX_GO_PACKAGES.txt
 
@@ -432,7 +457,9 @@ WORKDIR /usr/src/docker-compose
 
 RUN go mod edit -require="github.com/docker/buildx@v${DOCKER_BUILDX_VERSION}" \
     && go mod edit -require="github.com/moby/go-archive@v${MOBY_GO_ARCHIVE_VERSION}" \
+    && go mod edit -require="golang.org/x/crypto@v${X_CRYPTO_VERSION}" \
     && go mod edit -require="golang.org/x/mod@v${X_MOD_VERSION}" \
+    && go mod edit -require="golang.org/x/net@v${X_NET_VERSION}" \
     && go mod tidy
 
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -444,6 +471,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     && /out/docker-compose version \
         | grep -F "Docker Compose version v${DOCKER_COMPOSE_VERSION}" \
     && go version -m /out/docker-compose | grep -F "go${GO_VERSION}" \
+    && go version -m /out/docker-compose | grep -Eq \
+        "golang\\.org/x/net[[:space:]]+v${X_NET_VERSION}([[:space:]]|$)" \
     && if compose_x_mod_version="$(go list -m -f '{{.Version}}' golang.org/x/mod 2>/dev/null)"; then \
         test "${compose_x_mod_version}" = "v${X_MOD_VERSION}"; \
     fi \
@@ -460,7 +489,8 @@ RUN grep -Fx 'github.com/docker/cli/cmd/docker' /licenses/DOCKER_CLI_GO_PACKAGES
             = 'github.com/docker/docker/pkg/namesgenerator' || exit 1; \
     done \
     && ! grep -E '^github.com/(docker/docker|moby/moby(/v[0-9]+)?)/(pkg/authorization|daemon)(/|$)' \
-        /licenses/DOCKER_*_GO_PACKAGES.txt
+        /licenses/DOCKER_*_GO_PACKAGES.txt \
+    && ! grep -E '^golang.org/x/crypto/openpgp(/|$)' /licenses/DOCKER_*_GO_PACKAGES.txt
 
 RUN printf '%s  %s\n' \
         "${DOCKER_CLI_LICENSE_SHA256}" \
@@ -570,6 +600,7 @@ ARG RUFF_LICENSE_SHA256
 ARG TARGETARCH
 ARG ACTIONLINT_VERSION
 ARG ACTIONLINT_SOURCE_SHA256
+ARG X_SYS_VERSION
 ARG RUFF_VERSION
 ARG RUFF_SHA256_AMD64
 ARG RUFF_SHA256_ARM64
@@ -613,6 +644,8 @@ RUN case "${TARGETARCH}" in \
     && tar -xzf /tmp/actionlint-source.tar.gz -C /tmp/actionlint-source --strip-components=1 \
     && grep -Fxq 'module github.com/rhysd/actionlint' /tmp/actionlint-source/go.mod \
     && cd /tmp/actionlint-source \
+    && go mod edit -require="golang.org/x/sys@v${X_SYS_VERSION}" \
+    && go mod tidy \
     && go mod download \
     && go mod verify \
     && CGO_ENABLED=0 go build \
@@ -664,6 +697,8 @@ RUN case "${TARGETARCH}" in \
     && install -m 0644 /tmp/ruff-license /out/licenses/ruff/LICENSE \
     && /out/bin/actionlint -version | grep -Fx "${ACTIONLINT_VERSION}" \
     && go version -m /out/bin/actionlint | grep -F "go${GO_VERSION}" \
+    && go version -m /out/bin/actionlint | grep -Eq \
+        "golang\\.org/x/sys[[:space:]]+v${X_SYS_VERSION}([[:space:]]|$)" \
     && /out/bin/yq --version | grep -F "version v${YQ_VERSION}" \
     && /out/bin/uv --version | grep -F "uv ${UV_VERSION} " \
     && /out/bin/uvx --version | grep -F "uvx ${UV_VERSION} " \

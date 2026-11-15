@@ -22,7 +22,8 @@ class DcpTests(unittest.TestCase):
         self.baseline.mkdir()
         (self.baseline / "package.json").write_text(json.dumps({"config": {
             "dcpPackage": PACKAGE, "dcpSerovalVersion": "1.6.9",
-            "dcpTomlVersion": "5.0.1", "dcpZodVersion": "4.6.6"}}))
+            "dcpTomlVersion": "5.0.1", "dcpZodVersion": "4.6.6",
+            "dcpBabelVersion": "7.29.13"}}))
         self.cache = self.root / "cache"
         self.directory = self.cache / "opencode/packages" / PACKAGE
         self.config = self.root / "config/opencode"
@@ -31,7 +32,7 @@ class DcpTests(unittest.TestCase):
     def prepare(self, package=PACKAGE):
         MODULE.prepare(package, self.baseline, self.cache, self.run, config_dirs=[self.config])
 
-    def seed(self, serializer, override=None, toml="5.0.1", zod="4.6.6"):
+    def seed(self, serializer, override=None, toml="5.0.1", zod="4.6.6", babel="7.29.13"):
         (self.directory / "node_modules/@tarquinen/opencode-dcp").mkdir(parents=True, exist_ok=True)
         data = {"dependencies": {"@tarquinen/opencode-dcp": "3.1.15"},
                 "overrides": {"unrelated": "2.0.0"}, "description": "keep this"}
@@ -41,11 +42,14 @@ class DcpTests(unittest.TestCase):
             data["overrides"]["toml"] = toml
         if zod:
             data["overrides"]["zod"] = zod
+        if babel:
+            data["overrides"]["@babel/core"] = babel
         (self.directory / "package.json").write_text(json.dumps(data))
         (self.directory / "package-lock.json").write_text(json.dumps({"packages": {
             "node_modules/seroval": {"version": serializer},
             "node_modules/toml": {"version": toml},
-            "node_modules/zod": {"version": zod}}}))
+            "node_modules/zod": {"version": zod},
+            "node_modules/@babel/core": {"version": babel}}}))
 
     def seed_config(self, zod="4.6.6", toml="5.0.1", nested=False):
         plugin = "node_modules/@opencode-ai/plugin"
@@ -66,7 +70,8 @@ class DcpTests(unittest.TestCase):
     def test_fresh_cache_seeds_override_for_opencode_install(self):
         self.prepare()
         data = json.loads((self.directory / "package.json").read_text())
-        self.assertEqual(data["overrides"], {"seroval": "1.6.9", "toml": "5.0.1", "zod": "4.6.6"})
+        self.assertEqual(data["overrides"], {"seroval": "1.6.9", "toml": "5.0.1", "zod": "4.6.6",
+                                             "@babel/core": "7.29.13"})
         config = json.loads((self.config / "package.json").read_text())
         self.assertEqual(config["overrides"], {"@opencode-ai/plugin": {
             "zod": "4.6.6", "effect": {"toml": "5.0.1"}}})
@@ -76,7 +81,8 @@ class DcpTests(unittest.TestCase):
         self.seed("1.5.6")
         self.prepare()
         data = json.loads((self.directory / "package.json").read_text())
-        self.assertEqual(data["overrides"], {"unrelated": "2.0.0", "seroval": "1.6.9", "toml": "5.0.1", "zod": "4.6.6"})
+        self.assertEqual(data["overrides"], {"unrelated": "2.0.0", "seroval": "1.6.9", "toml": "5.0.1",
+                                             "zod": "4.6.6", "@babel/core": "7.29.13"})
         self.assertEqual(data["description"], "keep this")
         self.assertEqual(data["dependencies"], {"@tarquinen/opencode-dcp": "3.1.15"})
         self.run.assert_called_once_with(["npm", "install", "--prefix", str(self.directory),
@@ -93,8 +99,8 @@ class DcpTests(unittest.TestCase):
         self.prepare()
         self.run.assert_called_once()
 
-    def test_stale_toml_or_zod_in_cache_is_refreshed_with_current_overrides(self):
-        for name, version in (("toml", "4.3.0"), ("zod", "4.1.8")):
+    def test_stale_cache_dependency_is_refreshed_with_current_overrides(self):
+        for name, version in (("toml", "4.3.0"), ("zod", "4.1.8"), ("@babel/core", "7.29.0")):
             with self.subTest(package=name):
                 self.seed("1.6.9", "1.6.9")
                 lock = json.loads((self.directory / "package-lock.json").read_text())
@@ -103,6 +109,14 @@ class DcpTests(unittest.TestCase):
                 self.run.reset_mock()
                 self.prepare()
                 self.run.assert_called_once()
+
+    def test_babel_major_is_preserved(self):
+        data = json.loads((self.baseline / "package.json").read_text())
+        data["config"]["dcpBabelVersion"] = "8.0.0"
+        (self.baseline / "package.json").write_text(json.dumps(data))
+        with self.assertRaisesRegex(ValueError, "Babel.*reviewed major"):
+            self.prepare()
+        self.assertFalse(self.cache.exists())
 
     def test_stale_config_dependencies_are_refreshed_without_changing_other_overrides(self):
         self.seed_config(zod="4.1.8", toml="4.3.0")

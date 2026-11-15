@@ -52,7 +52,21 @@ def main(image, report):
                                        "http://127.0.0.1:4096/config").stdout)
             expected = json.loads(docker("exec", name, "cat", "/opt/opencode/package.json").stdout)
             assert expected["config"]["dcpPackage"] in config["plugin"], "default DCP plugin not loaded"
+            assert "compress" in config["experimental"]["primary_tools"], "DCP server hook not applied"
+            assert config["permission"]["compress"] == "allow", "DCP permission hook not applied"
             if phase == "first":
+                for content_type, body, status in (
+                    ("application/json", '{"target":"https://invalid.example/package.tgz"}', "400"),
+                    ("application/json", "{}", "400"),
+                    ("application/json", "", "400"),
+                    ("text/plain", '{"target":"latest"}', "415"),
+                ):
+                    actual = docker("exec", name, "curl", "-sS", "--max-time", "10", "-o", "/dev/null",
+                                    "-w", "%{http_code}", "-u", "opencode:" + password, "-X", "POST",
+                                    "-H", "Content-Type: " + content_type, "--data-binary", body,
+                                    "http://127.0.0.1:4096/global/upgrade").stdout
+                    assert actual == status, f"OpenCode accepted invalid upgrade input ({content_type}, {status})"
+                print("PASS: OpenCode rejects invalid upgrade requests", flush=True)
                 assert docker("exec", name, "test", "-e", "/usr/bin/node", check=False).returncode != 0, "unexpected second distro Node runtime"
                 docker("exec", name, "tsc", "--version")
                 print(docker("exec", name, "/app/scripts/smoke-test.sh", timeout=600).stdout, end="", flush=True)
