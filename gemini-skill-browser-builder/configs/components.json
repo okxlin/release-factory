@@ -22,9 +22,9 @@
         "fancyindex_sha256": "25e820923e7cbe6a020b796137f77fd73391d4681d259a5a93a8feb01c5db89e"
       },
       "pip": {
-        "version": "26.2",
-        "url": "https://files.pythonhosted.org/packages/62/36/a3aed958d60531cb442b7ab4596cda7b3621cfb916f8ae1d6769795c7dc1/pip-26.2-py3-none-any.whl",
-        "sha256": "931c303696af6fa3417112103b1cad26890e5a07eccb5b99783700e33f2b8aad"
+        "version": "26.3",
+        "url": "https://files.pythonhosted.org/packages/07/25/ee8c38ae72d66b844ce8eb9711ba905dba21ca1a8a0c960057c41cd23337/pip-26.3-py3-none-any.whl",
+        "sha256": "f3b60b20ffaadd4415ed7957212a38ac63fa4c5fa375bd0f4a797777940fad13"
       }
     }
   }

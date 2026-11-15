@@ -153,6 +153,24 @@ RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g "npm@${NPM_VERSION}"
 
+# Backport Ubuntu's complete setuptools tree and wheel before pipx can seed it.
+COPY setuptools-security/ /tmp/setuptools-security/
+RUN setuptools_ubuntu_version=68.1.2-2ubuntu1.2 \
+    && for setuptools_package in python3-setuptools python3-setuptools-whl python3-pkg-resources; do \
+        test "$(dpkg-query -W -f='${Version}' "${setuptools_package}")" = "${setuptools_ubuntu_version}" || exit 1; \
+    done \
+    && python3 /tmp/setuptools-security/patch-setuptools-ubuntu68.py \
+        --site-packages /usr/lib/python3/dist-packages \
+        --wheel /usr/share/python-wheels/setuptools-68.1.2-py3-none-any.whl \
+    && setuptools_checks="$(mktemp -d /tmp/release-factory-setuptools.XXXXXXXX)" \
+    && python3 -B /tmp/setuptools-security/test-backports.py \
+        --source-root /usr/lib/python3/dist-packages --work-root "${setuptools_checks}/system" --phase green \
+    && python3 -B /tmp/setuptools-security/test-backports.py \
+        --source-root /usr/share/python-wheels/setuptools-68.1.2-py3-none-any.whl \
+        --work-root "${setuptools_checks}/wheel" --phase green \
+    && rm -rf "${setuptools_checks}" /tmp/setuptools-security
+COPY setuptools-security/UPSTREAM.md /usr/share/doc/setuptools-security/UPSTREAM.md
+
 # ── Go ──
 RUN dpkg_arch="$(dpkg --print-architecture)" \
     && case "${dpkg_arch}" in \
@@ -353,18 +371,6 @@ RUN [[ "${CODE_SERVER_UNDICI_VERSION}" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]] \
         "${undici_dir}" "${CODE_SERVER_UNDICI_VERSION}" \
     && rm -f "/tmp/${tarball}"
 
-# Replace complete, locked dependency trees. Sandbox Runtime keeps Zod's v3
-# entry contract, with the bounded-container security fix backported to v3.
-COPY code-server-security/ /tmp/code-server-security/
-COPY patch-code-server-deps.mjs /tmp/patch-code-server-deps.mjs
-RUN cd /tmp/code-server-security \
-    && npm ci --install-strategy=nested --omit=dev --ignore-scripts --no-audit --no-fund \
-    && npm audit signatures \
-    && npm audit --omit=dev --audit-level=high \
-    && node /tmp/patch-code-server-deps.mjs /usr/lib/code-server /tmp/code-server-security \
-    && rm -rf /tmp/code-server-security /tmp/patch-code-server-deps.mjs
-COPY code-server-security/UPSTREAM.md /usr/share/doc/code-server-security/UPSTREAM.md
-
 # Fix FTP directory/PASV parser denial of service in code-server's proxy dependencies.
 # https://github.com/patrickjuchli/basic-ftp/releases/tag/v6.2.2
 ARG CODE_SERVER_BASIC_FTP_VERSION=6.2.2
@@ -455,6 +461,24 @@ RUN install -d -o dev -g dev /opt/code-server/extensions \
         sudo -u dev code-server --extensions-dir /opt/code-server/extensions --install-extension "${extension}"; \
     done \
     && rm -rf /home/dev/.local/share/code-server/CachedExtensionVSIXs
+
+# Replace complete, locked trees after extensions exist, including EditorConfig.
+# Sandbox Runtime keeps the bounded-container fix with Zod's v3 entry contract.
+COPY code-server-security/ /tmp/code-server-security/
+COPY patch-code-server-deps.mjs /tmp/patch-code-server-deps.mjs
+RUN cd /tmp/code-server-security \
+    && npm ci --install-strategy=nested --omit=dev --ignore-scripts --no-audit --no-fund \
+    && npm audit signatures \
+    && npm audit --omit=dev --audit-level=high \
+    && node /tmp/patch-code-server-deps.mjs /usr/lib/code-server /tmp/code-server-security \
+        /opt/code-server/extensions "${CODE_SERVER_EXTENSIONS}" \
+    && editorconfig_brace_dir=/opt/code-server/extensions/editorconfig.editorconfig-0.18.2-universal/node_modules/editorconfig/node_modules/brace-expansion \
+    && if [ -d "${editorconfig_brace_dir}" ]; then \
+        chown --from=root:root -R dev:dev "${editorconfig_brace_dir}"; \
+    fi \
+    && rm -rf /tmp/code-server-security /tmp/patch-code-server-deps.mjs
+COPY code-server-security/UPSTREAM.md /usr/share/doc/code-server-security/UPSTREAM.md
+
 # ── Supervisord config ──
 COPY config/supervisord/supervisord.conf /etc/supervisor/supervisord.conf
 COPY config/supervisord/conf.d/ /etc/supervisor/conf.d/
