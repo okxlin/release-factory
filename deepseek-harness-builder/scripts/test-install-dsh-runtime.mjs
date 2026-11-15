@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -174,4 +174,68 @@ test('installs unpublished local tarballs offline without opt-in plugins or life
   const lock = JSON.parse(readFileSync(join(runtime, 'node_modules/.package-lock.json')))
   assert.equal(Object.keys(lock.packages).length, 4)
   assert.ok(Object.values(lock.packages).every(pkg => pkg.resolved.startsWith('file:')))
+})
+
+test('applies the reviewed fflate override to a source-only office dependency and rejects malformed ZIP64', { timeout: 120000 }, t => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-fflate-override-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const office = '@deepseek-ai/libreoffice-kit'
+  const packages = [
+    fixture(cli, { dependencies: { [office]: '0.2.3' } }),
+    fixture(office, { version: '0.2.3', dependencies: { fflate: '0.8.2' } }),
+  ]
+  const tarballs = packages.map(({ manifest }, index) => {
+    const stage = join(root, `stage-${index}`)
+    const payload = join(stage, 'package')
+    mkdirSync(payload, { recursive: true })
+    writeFileSync(join(payload, 'package.json'), JSON.stringify(manifest))
+    writeFileSync(join(payload, 'index.js'), 'module.exports = "local-office-source"\n')
+    const tarball = join(root, `${index}.tgz`)
+    execFileSync('tar', ['-czf', tarball, '-C', stage, 'package'])
+    return tarball
+  })
+  const installer = fileURLToPath(new URL('../image/scripts/install-dsh-runtime.mjs', import.meta.url))
+  const verifier = fileURLToPath(new URL('./verify-runtime-dependencies.mjs', import.meta.url))
+  const pins = JSON.parse(readFileSync(new URL('../image/package.json', import.meta.url)))
+  const install = (name, overrides) => {
+    const runtime = join(root, name)
+    mkdirSync(runtime)
+    writeFileSync(join(runtime, 'package.json'), JSON.stringify({ name: 'office-runtime-fixture', private: true, overrides }))
+    // The Docker source path retains its overrides through npm init first.
+    execFileSync('npm', ['init', '--yes'], { cwd: runtime, encoding: 'utf8', timeout: 10000 })
+    execFileSync(process.execPath, [installer, ...tarballs], {
+      cwd: runtime, encoding: 'utf8', timeout: 60000,
+      env: { ...process.env, NPM_CONFIG_REGISTRY: 'https://registry.npmjs.org' },
+    })
+    return runtime
+  }
+  const original = install('original', {})
+  const red = spawnSync(process.execPath, [verifier, original, 'fflate'], { encoding: 'utf8', timeout: 10000 })
+  assert.equal(red.error, undefined, red.error?.message)
+  assert.equal(red.status, 1, red.stderr)
+  assert.match(red.stderr, /fflate ZIP64 parser exceeded two seconds/)
+  console.log('RED: original fflate 0.8.2 ZIP64 parser stalled; bounded worker terminated')
+
+  const runtime = install('reviewed', pins.overrides)
+  const result = spawnSync(process.execPath, [verifier, runtime, 'fflate'], { encoding: 'utf8', timeout: 10000 })
+  assert.equal(result.error, undefined, result.error?.message)
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /Verified fflate 0\.8\.3 cjs/)
+  assert.match(result.stdout, /Verified fflate 0\.8\.3 esm/)
+  console.log(result.stdout.trim())
+  const stdinResult = spawnSync(process.execPath, ['--input-type=module', '-', runtime, 'fflate'], {
+    input: readFileSync(verifier, 'utf8'), encoding: 'utf8', timeout: 10000,
+  })
+  assert.equal(stdinResult.error, undefined, stdinResult.error?.message)
+  assert.equal(stdinResult.status, 0, stdinResult.stderr)
+  assert.match(stdinResult.stdout, /Verified fflate 0\.8\.3 cjs/)
+  assert.match(stdinResult.stdout, /Verified fflate 0\.8\.3 esm/)
+  assert.equal(readFileSync(join(runtime, 'node_modules', office, 'index.js'), 'utf8'), 'module.exports = "local-office-source"\n')
+  const lock = JSON.parse(readFileSync(join(runtime, 'node_modules/.package-lock.json')))
+  assert.deepEqual(Object.keys(lock.packages).sort(), [
+    `node_modules/${cli}`, `node_modules/${office}`, 'node_modules/fflate',
+  ].sort())
+  assert.equal(lock.packages['node_modules/fflate'].version, '0.8.3')
+  assert.equal(lock.packages['node_modules/fflate'].integrity,
+    'sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==')
 })

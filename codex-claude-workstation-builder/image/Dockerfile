@@ -1,16 +1,30 @@
 # codex-claude-workstation Dockerfile v2
 # Ubuntu 24.04 base, linux/amd64 and linux/arm64
+ARG GO_TOOLS_IMAGE=docker.io/library/golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea
+FROM ${GO_TOOLS_IMAGE} AS workstation-go-tools
+ARG ACTIONLINT_VERSION=1.7.12
+ARG ACTIONLINT_SOURCE_SHA256=454800bd4f854592bcfe79b161f71d56e35940eb7016e48a26dd356adc9d400a
+COPY build-workstation-go-tools.sh /tmp/build-workstation-go-tools.sh
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    ACTIONLINT_VERSION="${ACTIONLINT_VERSION}" ACTIONLINT_SOURCE_SHA256="${ACTIONLINT_SOURCE_SHA256}" \
+    bash /tmp/build-workstation-go-tools.sh all
+
 FROM ubuntu:24.04
+
+COPY --from=workstation-go-tools /out/bin/ /usr/local/bin/
+COPY --from=workstation-go-tools /out/cli-plugins/ /usr/libexec/docker/cli-plugins/
+COPY --from=workstation-go-tools /out/licenses/ /usr/share/doc/release-factory-go-tools/
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG TARGETARCH
 ARG DEBIAN_FRONTEND=noninteractive
 ARG NODE_MAJOR=24
-ARG NPM_VERSION=12.0.2
-ARG GO_VERSION=1.27.3
-ARG GO_SHA256_AMD64=65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
-ARG GO_SHA256_ARM64=a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49
+ARG NPM_VERSION=12.2.2
+ARG GO_VERSION=1.27.4
+ARG GO_SHA256_AMD64=7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
+ARG GO_SHA256_ARM64=3392582988a273a87ab5043ee1b2c9c17a2c3c00580bf9326c47a2e0aaaeac92
 ARG RUST_VERSION=stable
 ARG BUN_VERSION=latest
 ARG DENO_VERSION=latest
@@ -18,22 +32,22 @@ ARG ACTIONLINT_VERSION=1.7.12
 ARG CODE_SERVER_TAR_VERSION=7.5.22
 # CI overrides these proxy inputs from the upstream resolver; defaults keep
 # standalone local builds reproducible when no build arguments are supplied.
-ARG MIHOMO_VERSION=1.19.30
-ARG MIHOMO_SOURCE_REF=ac017cdd246ce8bd547653d927e7bf77d7ee73d5
-ARG MIHOMO_SOURCE_SHA256=971dd4533e4e2c3dad7473e8115200da8c0d7471b4b61da54da896345c5b3850
-ARG SING_BOX_VERSION=1.14.0
-ARG SING_BOX_SOURCE_REF=0b8995879f29a9b98ee027bc17b75e101445b238
-ARG SING_BOX_SOURCE_SHA256=faa17ef1634429371401b495f32c498fa35b92e5872dce245ba44a9155f95f14
-ARG XRAY_VERSION=26.7.28
-ARG XRAY_SOURCE_REF=5ca6f4b7d4dc20a881d4330e498892697627ec0c
-ARG XRAY_SOURCE_SHA256=45de3ead5186fea442b04c662c554a1ffd1d7bd9093a83410f2edabe74fb766e
-ARG PROXY_X_CRYPTO_VERSION=0.55.0
-ARG PROXY_X_NET_VERSION=0.58.0
-ARG PROXY_X_TEXT_VERSION=0.41.0
-ARG PROXY_X_MOD_VERSION=0.41.0
-ARG PROXY_GRPC_VERSION=1.83.2
-ARG MIHOMO_COMPRESS_VERSION=1.18.7
-ARG SING_BOX_GO_JOSE_VERSION=4.1.6
+ARG MIHOMO_VERSION=1.19.34
+ARG MIHOMO_SOURCE_REF=0455d0d28c4526937380505153e65a843d8612e8
+ARG MIHOMO_SOURCE_SHA256=db0cc4145fe4024e9c2386bd4768bf23a69c8789610d56d7243819e2f77c0cfe
+ARG SING_BOX_VERSION=1.14.4
+ARG SING_BOX_SOURCE_REF=c005f35300ce76427dc285481ec5695f5b179cd2
+ARG SING_BOX_SOURCE_SHA256=1c4d2b3bf261a8d98e1b026be0bbcddbcb3f53bbca77eb15e8f25f7d4e602e59
+ARG XRAY_VERSION=26.11.9
+ARG XRAY_SOURCE_REF=676eaf66f8f05d4d558ee7a74b4736623d3feeb9
+ARG XRAY_SOURCE_SHA256=adccbbb35f9efccae0884bfd46b9d439daee60aa543efa19e775799c74589bab
+ARG PROXY_X_CRYPTO_VERSION=0.59.0
+ARG PROXY_X_NET_VERSION=0.62.0
+ARG PROXY_X_TEXT_VERSION=0.44.0
+ARG PROXY_X_MOD_VERSION=0.43.0
+ARG PROXY_GRPC_VERSION=1.85.0
+ARG MIHOMO_COMPRESS_VERSION=1.20.4
+ARG SING_BOX_GO_JOSE_VERSION=4.1.9
 ARG PNPM_VERSION=latest
 ARG YARN_VERSION=stable
 ARG RUFF_VERSION=latest
@@ -47,12 +61,6 @@ RUN apt-get update && apt-get install -y locales \
     && locale-gen zh_CN.UTF-8 \
     && update-locale LANG=zh_CN.UTF-8 \
     && rm -rf /var/lib/apt/lists/*
-
-# ── Docker repo (needs curl + gpg first) ──
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg && rm -rf /var/lib/apt/lists/*
-RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
-    | tee /etc/apt/sources.list.d/docker.list > /dev/null
 
 # ── System packages ──
 RUN apt-get update \
@@ -69,16 +77,13 @@ RUN apt-get update \
     curl \
     diffutils \
     direnv \
-    docker-buildx-plugin \
-    docker-ce-cli \
-    docker-compose-plugin \
     fd-find \
     file \
     fzf \
     gettext-base \
-    gh \
     git \
     git-lfs \
+    gnupg \
     htop \
     httpie \
     iotop \
@@ -147,6 +152,24 @@ RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g "npm@${NPM_VERSION}"
+
+# Backport Ubuntu's complete setuptools tree and wheel before pipx can seed it.
+COPY setuptools-security/ /tmp/setuptools-security/
+RUN setuptools_ubuntu_version=68.1.2-2ubuntu1.2 \
+    && for setuptools_package in python3-setuptools python3-setuptools-whl python3-pkg-resources; do \
+        test "$(dpkg-query -W -f='${Version}' "${setuptools_package}")" = "${setuptools_ubuntu_version}" || exit 1; \
+    done \
+    && python3 /tmp/setuptools-security/patch-setuptools-ubuntu68.py \
+        --site-packages /usr/lib/python3/dist-packages \
+        --wheel /usr/share/python-wheels/setuptools-68.1.2-py3-none-any.whl \
+    && setuptools_checks="$(mktemp -d /tmp/release-factory-setuptools.XXXXXXXX)" \
+    && python3 -B /tmp/setuptools-security/test-backports.py \
+        --source-root /usr/lib/python3/dist-packages --work-root "${setuptools_checks}/system" --phase green \
+    && python3 -B /tmp/setuptools-security/test-backports.py \
+        --source-root /usr/share/python-wheels/setuptools-68.1.2-py3-none-any.whl \
+        --work-root "${setuptools_checks}/wheel" --phase green \
+    && rm -rf "${setuptools_checks}" /tmp/setuptools-security
+COPY setuptools-security/UPSTREAM.md /usr/share/doc/setuptools-security/UPSTREAM.md
 
 # ── Go ──
 RUN dpkg_arch="$(dpkg --print-architecture)" \
@@ -222,26 +245,6 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
     && curl --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 120 \
         -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${yq_arch}" -o /usr/local/bin/yq \
     && chmod +x /usr/local/bin/yq
-
-# ── actionlint ──
-RUN dpkg_arch="$(dpkg --print-architecture)" \
-    && case "${dpkg_arch}" in \
-        amd64) actionlint_arch="amd64" ;; \
-        arm64) actionlint_arch="arm64" ;; \
-        *) echo "unsupported architecture for actionlint install: ${dpkg_arch}" >&2; exit 1 ;; \
-    esac \
-    && actionlint_version="${ACTIONLINT_VERSION#v}" \
-    && actionlint_asset="actionlint_${actionlint_version}_linux_${actionlint_arch}.tar.gz" \
-    && curl --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 120 \
-        -fsSL "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/${actionlint_asset}" -o "/tmp/${actionlint_asset}" \
-    && curl --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 20 --max-time 120 \
-        -fsSL "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/actionlint_${actionlint_version}_checksums.txt" -o /tmp/actionlint_checksums.txt \
-    && grep "  ${actionlint_asset}$" /tmp/actionlint_checksums.txt > /tmp/actionlint.sha256 \
-    && (cd /tmp && sha256sum -c /tmp/actionlint.sha256) \
-    && tar -xzf "/tmp/${actionlint_asset}" -C /tmp actionlint \
-    && install -m 0755 /tmp/actionlint /usr/local/bin/actionlint \
-    && actionlint --version \
-    && rm -f "/tmp/${actionlint_asset}" /tmp/actionlint_checksums.txt /tmp/actionlint.sha256 /tmp/actionlint
 
 # ── Proxy cores: Clash.Meta (mihomo), sing-box, Xray ──
 # Build from immutable upstream source revisions so the Go security fixes are
@@ -368,18 +371,6 @@ RUN [[ "${CODE_SERVER_UNDICI_VERSION}" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]] \
         "${undici_dir}" "${CODE_SERVER_UNDICI_VERSION}" \
     && rm -f "/tmp/${tarball}"
 
-# Replace complete, locked dependency trees. Sandbox Runtime keeps Zod's v3
-# entry contract, with the bounded-container security fix backported to v3.
-COPY code-server-security/ /tmp/code-server-security/
-COPY patch-code-server-deps.mjs /tmp/patch-code-server-deps.mjs
-RUN cd /tmp/code-server-security \
-    && npm ci --install-strategy=nested --omit=dev --ignore-scripts --no-audit --no-fund \
-    && npm audit signatures \
-    && npm audit --omit=dev --audit-level=high \
-    && node /tmp/patch-code-server-deps.mjs /usr/lib/code-server /tmp/code-server-security \
-    && rm -rf /tmp/code-server-security /tmp/patch-code-server-deps.mjs
-COPY code-server-security/UPSTREAM.md /usr/share/doc/code-server-security/UPSTREAM.md
-
 # Fix FTP directory/PASV parser denial of service in code-server's proxy dependencies.
 # https://github.com/patrickjuchli/basic-ftp/releases/tag/v6.2.2
 ARG CODE_SERVER_BASIC_FTP_VERSION=6.2.2
@@ -470,6 +461,24 @@ RUN install -d -o dev -g dev /opt/code-server/extensions \
         sudo -u dev code-server --extensions-dir /opt/code-server/extensions --install-extension "${extension}"; \
     done \
     && rm -rf /home/dev/.local/share/code-server/CachedExtensionVSIXs
+
+# Replace complete, locked trees after extensions exist, including EditorConfig.
+# Sandbox Runtime keeps the bounded-container fix with Zod's v3 entry contract.
+COPY code-server-security/ /tmp/code-server-security/
+COPY patch-code-server-deps.mjs /tmp/patch-code-server-deps.mjs
+RUN cd /tmp/code-server-security \
+    && npm ci --install-strategy=nested --omit=dev --ignore-scripts --no-audit --no-fund \
+    && npm audit signatures \
+    && npm audit --omit=dev --audit-level=high \
+    && node /tmp/patch-code-server-deps.mjs /usr/lib/code-server /tmp/code-server-security \
+        /opt/code-server/extensions "${CODE_SERVER_EXTENSIONS}" \
+    && editorconfig_brace_dir=/opt/code-server/extensions/editorconfig.editorconfig-0.18.2-universal/node_modules/editorconfig/node_modules/brace-expansion \
+    && if [ -d "${editorconfig_brace_dir}" ]; then \
+        chown --from=root:root -R dev:dev "${editorconfig_brace_dir}"; \
+    fi \
+    && rm -rf /tmp/code-server-security /tmp/patch-code-server-deps.mjs
+COPY code-server-security/UPSTREAM.md /usr/share/doc/code-server-security/UPSTREAM.md
+
 # ── Supervisord config ──
 COPY config/supervisord/supervisord.conf /etc/supervisor/supervisord.conf
 COPY config/supervisord/conf.d/ /etc/supervisor/conf.d/

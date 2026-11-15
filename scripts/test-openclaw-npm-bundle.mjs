@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { patchNpmBundles } from '../openclaw-builder/image/patch-vendored-deps.mjs';
+import { patchNpmBundles, verifyIpAddress, verifySelectorParser } from '../openclaw-builder/image/patch-vendored-deps.mjs';
 
 const pins = JSON.parse(fs.readFileSync(new URL('../openclaw-builder/configs/components.json', import.meta.url))).npm_bundled;
 
@@ -88,6 +88,7 @@ test('repairs real old npm undici copies and rejects unsafe replacement inputs',
 });
 
 test('repairs only the two vulnerable dependencies inside bundled npm', async () => {
+  const selected = {'brace-expansion': pins['brace-expansion'], undici: pins.undici};
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-npm-test-'));
   try {
     const root = path.join(temporary, 'node_modules');
@@ -96,7 +97,7 @@ test('repairs only the two vulnerable dependencies inside bundled npm', async ()
     fs.writeFileSync(path.join(npm, 'package.json'), '{"name":"npm","version":"11.20.0"}\n');
     const bundled = [];
     for (const [index, npmVersion] of ['11.20.0', '12.2.0'].entries()) {
-      for (const [name, pin] of Object.entries(pins)) {
+      for (const [name, pin] of Object.entries(selected)) {
         const directory = path.join(root, `.pnpm/npm@${npmVersion}/node_modules/npm/node_modules`, name);
         fs.mkdirSync(directory, {recursive: true});
         const versions = Array.isArray(pin.from) ? pin.from : [pin.from];
@@ -107,7 +108,7 @@ test('repairs only the two vulnerable dependencies inside bundled npm', async ()
     const unrelated = path.join(root, 'unrelated');
     fs.mkdirSync(unrelated);
     fs.writeFileSync(path.join(unrelated, 'package.json'), '{"name":"undici","version":"6.28.0"}');
-    await patchNpmBundles(root, pins);
+    await patchNpmBundles(root, selected);
     for (const {name, directory, version} of bundled) {
       const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
       assert.equal(pkg.version, version);
@@ -115,7 +116,7 @@ test('repairs only the two vulnerable dependencies inside bundled npm', async ()
     }
     assert.equal(JSON.parse(fs.readFileSync(path.join(unrelated, 'package.json'))).version, '6.28.0');
     assert.equal(fs.readFileSync(path.join(npm, 'package.json'), 'utf8'), '{"name":"npm","version":"11.20.0"}\n');
-    await patchNpmBundles(root, pins); // Idempotent and does not download the archives again.
+    await patchNpmBundles(root, selected); // Idempotent and does not download the archives again.
   } finally {
     fs.rmSync(temporary, {recursive: true});
   }
@@ -132,6 +133,102 @@ test('rejects a bundle dependency that escapes its npm root', async () => {
     fs.writeFileSync(path.join(outside, 'package.json'), '{"name":"undici","version":"6.28.0"}');
     fs.symlinkSync(outside, path.join(npm, 'undici'));
     await assert.rejects(patchNpmBundles(root, pins), /unexpected bundled npm dependency path/);
+  } finally {
+    fs.rmSync(temporary, {recursive: true});
+  }
+});
+
+test('repairs the real global npm bundle and preserves its CLI', {timeout: 150000}, async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-global-npm-'));
+  try {
+    const components = JSON.parse(fs.readFileSync(new URL('../openclaw-builder/configs/components.json', import.meta.url)));
+    const version = components.build_args.OPENCLAW_NPM_VERSION;
+    fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({private: true, dependencies: {npm: version}}));
+    execFileSync('npm', ['install', '--prefix', temporary, '--ignore-scripts', '--package-lock=false',
+      '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], {timeout: 120000, stdio: 'pipe'});
+    const root = path.join(temporary, 'node_modules');
+    const directory = path.join(root, 'npm');
+    const packageFile = path.join(directory, 'package.json');
+    const originalPackage = fs.readFileSync(packageFile);
+    assert.equal(JSON.parse(originalPackage).version, version);
+    await patchNpmBundles(root, pins);
+    for (const [name, pin] of Object.entries(pins)) {
+      assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'node_modules', name, 'package.json'))).version, pin.version);
+    }
+    assert.deepEqual(fs.readFileSync(packageFile), originalPackage);
+    const cli = execFileSync(process.execPath, [path.join(directory, 'bin/npm-cli.js'), '--version'],
+      {encoding: 'utf8', timeout: 15000});
+    assert.equal(cli.trim(), version);
+    await patchNpmBundles(root, pins);
+  } finally {
+    fs.rmSync(temporary, {recursive: true});
+  }
+});
+
+test('rejects a global npm bundle that escapes its supplied root', async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-global-npm-escape-'));
+  try {
+    const root = path.join(temporary, 'node_modules');
+    const outside = path.join(temporary, 'outside/npm');
+    fs.mkdirSync(root);
+    fs.mkdirSync(path.join(outside, 'node_modules/brace-expansion'), {recursive: true});
+    fs.writeFileSync(path.join(outside, 'package.json'), '{"name":"npm","version":"11.21.2"}');
+    const packageFile = path.join(outside, 'node_modules/brace-expansion/package.json');
+    fs.writeFileSync(packageFile, '{"name":"brace-expansion","version":"5.0.12"}');
+    const original = fs.readFileSync(packageFile);
+    fs.symlinkSync(outside, path.join(root, 'npm'));
+    await assert.rejects(patchNpmBundles(root, pins), /unexpected bundled npm.*path/);
+    assert.deepEqual(fs.readFileSync(packageFile), original);
+  } finally {
+    fs.rmSync(temporary, {recursive: true});
+  }
+});
+
+
+test('repairs the actual pnpm npm distribution networking and selector dependencies', {timeout: 150000}, async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-npm-network-'));
+  try {
+    fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({private: true, dependencies: {npm: '12.2.0'}}));
+    execFileSync('npm', ['install', '--prefix', temporary, '--ignore-scripts', '--package-lock=false',
+      '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], {timeout: 120000, stdio: 'pipe'});
+    const root = path.join(temporary, 'node_modules');
+    const original = path.join(root, 'npm');
+    const directory = path.join(root, '.pnpm/npm@12.2.0/node_modules/npm');
+    fs.mkdirSync(path.dirname(directory), {recursive: true});
+    fs.renameSync(original, directory);
+    fs.symlinkSync(path.relative(root, directory), original);
+    const link = fs.readlinkSync(original);
+    const packageFile = path.join(directory, 'package.json');
+    const packageBytes = fs.readFileSync(packageFile);
+    const selected = {'ip-address': pins['ip-address'], 'postcss-selector-parser': pins['postcss-selector-parser']};
+    const bundled = name => path.join(directory, 'node_modules', name);
+    const oldVersions = Object.fromEntries(Object.keys(selected).map(name =>
+      [name, JSON.parse(fs.readFileSync(path.join(bundled(name), 'package.json'))).version]));
+    assert.equal(oldVersions['ip-address'], '10.5.0');
+    assert.equal(oldVersions['postcss-selector-parser'], '7.1.4');
+    assert.throws(() => verifyIpAddress(bundled('ip-address')),
+      error => /IPv6 link-local address escaped classification/.test(error.stderr?.toString()));
+    assert.throws(() => verifySelectorParser(bundled('postcss-selector-parser')),
+      error => error.code === 'ETIMEDOUT' || /flat selector parsing exceeded/.test(error.stderr?.toString()));
+    const bad = structuredClone(selected);
+    bad['ip-address'].sha512 = '0'.repeat(128);
+    await assert.rejects(patchNpmBundles(root, bad), {code: 'ERR_ASSERTION'});
+    for (const [name, version] of Object.entries(oldVersions)) {
+      assert.equal(JSON.parse(fs.readFileSync(path.join(bundled(name), 'package.json'))).version, version);
+    }
+    await patchNpmBundles(root, selected);
+    for (const [name, pin] of Object.entries(selected)) {
+      assert.equal(JSON.parse(fs.readFileSync(path.join(bundled(name), 'package.json'))).version, pin.version);
+    }
+    assert.deepEqual(fs.readFileSync(packageFile), packageBytes);
+    assert.equal(fs.readlinkSync(original), link);
+    const cli = path.join(directory, 'bin/npm-cli.js');
+    assert.equal(execFileSync(process.execPath, [cli, '--version'], {encoding: 'utf8', timeout: 10000}).trim(), '12.2.0');
+    // npm query is the actual selector-parser consumer, using the repaired bundle.
+    const query = JSON.parse(execFileSync(process.execPath, [cli, 'query', '[name="npm"]'],
+      {cwd: temporary, encoding: 'utf8', timeout: 15000}));
+    assert.ok(query.some(pkg => pkg.name === 'npm' && pkg.version === '12.2.0'));
+    await patchNpmBundles(root, selected);
   } finally {
     fs.rmSync(temporary, {recursive: true});
   }

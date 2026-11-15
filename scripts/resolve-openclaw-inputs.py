@@ -98,16 +98,30 @@ class Registry:
             headers["Authorization"] = "Bearer " + self.token
             status, response_headers, body = http(url, headers)
         if kind == "blobs" and status in (302, 307):
-            target = response_headers.get("location", "")
-            parsed = urllib.parse.urlsplit(target)
+            location = response_headers.get("location", "")
+            try:
+                if (not isinstance(location, str) or not location or not location.isascii()
+                        or any(ord(char) < 33 or ord(char) == 127 for char in location)):
+                    raise ValueError("invalid Location")
+                # https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.2
+                target = urllib.parse.urljoin(url, location)
+                parsed = urllib.parse.urlsplit(target)
+                port = parsed.port
+            except ValueError:
+                raise ValueError(f"unexpected registry blob redirect from {self.host}: invalid URL") from None
             # Docker's pull CDN hosts: https://docs.docker.com/desktop/setup/allow-list/
-            allowed_host = (parsed.hostname or "").endswith(".githubusercontent.com") if self.host == "ghcr.io" else parsed.hostname in {
+            allowed_destination = (parsed.hostname or "").endswith(".githubusercontent.com") if self.host == "ghcr.io" else parsed.hostname in {
                 "production.cloudflare.docker.com", "production.cloudfront.docker.com",
                 "docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com",
             }
-            if (parsed.scheme != "https" or not allowed_host
-                    or parsed.username or parsed.password or parsed.port not in (None, 443)):
-                raise ValueError("unexpected registry blob redirect")
+            # Same-origin signed URLs stay on this repository's digest-bound blob.
+            if parsed.hostname == self.host:
+                allowed_destination = bool(DIGEST.fullmatch(reference)) and parsed.path == f"/v2/{self.repository}/blobs/{reference}"
+            if (parsed.scheme != "https" or not allowed_destination or parsed.fragment
+                    or parsed.username or parsed.password or port not in (None, 443)):
+                host = parsed.hostname or ""
+                diagnostic_host = host if re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,252}", host) else "<invalid>"
+                raise ValueError(f"unexpected registry blob redirect from {self.host} to {diagnostic_host}")
             # Signed download URLs must never receive a registry token.
             status, _, body = http(target, {})
         if status == 404 and missing_ok:

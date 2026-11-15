@@ -3,26 +3,25 @@
 Published image workflows use `scripts/trivy-image-gate.sh` to scan built images
 with Trivy before publishing.
 
-The gate counts only HIGH and CRITICAL vulnerabilities. It fails the workflow
-when fixable vulnerabilities exceed the configured thresholds:
+Release and PR checks evaluate raw HIGH/CRITICAL findings against each builder's
+`configs/trivy-policy.json`. Protected paths and service packages block both
+severities, including findings without a published fix. Outside that protected
+scope, the selected profile controls fixable finding thresholds:
 
-- `TRIVY_MAX_FIXABLE_CRITICAL`: defaults to `0`
-- `TRIVY_MAX_FIXABLE_HIGH`: defaults to a high compatibility value and should be
-  set per workflow
-- `TRIVY_TIMEOUT`: defaults to `20m` so larger workstation images can complete
-  analysis instead of failing on Trivy's shorter default timeout
-
-Current workflow thresholds:
-
-| Workflow | Image | Fixable Critical | Fixable High | Notes |
+| Builder | Profile | Fixable Critical | Ordinary Fixable High | Protected scope |
 | --- | --- | ---: | ---: | --- |
-| `build-codex-claude-workstation.yml` | local smoke-test image | 0 | 150 | Workstation image keeps development toolchains, so HIGH noise is expected. |
-| `build-opencode-workstation.yml` | local smoke-test image | 0 | 100 | Workstation image keeps development toolchains, so HIGH noise is expected. |
-| `build-gemini-skill-browser.yml` | local Kasm image | 0 | 30 | Preferred browser variant; should stay relatively clean. |
-| `build-gemini-skill-browser-linuxserver.yml` | local LinuxServer image | 30 | 450 | Compatibility threshold for the noisier LinuxServer base. |
-| `openclaw-upstream-docker.yml` | local upstream image | 0 | 40 | Scans the upstream checkout before publishing to GHCR. |
-| `build-deepseek-harness.yml` | amd64 and arm64 runtime images | 0 | 0 | Authentication image has no runtime toolchain allowance; both architectures must remain free of fixable HIGH/CRITICAL findings. |
-| `build-deepseek-harness-workstation.yml` | amd64 and arm64 workstation images | 0 | Report | Ordinary toolchain HIGH findings warn; DSH and Caddy findings remain blocking. |
+| Codex Claude | `workstation` | 0 | Report | code-server, Paseo, proxy binaries and distro Node |
+| OpenCode | `workstation` | 0 | Report | Node, baseline and installed userland |
+| Gemini browser, both variants | `browser` | 0 | Report | Application, Node, browser, KasmVNC and Nginx |
+| OpenClaw | `sandbox` | 0 | Report | Application and Node |
+| DeepSeek Harness | `runtime` | 0 | 0 | DSH and Caddy |
+| DeepSeek Harness | `workstation` | 0 | Report | DSH and Caddy |
+
+The policy files are authoritative. `Report` means ordinary toolchain HIGH
+findings remain visible without a count limit; it does not exempt protected
+services. `TRIVY_TIMEOUT` defaults to `20m` for larger images. The script also
+retains explicit threshold arguments for callers that do not select a policy;
+those legacy defaults are not the release profiles above.
 
 DeepSeek release and PR workflows select the `runtime` or `workstation` profile
 from `deepseek-harness-builder/configs/trivy-policy.json`. Both profiles block
@@ -56,7 +55,7 @@ The OpenClaw upstream workflow passes `OPENCLAW_IMAGE_APT_PACKAGES=libgnutls30`
 so the upstream Dockerfile refreshes the runtime GnuTLS package before the
 vulnerability gate runs.
 When the host does not provide `trivy`, the gate uses the pinned
-`aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969`
+`aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb`
 container image. Set `TRIVY_DOCKER_IMAGE` when bumping
 Trivy intentionally.
 
@@ -87,35 +86,52 @@ amd64 and arm64 runners; browsers and OpenClaw remain amd64. Weekly package
 cache refreshes and OpenClaw's seven-day maximum build age keep unchanged
 application releases eligible for base-image security maintenance.
 
+OpenClaw's existing `http-cache-semantics` 4.2.0 backport checks the original
+source digest and tests normal cache reuse plus rejection of unsafe stale
+responses. Its two policy exceptions cover only the reviewed npm bundle paths
+and advisory; the expiry in `openclaw-builder/configs/trivy-policy.json` remains
+binding when no upstream fix is available.
+
+The rebuilt OpenClaw Docker CLI still declares
+`github.com/docker/distribution v2.8.3+incompatible`, so
+[CVE-2026-85747](https://github.com/advisories/GHSA-685w-q87j-wqw3) remains visible
+as MEDIUM. At the pinned CLI source, its outer
+[manifest client](https://github.com/docker/cli/blob/5457199aa57c45e990c59c89cab5f02b817238d7/internal/registryclient/fetcher.go)
+compares the exact received payload digest with the requested digest for
+Schema2, OCI, manifest lists and their children. This is scoped source evidence
+of an existing mitigation, not a fix to the generic distribution client or a
+binary attack test. No new scanner exception covers this finding; reassess it
+when updating that source or dependency.
+
 ## DeepSeek Harness Caddy gate
 
 Both DeepSeek Harness workflows additionally run
 `deepseek-harness-builder/scripts/check-caddy-vulnerabilities.sh` with
 `govulncheck 1.7.0`. Its custom Caddy build:
 
-- patches go-authcrunch `1.3.6` to remove the unused GPG public-key parser;
-- applies Caddy upstream commit `b2693fb`'s two-line CEL compatibility fix to
-  checksum-verified Caddy `2.11.4` source, then pins `cel-go` `0.32.0` for
-  `GO-2026-6094`;
+- patches go-authcrunch `1.5.0` to remove the unused GPG public-key parser;
+- uses checksum-verified Caddy `2.11.9`, caddy-security `1.6.2` and
+  `cel.dev/cel-go` `0.33.2`; the build applies the reviewed CEL compatibility
+  and module-relocation patches where needed, or verifies they are already
+  present in newer source;
 - retains `golang.org/x/crypto/ssh`;
 - records the actual linked package graph in `CADDY_GO_PACKAGES.txt`;
 - requires all `golang.org/x/crypto/openpgp` packages to be absent;
-- replaces `grpc`, `klauspost/compress`, and `x/text` with fixed releases.
+- replaces `grpc` with `1.85.0` and pins fixed `klauspost/compress` and `x/text`
+  releases from `image/components.lock.json`.
 
 The production Caddy binary is stripped. Go's documented binary-scan limitation
 means `govulncheck` can report every vulnerability associated with a required
 module when symbols cannot be extracted. Because SSH still requires the
 `golang.org/x/crypto` module, the binary scan currently reports
 `GO-2026-5932` even though the linked package manifest excludes OpenPGP. The
-Go vulnerability database also currently includes tagged gRPC `v1.84.0` in
-`GO-2026-6443`'s affected range, while the upstream gRPC security advisory lists
-`v1.84.0` as patched. The linked Caddy package manifest excludes
-`google.golang.org/grpc/internal/xds/server`, the affected server path. The gate
-permits `GO-2026-5932` only when OpenPGP packages are absent and permits
-`GO-2026-6443` only for module version `v1.84.0` with that xDS server package
-absent. Both are accepted only as stripped-binary module-level findings after
-`go tool nm` confirms symbols are unavailable. A clean scan is also accepted;
-unknown findings and unexpected scan results fail. References:
+gate permits `GO-2026-5932` only when OpenPGP packages are absent. It retains a
+compatibility rule for the historical gRPC `v1.84.0` database discrepancy:
+`GO-2026-6443` is accepted only at that exact version when the linked package
+manifest excludes `google.golang.org/grpc/internal/xds/server`. The current
+gRPC pin is `v1.85.0`. Both fallbacks require stripped-binary module-level
+findings after `go tool nm` confirms symbols are unavailable. A clean scan is
+also accepted; unknown findings and unexpected scan results fail. References:
 
 - <https://pkg.go.dev/vuln/GO-2026-6443>
 - <https://github.com/grpc/grpc-go/security/advisories/GHSA-2v4p-qf9q-27wj>
@@ -138,18 +154,16 @@ Source-mode govulncheck also exposes a version-range discrepancy in the Go
 database for historical caddy-security advisories. The Go records for
 `GO-2024-2549` and `GO-2024-2557` through `GO-2024-2565` contain no fixed event,
 while the corresponding GitHub advisories limit the vulnerable versions to
-`<=1.1.20`, `<=1.1.23`, or `<=1.0.42`. The image pins caddy-security `1.2.2`.
-Trivy evaluates the published package ranges and currently reports zero affected
-caddy-security findings. Examples:
+`<=1.1.20`, `<=1.1.23`, or `<=1.0.42`. The image pins caddy-security `1.6.2`.
+Trivy evaluates the published package ranges; source-mode module findings alone
+do not establish reachability. Examples:
 
 - <https://github.com/advisories/GHSA-xwmv-cx7p-fqfc>
 - <https://github.com/advisories/GHSA-vj36-3ccr-6563>
 - <https://github.com/advisories/GHSA-c7vf-m394-m4x4>
 
-The workflow pins its fallback scanner to
-`aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969`;
-changing that pin or the accepted govulncheck exception requires a reviewed source
-update.
+Changing the fallback scanner pin above or an accepted govulncheck exception
+requires a reviewed source update.
 
 ## DeepSeek Harness workstation Docker client gate
 

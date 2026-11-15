@@ -87,6 +87,19 @@ assert cache_line == build_patch_line + 1
 assert mount_counts == {'build': 1, 'runtime': 1}, mount_counts
 PY
   test "$(grep -Fc -- 'AS openclaw-runtime-docker-tools' "${dockerfile}")" -eq 1
+  grep -Fq -- 'ARG OPENCLAW_DOCKER_CRYPTO_VERSION="0.59.0"' "${dockerfile}" || fail 'missing configured Go crypto pin'
+  grep -Fq -- 'ARG OPENCLAW_DOCKER_MOD_VERSION="0.43.0"' "${dockerfile}" || fail 'missing configured Go mod pin'
+  grep -Fq -- 'ARG OPENCLAW_DOCKER_NET_VERSION="0.62.0"' "${dockerfile}" || fail 'missing configured Go net pin'
+  grep -Fq -- 'ARG OPENCLAW_DOCKER_OTEL_VERSION="1.47.0"' "${dockerfile}" || fail 'missing configured OpenTelemetry pin'
+  grep -Fq -- '-require=golang.org/x/crypto@v${OPENCLAW_DOCKER_CRYPTO_VERSION}' "${dockerfile}"
+  grep -Fq -- '-require=golang.org/x/mod@v${OPENCLAW_DOCKER_MOD_VERSION}' "${dockerfile}"
+  grep -Fq -- '-require=golang.org/x/net@v${OPENCLAW_DOCKER_NET_VERSION}' "${dockerfile}"
+  grep -Fq -- '-require=go.opentelemetry.io/otel/sdk@v${OPENCLAW_DOCKER_OTEL_VERSION}' "${dockerfile}"
+  grep -Fq -- 'cp vendor.mod go.mod && cp vendor.sum go.sum' "${dockerfile}"
+  grep -Fq -- 'GOFLAGS=-mod=mod GOOS=' "${dockerfile}"
+  if grep -Eq -- 'v0\\.55\\.0|v0\\.40\\.0' "${dockerfile}"; then
+    fail 'Docker tools retained stale Go security pins'
+  fi
   test "$(grep -Fc -- 'ARG SECURITY_REFRESH=manual' "${dockerfile}")" -eq 1
   test "$(grep -Fc -- 'RUN --mount=type=bind,from=openclaw-runtime-docker-tools' "${dockerfile}")" -eq 1
   if grep -Fq -- 'COPY --from=openclaw-runtime-docker-tools' "${dockerfile}"; then
@@ -102,9 +115,9 @@ PY
   printf '[openclaw-hardening-test] PASS: %s\n' "${name}"
 }
 
-run_case legacy-stage-source build
-run_case production-deps-stage-source production-deps
-run_case platform-qualified-stage-source '--platform=linux/amd64 production-deps'
+OPENCLAW_DOCKER_CRYPTO_VERSION=0.59.0 OPENCLAW_DOCKER_MOD_VERSION=0.43.0 run_case legacy-stage-source build
+OPENCLAW_DOCKER_CRYPTO_VERSION=0.59.0 OPENCLAW_DOCKER_MOD_VERSION=0.43.0 run_case production-deps-stage-source production-deps
+OPENCLAW_DOCKER_CRYPTO_VERSION=0.59.0 OPENCLAW_DOCKER_MOD_VERSION=0.43.0 run_case platform-qualified-stage-source '--platform=linux/amd64 production-deps'
 
 missing_anchor="${tmp_dir}/missing-anchor"
 create_fixture "${missing_anchor}" production-deps
@@ -129,6 +142,14 @@ assert_rejected() {
   test "${before}" = "${after}"
   printf '[openclaw-hardening-test] PASS: %s fails closed\n' "${name}"
 }
+
+invalid_net="${tmp_dir}/invalid-net-version"
+create_fixture "${invalid_net}" production-deps
+OPENCLAW_DOCKER_NET_VERSION=0.62.0-preview assert_rejected "${invalid_net}" 'Docker tool versions must be stable semver values' invalid-net-version
+
+invalid_otel="${tmp_dir}/invalid-otel-version"
+create_fixture "${invalid_otel}" production-deps
+OPENCLAW_DOCKER_OTEL_VERSION=1.47.0-preview assert_rejected "${invalid_otel}" 'Docker tool versions must be stable semver values' invalid-otel-version
 
 missing_build="${tmp_dir}/missing-build-stage"
 create_fixture "${missing_build}" production-deps

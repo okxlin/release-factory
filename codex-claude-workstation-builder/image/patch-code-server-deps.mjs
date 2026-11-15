@@ -6,10 +6,10 @@ import { fileURLToPath } from 'node:url';
 
 const targets = [
   {relative: 'node_modules/body-parser', name: 'body-parser', from: '2.3.0', version: '2.4.0'},
-  {relative: 'node_modules/follow-redirects', name: 'follow-redirects', from: '1.16.0', version: '1.16.2'},
-  {relative: 'lib/vscode/node_modules/zod', name: 'zod', from: '4.4.3', version: '4.6.6', api: 'v4'},
-  {relative: 'lib/vscode/node_modules/@github/copilot-sdk/node_modules/zod', name: 'zod', from: '4.3.6', version: '4.6.6', api: 'v4'},
-  {relative: 'lib/vscode/node_modules/@vscode/sandbox-runtime/node_modules/zod', name: 'zod', from: '3.25.76', version: '4.6.6', api: 'v3'},
+  {relative: 'node_modules/follow-redirects', name: 'follow-redirects', from: ['1.16.0', '1.16.2'], version: '1.16.3'},
+  {relative: 'lib/vscode/node_modules/zod', name: 'zod', from: '4.4.3', version: '4.6.7', api: 'v4'},
+  {relative: 'lib/vscode/node_modules/@github/copilot-sdk/node_modules/zod', name: 'zod', from: '4.3.6', version: '4.6.7', api: 'v4'},
+  {relative: 'lib/vscode/node_modules/@vscode/sandbox-runtime/node_modules/zod', name: 'zod', from: '3.25.76', version: '4.6.7', api: 'v3'},
 ];
 
 function packageAt(directory, name) {
@@ -21,18 +21,91 @@ function packageAt(directory, name) {
   return pkg;
 }
 
+function editorConfigAt(extensions, requested) {
+  const required = requested.split(/\s+/).some(id => id.split('@')[0].toLowerCase() === 'editorconfig.editorconfig');
+  const directories = fs.readdirSync(extensions).filter(name => name.toLowerCase().startsWith('editorconfig.editorconfig-'));
+  assert.ok(directories.length <= 1, 'unreviewed multiple EditorConfig extension versions');
+  if (!directories.length) {
+    assert.ok(!required, 'requested EditorConfig extension is missing');
+    return;
+  }
+  assert.equal(directories[0], 'editorconfig.editorconfig-0.18.2-universal', 'unreviewed EditorConfig extension layout');
+  const directory = path.join(extensions, directories[0]);
+  assert.equal(packageAt(directory, 'EditorConfig').version, '0.18.2', 'unreviewed EditorConfig extension version');
+  const consumer = packageAt(path.join(directory, 'node_modules/editorconfig'), 'editorconfig');
+  assert.equal(consumer.version, '3.0.2', 'unreviewed editorconfig consumer version');
+  assert.equal(consumer.dependencies.minimatch, '~10.2.4');
+  const minimatch = packageAt(path.join(directory, 'node_modules/editorconfig/node_modules/minimatch'), 'minimatch');
+  assert.equal(minimatch.version, '10.2.5', 'unreviewed EditorConfig minimatch version');
+  assert.equal(minimatch.dependencies['brace-expansion'], '^5.0.5');
+  return directory;
+}
+
+export function verifyEditorConfigDeps(directory) {
+  execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import {createRequire} from 'node:module';
+    import fs from 'node:fs';
+    import os from 'node:os';
+    import path from 'node:path';
+    import {pathToFileURL} from 'node:url';
+    const directory = process.argv[1];
+    const require = createRequire(path.join(directory, 'package.json'));
+    const consumerDirectory = path.join(directory, 'node_modules/editorconfig');
+    assert.ok(require.resolve('editorconfig').startsWith(consumerDirectory + path.sep));
+    const consumerRequire = createRequire(path.join(consumerDirectory, 'package.json'));
+    const minimatchDirectory = path.join(consumerDirectory, 'node_modules/minimatch');
+    assert.ok(consumerRequire.resolve('minimatch').startsWith(minimatchDirectory + path.sep));
+    const minimatchRequire = createRequire(path.join(minimatchDirectory, 'package.json'));
+    const braceDirectory = path.join(consumerDirectory, 'node_modules/brace-expansion');
+    assert.ok(minimatchRequire.resolve('brace-expansion').startsWith(braceDirectory + path.sep));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(braceDirectory, 'package.json'))).version, '5.0.13');
+    const braceRequire = createRequire(path.join(braceDirectory, 'package.json'));
+    const balancedDirectory = path.join(braceDirectory, 'node_modules/balanced-match');
+    assert.ok(braceRequire.resolve('balanced-match').startsWith(balancedDirectory + path.sep));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(balancedDirectory, 'package.json'))).version, '4.0.4');
+    const bracePackage = JSON.parse(fs.readFileSync(path.join(braceDirectory, 'package.json')));
+    for (const brace of [minimatchRequire('brace-expansion'), await import(pathToFileURL(path.join(braceDirectory, bracePackage.module)))]) {
+      assert.deepEqual(brace.expand('file{1..3}.{js,ts}'), ['file1.js', 'file1.ts', 'file2.js', 'file2.ts', 'file3.js', 'file3.ts']);
+      assert.deepEqual(brace.expand('{1..100}', {max: 4}), ['1', '2', '3', '4']);
+      assert.deepEqual(brace.expand('{a,b}', {maxSteps: 0}), ['{a,b}']);
+    }
+    const {Minimatch} = consumerRequire('minimatch');
+    const glob = new Minimatch('{src,test}/**/*.{js,ts}');
+    assert.equal(glob.match('src/main.ts'), true);
+    assert.equal(glob.match('test/nested/a.js'), true);
+    assert.equal(glob.match('doc/readme.md'), false);
+    const editorconfig = require('editorconfig');
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'editorconfig-parse-'));
+    try {
+      fs.mkdirSync(path.join(fixture, 'src/nested'), {recursive: true});
+      fs.writeFileSync(path.join(fixture, '.editorconfig'), 'root = true\\n[*.{js,ts}]\\nindent_style = space\\nindent_size = 2\\n[src/file{1..3}.ts]\\nindent_size = 4\\n');
+      fs.writeFileSync(path.join(fixture, 'src/nested/.editorconfig'), '[*.ts]\\nindent_size = 8\\n');
+      for (const [name, size] of [['src/main.ts', 2], ['src/file2.ts', 4], ['src/file4.ts', 2], ['src/nested/main.ts', 8], ['doc/readme.md', undefined]]) {
+        const file = path.join(fixture, name);
+        fs.mkdirSync(path.dirname(file), {recursive: true});
+        fs.writeFileSync(file, '');
+        const expected = size === undefined ? {} : {indent_style: 'space', indent_size: size, tab_width: size};
+        assert.deepEqual(editorconfig.parseSync(file), expected);
+        assert.deepEqual(await editorconfig.parse(file), expected);
+      }
+    } finally {fs.rmSync(fixture, {recursive: true});}
+  `, directory], {timeout: 15000, stdio: 'pipe'});
+  console.log('Verified real EditorConfig parser, nested minimatch/brace-expansion CJS/ESM and bounded expansion');
+}
+
 function prepareZod(directory, api) {
   // Match the reviewed OpenClaw backport, packaged locally for this build context.
   // https://github.com/colinhacks/zod/pull/6652
   const pkg = packageAt(directory, 'zod');
-  assert.equal(pkg.version, '4.6.6');
+  assert.equal(pkg.version, '4.6.7');
   if (api === 'v3') {
     pkg.exports['.'] = structuredClone(pkg.exports['./v3']);
     pkg.main = './v3/index.cjs';
     pkg.module = './v3/index.js';
     pkg.types = './v3/index.d.cts';
   }
-  pkg['release-factory'] = {source: 'zod@4.6.6', root: api, patches: ['v3-bounded-container-gate']};
+  pkg['release-factory'] = {source: 'zod@4.6.7', root: api, patches: ['v3-bounded-container-gate']};
   fs.writeFileSync(path.join(directory, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`);
   for (const [relative, invalid] of [
     ['v3/types.js', 'INVALID'],
@@ -102,7 +175,7 @@ export function verifyZod(directory, api) {
   `, directory, api], {timeout: 15000, stdio: 'pipe'});
 }
 
-export function verifyCodeServerDeps(root) {
+export function verifyCodeServerDeps(root, editorConfig) {
   for (const target of targets) {
     const directory = path.join(root, target.relative);
     assert.equal(packageAt(directory, target.name).version, target.version);
@@ -173,20 +246,35 @@ export function verifyCodeServerDeps(root) {
       filesystem: {...config.filesystem, allowWrite: ['']}}).success, false);
     assert.deepEqual(sandbox.IgnoreViolationsConfigSchema.parse({'git status': ['/workspace']}), {'git status': ['/workspace']});
   `, root], {timeout: 15000, stdio: 'pipe'});
+  if (editorConfig) verifyEditorConfigDeps(editorConfig);
   console.log('Verified code-server Express, redirects, Zod CJS/ESM and Sandbox Runtime schemas');
 }
 
-export function patchCodeServerDeps(root, staging) {
+export function patchCodeServerDeps(root, staging, extensions, requested) {
   root = fs.realpathSync(root);
   staging = fs.realpathSync(staging);
   assert.ok(root !== staging && !root.startsWith(staging + path.sep) && !staging.startsWith(root + path.sep),
     'security staging root must be separate from code-server');
   packageAt(root, 'code-server');
+  let editorConfig;
+  if (extensions !== undefined) {
+    assert.equal(typeof requested, 'string', 'extension request list is required');
+    extensions = fs.realpathSync(extensions);
+    assert.ok(extensions !== staging && !extensions.startsWith(staging + path.sep) && !staging.startsWith(extensions + path.sep),
+      'security staging root must be separate from extensions');
+    editorConfig = editorConfigAt(extensions, requested);
+  }
+  const selected = [...targets];
+  if (editorConfig) selected.push({
+    relative: 'extensions/editorconfig.editorconfig-0.18.2-universal/node_modules/editorconfig/node_modules/brace-expansion',
+    directory: path.join(editorConfig, 'node_modules/editorconfig/node_modules/brace-expansion'),
+    name: 'brace-expansion', from: '5.0.5', version: '5.0.13',
+  });
   // Validate all targets and sources before constructing or replacing any tree.
-  const plans = targets.map(target => {
-    const directory = path.join(root, target.relative);
+  const plans = selected.map(target => {
+    const directory = target.directory || path.join(root, target.relative);
     const pkg = packageAt(directory, target.name);
-    assert.ok([target.from, target.version].includes(pkg.version), `unreviewed ${target.name} version: ${pkg.version}`);
+    assert.ok([target.from, target.version].flat().includes(pkg.version), `unreviewed ${target.name} version: ${pkg.version}`);
     const source = path.join(staging, 'node_modules', target.name);
     assert.equal(packageAt(source, target.name).version, target.version);
     return {...target, directory, source};
@@ -209,7 +297,7 @@ export function patchCodeServerDeps(root, staging) {
       fs.rmSync(plan.directory, {recursive: true});
       fs.renameSync(plan.candidate, plan.directory);
     }
-    verifyCodeServerDeps(root);
+    verifyCodeServerDeps(root, editorConfig);
   } catch (error) {
     for (const plan of replaced.reverse()) {
       if (fs.existsSync(plan.directory)) fs.rmSync(plan.directory, {recursive: true});
@@ -220,6 +308,6 @@ export function patchCodeServerDeps(root, staging) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  assert.equal(process.argv.length, 4, 'usage: patch-code-server-deps.mjs CODE_SERVER_ROOT STAGING_ROOT');
-  patchCodeServerDeps(process.argv[2], process.argv[3]);
+  assert.equal(process.argv.length, 6, 'usage: patch-code-server-deps.mjs CODE_SERVER_ROOT STAGING_ROOT EXTENSIONS_ROOT REQUESTED_EXTENSIONS');
+  patchCodeServerDeps(...process.argv.slice(2));
 }

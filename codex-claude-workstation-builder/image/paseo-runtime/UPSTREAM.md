@@ -13,7 +13,27 @@ This image redistributes the unmodified Paseo npm runtime pinned below.
 
 The dependency graph is captured in `package-lock.json`. The image installs it with npm lifecycle scripts disabled and verifies registry signatures during the build.
 
-Security overrides pin Zod to 4.6.6 and keep body-parser aligned with its
+Security overrides pin Zod to 4.6.7 and keep body-parser aligned with its
 consumer: Paseo's Express 4 uses 1.20.9, while the MCP SDK's Express 5 uses
-2.4.0. The existing fast-uri pin remains in place. The high-severity audit gate
+2.4.0. fast-uri 3.1.9 fixes URI normalization and scheme/host-confusion advisories.
+The 2026-11-14 lock refresh updates compatible Hono, node-server, fast-copy,
+ip-address, Express and qs dependencies. The high-severity audit gate
 still applies to the complete installed production graph.
+
+The remaining UUID buffer-boundary advisory
+<https://github.com/advisories/GHSA-w5hq-g745-h8pq> affects v3/v5/v6 calls with an
+output buffer. The locked package is `node_modules/uuid` (9.0.1); the first fixed
+release is 11.1.1, outside Paseo's declared `^9.0.1` range. The integrity-verified
+Paseo 0.3.1 server imports only UUID v4 and
+calls it without a buffer. The AI SDK provider-utils resource-consumption advisory
+<https://github.com/advisories/GHSA-866g-f22w-33x8> remains at
+`node_modules/@ai-sdk/provider-utils` (3.0.12) in the pinned production dependency graph.
+The first fixed provider-utils release is 3.0.28; AI SDK 5.0.78 and its gateway
+pin 3.0.12 exactly, so npm has no automatic fix in the declared graph. The
+distributed server JavaScript has no AI SDK import.
+These observations cover the reviewed server artifact, not its precompiled web
+bundle or future source changes. Recheck both findings by 2026-12-14 or at the
+next Paseo update, and retain the audit gate.
+
+- <https://registry.npmjs.org/fast-uri/3.1.9>
+- <https://registry.npmjs.org/zod/4.6.7>

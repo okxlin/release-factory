@@ -27,6 +27,8 @@ on:
       - 'gemini-skill-browser-builder/configs/**'
       - 'gemini-skill-browser-builder/image/runtime/**'
       - 'gemini-skill-browser-builder/scripts/**'
+      - 'openclaw-builder/image/patch-vendored-deps.mjs'
+      - 'openclaw-builder/configs/components.json'
       - '.github/workflows/build-gemini-skill-browser.yml'
       - '.github/workflows/release-gemini-browser.yml'
       - 'scripts/smoke-gemini-browser.py'

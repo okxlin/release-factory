@@ -37,23 +37,39 @@ export function verifyArchiveReader(directory) {
 export async function patchNpmBundles(root, pins) {
   root = fs.realpathSync(root);
   const store = path.join(root, '.pnpm');
+  let bundles;
+  if (fs.existsSync(store)) {
+    bundles = fs.readdirSync(store).filter(entry => /^npm@\d/.test(entry))
+      .map(entry => path.join(store, entry, 'node_modules/npm/node_modules'));
+  } else {
+    const npm = path.join(root, 'npm');
+    assert.equal(fs.realpathSync(npm), npm, 'unexpected bundled npm root path');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(npm, 'package.json'))).name, 'npm');
+    bundles = [path.join(npm, 'node_modules')];
+  }
   for (const [name, pin] of Object.entries(pins)) {
-    assert.ok(['brace-expansion', 'undici'].includes(name));
+    assert.ok(['brace-expansion', 'undici', 'ip-address', 'postcss-selector-parser'].includes(name));
     assert.match(pin.version, /^\d+\.\d+\.\d+$/);
     assert.equal(pin.url, `https://registry.npmjs.org/${name}/-/${name}-${pin.version}.tgz`);
     assert.match(pin.sha512, /^[a-f0-9]{128}$/);
     const outdated = [];
-    for (const entry of fs.readdirSync(store)) {
-      if (!/^npm@\d/.test(entry)) continue;
-      const directory = path.join(store, entry, 'node_modules/npm/node_modules', name);
+    const directories = [];
+    for (const bundle of bundles) {
+      const directory = path.join(bundle, name);
       if (!fs.existsSync(directory)) continue;
       assert.equal(fs.realpathSync(directory), directory, 'unexpected bundled npm dependency path');
       const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
       assert.equal(pkg.name, name);
+      directories.push(directory);
       if (pinFromVersions(pin).includes(pkg.version)) outdated.push(directory);
       else assert.equal(pkg.version, pin.version, `unreviewed bundled ${name} version`);
     }
     await replaceVerifiedDependency(name, pin, outdated);
+    // Selector parsing needs the original sibling dependencies from npm.
+    for (const directory of directories) {
+      if (name === 'ip-address') verifyIpAddress(directory);
+      else if (name === 'postcss-selector-parser') verifySelectorParser(directory);
+    }
   }
 }
 
@@ -158,6 +174,231 @@ export function verifyJoi(directory) {
   console.log(`Verified CVE-2026-118772 linear multiple-email splitting: ${directory}`);
 }
 
+export function verifyIpAddress(directory) {
+  // GHSA-rxp7-6hxx-x8q5, GHSA-rpw4-54j3-4h4q, GHSA-2vr4-cq9g-pvrc and GHSA-j6r3-76f7-8jcv.
+  execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import {createRequire} from 'node:module';
+    import {performance} from 'node:perf_hooks';
+    const {Address4, Address6} = createRequire(import.meta.url)(process.argv[1]);
+    for (const host of ['fe80::1', 'fe81::1', 'febf::1', 'fe80:0:0:1::1']) {
+      assert.equal(new Address6(host).isLinkLocal(), true, 'IPv6 link-local address escaped classification');
+    }
+    assert.equal(new Address6('fec0::1').isLinkLocal(), false);
+    for (const host of ['64:ff9b:1:7f00:0:100::', '64:ff9b:1::7f00:1']) {
+      assert.equal(new Address6(host).isPrivate(), true, 'NAT64 local-use range escaped classification');
+    }
+    const network = new Address6('2001:db8::/32');
+    assert.equal(new Address6('2001:db8::1').isInSubnet(network), true);
+    for (const method of ['isInSubnet', 'isHostInSubnet']) {
+      assert.equal(new Address4('32.1.13.184')[method](network), false, 'cross-family subnet admitted');
+    }
+    assert.equal(new Address6('2001:db8::1').correctForm(), '2001:db8::1');
+    assert.equal(new Address6('fe80::1%eth0').zone, '%eth0');
+    const start = performance.now();
+    assert.equal(Address6.isValid('%'.repeat(200000) + '\\n'), false);
+    assert.ok(performance.now() - start < 1500, 'IPv6 zone parsing exceeded 1.5 seconds');
+    console.log('ip-address classification and bounded parsing passed');
+  `, directory], {timeout: 10000, stdio: 'pipe'});
+}
+
+export function verifySelectorParser(directory) {
+  // https://github.com/postcss/postcss-selector-parser/security/advisories/GHSA-rj75-hqrm-r3gf
+  execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import {createRequire} from 'node:module';
+    import {performance} from 'node:perf_hooks';
+    const parser = createRequire(import.meta.url)(process.argv[1]);
+    const selector = 'svg|a:hover > .safe[data-value="a,b"], #id';
+    assert.equal(parser().processSync(selector), selector);
+    const count = 100000;
+    const start = performance.now();
+    const ast = parser().astSync('.a'.repeat(count));
+    assert.equal(ast.first.nodes.length, count);
+    assert.ok(performance.now() - start < 1500, 'flat selector parsing exceeded 1.5 seconds');
+    assert.throws(() => parser().astSync('[unclosed'));
+    console.log('selector-parser linear parsing and selector compatibility passed');
+  `, directory], {timeout: 10000, stdio: 'pipe'});
+}
+
+export function verifyHono(directory) {
+  // Hono 4.13.16 fixes CSRF, multipart validation, mount and wildcard routing.
+  execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import {createRequire} from 'node:module';
+    import path from 'node:path';
+    const require = createRequire(path.join(process.argv[1], 'package.json'));
+    const {Hono} = require('hono');
+    const {csrf} = require('hono/csrf');
+    const {validator} = require('hono/validator');
+    const {RegExpRouter} = require('hono/router/reg-exp-router');
+    const csrfApp = new Hono();
+    csrfApp.use('*', csrf());
+    csrfApp.post('/change', c => c.text('changed'));
+    for (const [origin, status] of [['https://foreign.test', 403], ['https://hono.test', 200]]) {
+      assert.equal((await csrfApp.request('https://hono.test/change', {method: 'POST',
+        headers: {'content-type': 'text/ping', origin}, body: 'PING'})).status, status,
+        'text/ping skipped the origin check');
+    }
+    const formApp = new Hono();
+    formApp.post('/form', validator('form', (value, c) => value.forbidden ? c.text('rejected', 400) : value),
+      c => c.json(c.req.valid('form')));
+    for (const [field, status] of [['forbidden', 400], ['safe', 200]]) {
+      const body = '--fixture\\r\\nContent-Disposition: form-data; name="' + field +
+        '"\\r\\n\\r\\nvalue\\r\\n--fixture--\\r\\n';
+      const response = await formApp.request('https://hono.test/form', {method: 'POST',
+        headers: {'content-type': 'multipart/form-data; charset=utf-8; boundary=fixture'}, body});
+      assert.equal(response.status, status, 'multipart parameters skipped form validation');
+      if (status === 200) assert.deepEqual(await response.json(), {safe: 'value'});
+    }
+    const inner = new Hono();
+    inner.get('/admin/secret', c => c.text('secret'));
+    inner.get('/public', c => c.text('public'));
+    for (const [prefix, unsafe, positive] of [
+      ['/app', '/app/public%5C..%5Cadmin/secret', '/app/public'],
+      ['/api/:tenant', '/api/a/xxxxx/admin/secret', '/api/long-tenant/public'],
+    ]) {
+      const outer = new Hono();
+      outer.use(prefix + '/admin/*', c => c.text('blocked', 401));
+      outer.mount(prefix, inner.fetch);
+      assert.equal((await outer.request('https://hono.test' + unsafe)).status, 404,
+        'mounted path bypassed scoped middleware');
+      assert.equal(await (await outer.request('https://hono.test' + positive)).text(), 'public');
+    }
+    for (const [middleware, route, request] of [
+      ['/api/:tenant{[^/]+}/admin/*', '/api/:tenant/admin/:id', '/api/team/admin/secret'],
+      ['/admin/*', '/admin*', '/admin/secret'],
+      ['*', '/normal', '/other%0Apath'],
+    ]) {
+      const app = new Hono({router: new RegExpRouter()});
+      app.use(middleware, c => c.text('blocked', 401));
+      app.get(route, c => c.text('secret'));
+      assert.equal((await app.request('https://hono.test' + request)).status, 401,
+        'wildcard middleware skipped an equivalent path');
+    }
+    console.log('Hono origin, form and route protections passed');
+  `, directory], {timeout: 10000, stdio: 'pipe'});
+}
+
+export function verifyHonoNodeServer(directory) {
+  // https://github.com/honojs/node-server/security/advisories/GHSA-jpvv-r467-5p4w
+  execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import {once} from 'node:events';
+    import {createRequire} from 'node:module';
+    import {createConnection} from 'node:net';
+    const {createAdaptorServer} = createRequire(import.meta.url)(process.argv[1]);
+    const server = createAdaptorServer({fetch: request => new Response(new URL(request.url).pathname)});
+    await once(server.listen(0, '127.0.0.1'), 'listening');
+    const exchange = target => new Promise((resolve, reject) => {
+      const socket = createConnection(server.address().port, '127.0.0.1');
+      let response = '';
+      socket.once('connect', () => socket.end('GET ' + target +
+        ' HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n'));
+      socket.setEncoding('utf8');
+      socket.on('data', chunk => { response += chunk; });
+      socket.once('end', () => resolve(response));
+      socket.once('error', reject);
+    });
+    try {
+      for (const target of ['/admin\\\\secret', '/public\\\\..\\\\admin/secret',
+        'http://localhost/admin\\\\secret']) {
+        assert.match(await exchange(target), /^HTTP\\/1\\.1 400 /, 'raw backslash path was normalized');
+      }
+      for (const target of ['/public', '/admin%5Csecret', '/public?q=\\\\value']) {
+        assert.match(await exchange(target), /^HTTP\\/1\\.1 200 /);
+      }
+      console.log('node-server raw path rejection and HTTP compatibility passed');
+    } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+  `, directory], {timeout: 10000, stdio: 'pipe'});
+}
+
+export function verifySeroval(directory) {
+  // GHSA-9wx9-5pv9-3349 and GHSA-f86p-h4j2-7qgj; compact buffers need the standard atob decoder.
+  execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import {createRequire} from 'node:module';
+    import vm from 'node:vm';
+    const {serialize} = createRequire(import.meta.url)(process.argv[1]);
+    const expression = new RegExp('(?<word>a)(?<=a)</script>', 'g');
+    const source = serialize(expression);
+    assert.equal(source.includes('<'), false, 'RegExp serialization can close an HTML script');
+    const revived = vm.runInNewContext('(' + source + ')');
+    assert.equal(revived.source, expression.source);
+    assert.equal(revived.flags, expression.flags);
+    const value = new Uint8Array([1, 2, 3]);
+    value.constructor = {name: 'Uint8Array([0]);globalThis.serovalInjection=1;//'};
+    for (const options of [{}, {compactArrayBufferViews: true}]) {
+      const output = serialize(value, options);
+      assert.equal(output.includes('serovalInjection'), false, 'typed array constructor injected code');
+      assert.deepEqual(Array.from(vm.runInNewContext('(' + output + ')', {atob})), [1, 2, 3]);
+    }
+    console.log('seroval script escaping and intrinsic typed array serialization passed');
+  `, directory], {timeout: 10000, stdio: 'pipe'});
+}
+
+function verifyXmlDependency(name, directory) {
+  execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import fs from 'node:fs';
+    import path from 'node:path';
+    import {pathToFileURL} from 'node:url';
+    const name = process.argv[1], directory = process.argv[2];
+    const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
+    const api = await import(pathToFileURL(path.join(directory, pkg.module || pkg.main)));
+    if (name === 'is-unsafe') {
+      assert.equal(api.isUnsafe('safe &amp; text', api.XML), false);
+      assert.equal(api.isUnsafe('<!DOCTYPE root SYSTEM "https://foreign.test/xxe">', api.XML), true);
+    } else {
+      assert.equal(api.default('42'), 42);
+      assert.equal(api.default(' 0.5 '), 0.5);
+      assert.equal(api.default('001', {leadingZeros: false}), '001');
+      assert.equal(api.default('text'), 'text');
+    }
+  `, name, directory], {timeout: 10000, stdio: 'pipe'});
+}
+
+export function verifyFastXmlParser(directory) {
+  // https://github.com/NaturalIntelligence/fast-xml-parser/security/advisories/GHSA-474x-hrwr-fgx4
+  execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import fs from 'node:fs';
+    import {createRequire} from 'node:module';
+    import path from 'node:path';
+    import {performance} from 'node:perf_hooks';
+    import {pathToFileURL} from 'node:url';
+    const directory = process.argv[1];
+    const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
+    const require = createRequire(path.join(directory, 'package.json'));
+    const unsafePackage = path.join(path.dirname(require.resolve('is-unsafe')), '..', 'package.json');
+    assert.equal(JSON.parse(fs.readFileSync(unsafePackage)).version, '2.0.3');
+    assert.equal(JSON.parse(fs.readFileSync(require.resolve('strnum/package.json'))).version, '2.5.1');
+    for (const {XMLParser, XMLBuilder, XMLValidator} of [require(directory),
+      await import(pathToFileURL(path.join(directory, pkg.module)))]) {
+      const options = {ignoreAttributes: false, attributeNamePrefix: '@_'};
+      const parser = new XMLParser(options);
+      const svg = '<svg baseProfile="tiny-ps"><title>A &amp; B</title><rect width="32" /></svg>';
+      const parsed = parser.parse(svg);
+      assert.equal(parsed.svg.title, 'A & B');
+      assert.equal(parsed.svg.rect['@_width'], '32');
+      assert.deepEqual(parser.parse(new XMLBuilder(options).build(parsed)), parsed);
+      assert.equal(XMLValidator.validate(svg), true);
+      assert.notEqual(XMLValidator.validate('<root><unclosed></root>'), true);
+      const stop = new XMLParser({stopNodes: ['root.stop']});
+      for (const raw of ['before <a href=">">one</a> after',
+        'if (a < b) "<a unclosed text <b>raw', 'before<stop>nested</stop>after']) {
+        assert.deepEqual(stop.parse('<root><stop>' + raw + '</stop><count>42</count></root>'),
+          {root: {stop: raw, count: 42}});
+      }
+      const hostile = new XMLParser({stopNodes: ['stop']});
+      const start = performance.now();
+      assert.throws(() => hostile.parse('<stop>' + '<a '.repeat(100000)), /Unexpected end/);
+      assert.ok(performance.now() - start < 1500, 'XML stop-node parsing exceeded 1.5 seconds');
+    }
+    console.log('fast-xml-parser CJS/ESM XML and bounded stop-node parsing passed');
+  `, directory], {timeout: 10000, stdio: 'pipe'});
+}
+
 export function verifyRuntimePackage(name, directory, compatibility) {
   const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
   assert.equal(pkg.name, name);
@@ -182,6 +423,18 @@ export function verifyRuntimePackage(name, directory, compatibility) {
     verifyZod(directory, compatibility);
   } else if (name === 'joi') {
     verifyJoi(directory);
+  } else if (name === 'hono') {
+    verifyHono(directory);
+  } else if (name === '@hono/node-server') {
+    verifyHonoNodeServer(directory);
+  } else if (name === 'ip-address') {
+    verifyIpAddress(directory);
+  } else if (name === 'seroval') {
+    verifySeroval(directory);
+  } else if (name === 'is-unsafe' || name === 'strnum') {
+    verifyXmlDependency(name, directory);
+  } else if (name === 'fast-xml-parser') {
+    verifyFastXmlParser(directory);
   } else {
     assert.fail(`unreviewed runtime dependency: ${name}`);
   }
@@ -192,7 +445,7 @@ export async function patchRuntimePackages(root, pins) {
   const store = path.join(root, '.pnpm');
   const evidence = [];
   for (const [name, pin] of Object.entries(pins)) {
-    assert.ok(['qs', 'body-parser', 'dompurify', 'undici', 'zod', 'joi'].includes(name), `unreviewed runtime dependency: ${name}`);
+    assert.ok(['qs', 'body-parser', 'dompurify', 'undici', 'zod', 'joi', 'hono', '@hono/node-server', 'ip-address', 'seroval', 'is-unsafe', 'strnum', 'fast-xml-parser'].includes(name), `unreviewed runtime dependency: ${name}`);
     assertDependencyPin(name, pin);
     const fromVersions = pinFromVersions(pin);
     const directories = [];
@@ -212,7 +465,7 @@ export async function patchRuntimePackages(root, pins) {
       if (!targets.length) continue;
       await replaceVerifiedDependency(name, pin, targets, directory => {
         // These packages need their existing sibling dependencies in the pnpm store.
-        if (!['body-parser', 'qs', 'joi'].includes(name)) verifyRuntimePackage(name, directory, pin.compatibility?.[from]);
+        if (!['body-parser', 'qs', 'joi', '@hono/node-server', 'strnum', 'fast-xml-parser'].includes(name)) verifyRuntimePackage(name, directory, pin.compatibility?.[from]);
       }, directory => {
         if (name === 'zod') prepareZod(directory, pin.compatibility?.[from], pin.version);
       });
@@ -284,7 +537,7 @@ export async function patchMcpPackages(root, pins) {
       const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
       assert.equal(pkg.name, name);
       directories.push(directory);
-      if (pkg.version === pin.from) { outdated.push(directory); originals.push(pkg); }
+      if (pinFromVersions(pin).includes(pkg.version)) { outdated.push(directory); originals.push(pkg); }
     }
     await replaceVerifiedDependency(name, pin, outdated, directory => {
       const replacement = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
@@ -486,9 +739,34 @@ export function patchCacheSemantics(directory) {
   console.log(`Verified CVE-2026-93748 cache protections (${pkg.version}): ${directory}`);
 }
 
+export function patchMcpHttpFetch(root) {
+  // OpenClaw v2026.11.3 wraps the SDK's manual fetch with its own redirect loop.
+  // Reuse its OAuth policy so a tool's POST body stays on the resource origin.
+  const file = path.join(fs.realpathSync(root), 'src/agents/mcp-http-fetch.ts');
+  assert.equal(fs.realpathSync(file), file, 'unexpected MCP HTTP fetch source path');
+  const source = fs.readFileSync(file, 'utf8');
+  const original = '  return buildMcpHttpFetchWithRedirectPolicy(params, "replay");';
+  const replacement = '  return buildMcpHttpFetchWithRedirectPolicy(params, "reject");';
+  const originalHash = 'f144f2e0707d4a81077c759b5cfc3dd9fa432fc6c5317c3599ee9462d8866f26';
+  const patchedHash = 'e88a9f6501cf5897289a8141e32b4a0ea096e35bf70dd6ed73a73820e0ebf7bd';
+  const sha256 = value => createHash('sha256').update(value).digest('hex');
+  if (sha256(source) === patchedHash) {
+    assert.equal(source.split(replacement).length, 2, 'missing MCP HTTP fetch patch anchor');
+    return;
+  }
+  assert.equal(sha256(source), originalHash, 'unreviewed MCP HTTP fetch source');
+  assert.equal(source.split(original).length, 2, 'missing MCP HTTP fetch patch anchor');
+  const patched = source.replace(original, replacement);
+  assert.equal(sha256(patched), patchedHash, 'unexpected MCP HTTP fetch patch result');
+  fs.writeFileSync(file, patched);
+  console.log(`Patched MCP cross-origin tool body replay: ${file}`);
+}
+
 async function main() {
   const components = JSON.parse(fs.readFileSync(new URL('./components.json', import.meta.url)));
   if (process.argv[2] === '--build') {
+    assert.equal(process.argv.length, 3, 'unexpected dependency patch argument');
+    patchMcpHttpFetch('/app');
     // Vite/Rolldown inline these packages into the browser assets before runtime COPY.
     await patchRuntimePackages('/app/node_modules', components.runtime_packages);
     await patchMarkdownPackages('/app/node_modules', components.markdown_packages);
@@ -496,6 +774,7 @@ async function main() {
   }
   assert.equal(process.argv.length, 2, 'unexpected dependency patch argument');
   await patchNpmBundles('/app/node_modules', components.npm_bundled);
+  await patchNpmBundles('/usr/local/lib/node_modules', components.npm_bundled);
   const runtimePatches = await patchRuntimePackages('/app/node_modules', components.runtime_packages);
   fs.mkdirSync('/usr/share/doc/release-factory', {recursive: true});
   fs.writeFileSync('/usr/share/doc/release-factory/openclaw-runtime-deps.json', JSON.stringify(runtimePatches, null, 2) + '\n');
@@ -522,7 +801,7 @@ async function main() {
     assert.ok(directory.startsWith('/app/node_modules/.pnpm/@github+copilot-'));
     const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
     assert.equal(pkg.name, 'adm-zip');
-    if (pkg.version === '0.5.17') outdated.push(directory);
+    if (['0.5.17', '0.6.0'].includes(pkg.version)) outdated.push(directory);
     else verifyArchiveReader(directory); // Keep a newer upstream fix only if it passes the same regression.
   }
   if (!outdated.length) {
@@ -549,7 +828,8 @@ async function main() {
     assert.equal(JSON.parse(fs.readFileSync(path.join(replacement, 'package.json'))).version, pin.version);
     verifyArchiveReader(replacement);
     for (const directory of outdated) {
-      console.log(`Replace verified vendored adm-zip 0.5.17 -> ${pin.version}: ${directory}`);
+      const from = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'))).version;
+      console.log(`Replace verified vendored adm-zip ${from} -> ${pin.version}: ${directory}`);
       const {uid, gid} = fs.statSync(directory);
       fs.rmSync(directory, {recursive: true});
       fs.cpSync(replacement, directory, {recursive: true});
