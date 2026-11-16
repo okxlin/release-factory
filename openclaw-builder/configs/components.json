@@ -72,7 +72,7 @@
       "sha512": "21f93529c2ebc5a1add6871c41a81034534d3aa46dd4b16e7a11271c7cc1f19e9c460231454d5305a888b14882740fa0cb93cbed8d485f7d4334a9119b1b578d"
     },
     "dompurify": {
-      "from": ["3.4.16"],
+      "from": ["3.4.16", "3.4.17"],
       "version": "3.4.18",
       "url": "https://registry.npmjs.org/dompurify/-/dompurify-3.4.18.tgz",
       "sha512": "a1f7b7c08fee366ebc1c89c005814962a431470d4468a02335dac554aaa3518f9466eaef35dd8bfc7b907b4f7bb3fe118af5a26723fab53edaa13f1ab637e1c2"
