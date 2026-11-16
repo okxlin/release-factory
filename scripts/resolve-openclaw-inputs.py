@@ -110,9 +110,11 @@ class Registry:
             except ValueError:
                 raise ValueError(f"unexpected registry blob redirect from {self.host}: invalid URL") from None
             # Docker's pull CDN hosts: https://docs.docker.com/desktop/setup/allow-list/
+            # Docker Hub also redirects signed blobs to its exact S3 bucket.
             allowed_destination = (parsed.hostname or "").endswith(".githubusercontent.com") if self.host == "ghcr.io" else parsed.hostname in {
                 "production.cloudflare.docker.com", "production.cloudfront.docker.com",
                 "docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com",
+                "docker-images-prod.s3.dualstack.us-east-1.amazonaws.com",
             }
             # Same-origin signed URLs stay on this repository's digest-bound blob.
             if parsed.hostname == self.host:

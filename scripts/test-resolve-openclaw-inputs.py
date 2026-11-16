@@ -125,6 +125,50 @@ class RegistryTests(unittest.TestCase):
             self.assertNotIn(sensitive, message)
         self.assertEqual(http.call_count, 1)
 
+    def test_docker_hub_s3_blob_redirect_strips_auth_and_checks_digest(self):
+        registry = MODULE.Registry("docker.io/okxlin/openclaw-sandbox")
+        registry.token = "hub-token"
+        body = b'{"os":"linux"}'
+        digest = "sha256:" + hashlib.sha256(body).hexdigest()
+        location = "https://docker-images-prod.s3.dualstack.us-east-1.amazonaws.com/config?signature=fixture"
+        for status in (302, 307):
+            with self.subTest(status=status), patch.object(MODULE, "http", side_effect=[
+                (status, {"location": location}, b""), (200, {}, body)
+            ]) as http:
+                self.assertEqual(registry.get("blobs", digest), {"os": "linux"})
+                self.assertEqual(http.call_count, 2)
+                self.assertEqual(http.call_args_list[0].args[1]["Authorization"], "Bearer hub-token")
+                self.assertEqual(http.call_args_list[-1].args, (location, {}))
+        for response in ((200, {}, b"{}"), (307, {"location": "https://example.org/config"}, b"")):
+            with self.subTest(response=response), patch.object(MODULE, "http", side_effect=[
+                (307, {"location": location}, b""), response
+            ]) as http:
+                with self.assertRaisesRegex(ValueError, "digest mismatch|lookup failed"):
+                    registry.get("blobs", digest)
+                self.assertEqual(http.call_count, 2)
+                self.assertEqual(http.call_args_list[-1].args[1], {})
+
+    def test_docker_hub_s3_blob_redirect_cannot_retarget(self):
+        digest = "sha256:" + "a" * 64
+        host = "docker-images-prod.s3.dualstack.us-east-1.amazonaws.com"
+        locations = ("https://" + host + ".evil.example/config",
+                     "https://other-bucket.s3.dualstack.us-east-1.amazonaws.com/config",
+                     "http://" + host + "/config", "https://" + host + ":8443/config",
+                     "https://user:secret-fixture@" + host + "/config", "https://" + host + "/config#fragment")
+        for location in locations:
+            registry = MODULE.Registry("docker.io/okxlin/openclaw-sandbox")
+            with self.subTest(location=location), patch.object(
+                MODULE, "http", return_value=(307, {"location": location}, b"")
+            ) as http:
+                with self.assertRaisesRegex(ValueError, "redirect") as failure:
+                    registry.get("blobs", digest)
+                self.assertNotIn("secret-fixture", str(failure.exception))
+                self.assertEqual(http.call_count, 1)
+        with patch.object(MODULE, "http", return_value=(307, {"location": "https://" + host + "/config"}, b"")) as http:
+            with self.assertRaisesRegex(ValueError, "redirect"):
+                self.registry.get("blobs", digest)
+            self.assertEqual(http.call_count, 1)
+
     def test_relative_blob_redirect_is_resolved_before_destination_validation(self):
         body = b'{"os":"linux"}'
         digest = "sha256:" + hashlib.sha256(body).hexdigest()
