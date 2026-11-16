@@ -268,6 +268,48 @@ test('repairs real runtime packages and preserves pnpm consumers and security pr
   }
 });
 
+test('upgrades stable upstream DOMPurify 3.4.17 and still rejects unreviewed versions', {timeout: 120000}, async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-current-dompurify-'));
+  try {
+    fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({private: true,
+      dependencies: {dompurify: '3.4.17', jsdom: '27.0.1'}}));
+    execFileSync('npm', ['install', '--prefix', temporary, '--ignore-scripts', '--package-lock=false',
+      '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], {timeout: 90000, stdio: 'pipe'});
+    const root = path.join(temporary, 'node_modules');
+    const original = path.join(root, 'dompurify');
+    const directory = path.join(root, '.pnpm', 'dompurify@3.4.17', 'node_modules/dompurify');
+    fs.mkdirSync(path.dirname(directory), {recursive: true});
+    fs.renameSync(original, directory);
+    fs.symlinkSync(path.relative(root, directory), original);
+    const consumer = path.join(root, 'fixture-consumer/node_modules/dompurify');
+    fs.mkdirSync(path.dirname(consumer), {recursive: true});
+    fs.symlinkSync(path.relative(path.dirname(consumer), directory), consumer);
+    const links = new Map([original, consumer].map(link => [link, fs.readlinkSync(link)]));
+    const packageFile = path.join(directory, 'package.json');
+    assert.equal(JSON.parse(fs.readFileSync(packageFile)).version, '3.4.17');
+
+    const receipt = await patchRuntimePackages(root, {dompurify: pins.dompurify});
+    assert.equal(JSON.parse(fs.readFileSync(packageFile)).version, '3.4.18');
+    assert.equal(receipt.length, 1);
+    assert.equal(receipt[0].version, '3.4.18');
+    assert.equal(receipt[0].sha512, pins.dompurify.sha512);
+    for (const [link, target] of links) assert.equal(fs.readlinkSync(link), target);
+    for (const mode of ['shadow', 'hook']) {
+      checkPassed(run(domPurifyRegression, consumer, temporary, mode), /DOMPurify .* protection passed/);
+    }
+
+    const fixedPackage = fs.readFileSync(packageFile);
+    const unreviewed = JSON.parse(fixedPackage);
+    unreviewed.version = '3.4.19';
+    fs.writeFileSync(packageFile, JSON.stringify(unreviewed));
+    await assert.rejects(patchRuntimePackages(root, {dompurify: pins.dompurify}), /unreviewed dompurify version/);
+    fs.writeFileSync(packageFile, fixedPackage);
+    await patchRuntimePackages(root, {dompurify: pins.dompurify});
+  } finally {
+    fs.rmSync(temporary, {recursive: true});
+  }
+});
+
 // The pinned v2026.11.3 source contains both versions, including the newer copy.
 test('upgrades both runtime Undici versions from the current upstream lock', {timeout: 150000}, async () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-current-undici-'));
