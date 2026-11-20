@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Registry failures must not be mistaken for a missing or fresh release."""
 import datetime as dt
+import base64
 import hashlib
 import importlib.util
 import json
@@ -15,6 +16,52 @@ from unittest.mock import patch
 SPEC = importlib.util.spec_from_file_location("openclaw_inputs", Path(__file__).with_name("resolve-openclaw-inputs.py"))
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+
+
+def dockerfile_metadata(family):
+    prefix = "OPENCLAW_NODE_" + family
+    source = (f'ARG {prefix}_IMAGE="docker.io/library/node:24-{family.lower()}"\n'
+              f'ARG {prefix}_SLIM_IMAGE="docker.io/library/node:24-{family.lower()}-slim"\n'
+              f'ARG {prefix}_SLIM_DIGEST="sha256:{"c" * 64}"\n'
+              f'FROM ${{{prefix}_IMAGE}} AS dependency-inputs\n'
+              f'FROM ${{{prefix}_SLIM_IMAGE}} AS base-runtime\n')
+    return {"type": "file", "path": "Dockerfile", "encoding": "base64",
+            "content": base64.b64encode(source.encode()).decode()}
+
+
+class NodeBaseSelectionTests(unittest.TestCase):
+    def setUp(self):
+        self.build_args = json.loads((MODULE.ROOT / "openclaw-builder/configs/components.json").read_text())["build_args"]
+
+    def test_matches_pinned_source_args_and_debian_package_names(self):
+        for family, package in (("BOOKWORM", "libgnutls30"), ("TRIXIE", "libgnutls30t64")):
+            with self.subTest(family=family), patch.object(MODULE, "github", return_value=dockerfile_metadata(family)) as github, \
+                    patch.object(MODULE, "pin_image", side_effect=lambda value: value + "@sha256:" + "b" * 64) as pin:
+                result = MODULE.node_base_build_args(self.build_args, "a" * 40)
+            prefix = "OPENCLAW_NODE_" + family
+            self.assertEqual(result[prefix + "_IMAGE"], self.build_args[prefix + "_IMAGE"] + "@sha256:" + "b" * 64)
+            self.assertEqual(result[prefix + "_SLIM_DIGEST"], "sha256:" + "b" * 64)
+            self.assertEqual(result["OPENCLAW_IMAGE_APT_PACKAGES"], package)
+            self.assertEqual({key for key in result if key.startswith("OPENCLAW_NODE_")},
+                             {prefix + "_IMAGE", prefix + "_SLIM_IMAGE", prefix + "_SLIM_DIGEST"})
+            self.assertEqual([call.args[0] for call in pin.call_args_list],
+                             [self.build_args[prefix + "_IMAGE"], self.build_args[prefix + "_SLIM_IMAGE"]])
+            github.assert_called_once_with("contents/Dockerfile?ref=" + "a" * 40)
+
+    def test_unknown_mixed_and_incomplete_node_bases_fail_before_registry_access(self):
+        missing_slim = dockerfile_metadata("TRIXIE")
+        missing_slim["content"] = base64.b64encode(b'ARG OPENCLAW_NODE_TRIXIE_IMAGE="node:24-trixie"\n').decode()
+        mixed = dockerfile_metadata("BOOKWORM")
+        mixed["content"] = base64.b64encode(base64.b64decode(mixed["content"]) +
+                                             base64.b64decode(dockerfile_metadata("TRIXIE")["content"])).decode()
+        for metadata in (dockerfile_metadata("UNKNOWN"), missing_slim, mixed,
+                         {**dockerfile_metadata("TRIXIE"), "path": "Otherfile"},
+                         {**dockerfile_metadata("TRIXIE"), "encoding": "none"}):
+            with self.subTest(metadata=metadata["path"]), patch.object(MODULE, "github", return_value=metadata), \
+                    patch.object(MODULE, "pin_image") as pin:
+                with self.assertRaises(ValueError):
+                    MODULE.node_base_build_args(self.build_args, "a" * 40)
+                pin.assert_not_called()
 
 
 class RegistryTests(unittest.TestCase):
@@ -330,7 +377,8 @@ class ReleaseSelectionTests(unittest.TestCase):
             github_output = Path(temporary) / "github-output"
             with patch("sys.argv", ["resolver", "--upstream-tag", "v2026.10.1", "--force",
                                    "--output", str(output), "--github-output", str(github_output)]), \
-                    patch.object(MODULE, "github", side_effect=[{"tag_name": "v2026.10.1"}, {"sha": "a" * 40}]) as github, \
+                    patch.object(MODULE, "github", side_effect=[{"tag_name": "v2026.10.1"}, {"sha": "a" * 40},
+                                                               dockerfile_metadata("BOOKWORM")]) as github, \
                     patch.object(MODULE, "pin_image", side_effect=lambda value: value + "@sha256:" + "b" * 64), \
                     patch("builtins.print"):
                 MODULE.main()
@@ -341,7 +389,7 @@ class ReleaseSelectionTests(unittest.TestCase):
             self.assertEqual(result["build_args"]["OPENCLAW_DOCKER_BUILD_VERSION"], "2026.10.1")
             self.assertIn("publish_latest=false\n", github_output.read_text())
             self.assertEqual([call.args[0] for call in github.call_args_list],
-                             ["releases/tags/v2026.10.1", "commits/v2026.10.1"])
+                             ["releases/tags/v2026.10.1", "commits/v2026.10.1", "contents/Dockerfile?ref=" + "a" * 40])
 
 
 class PublicationWorkflowTests(unittest.TestCase):

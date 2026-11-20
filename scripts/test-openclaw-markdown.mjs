@@ -8,10 +8,11 @@ import { patchMarkdownPackages, verifyMarkdown } from '../openclaw-builder/image
 
 const pins = JSON.parse(fs.readFileSync(new URL('../openclaw-builder/configs/components.json', import.meta.url))).markdown_packages;
 
-test('repairs the real Markdown denial of service and retains pnpm consumers and the CLI', {timeout: 120000}, async () => {
+for (const argparseBaseline of ['3.0.2', '3.0.3']) {
+test('repairs Markdown and preserves CLI consumers (argparse ' + argparseBaseline + ')', {timeout: 120000}, async () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-markdown-test-'));
   try {
-    const dependencies = {'markdown-it': pins['markdown-it'].from, argparse: pins.argparse.from,
+    const dependencies = {'markdown-it': pins['markdown-it'].from, argparse: argparseBaseline,
       entities: '8.1.0', 'linkify-it': '6.1.0', mdurl: '2.1.0', 'punycode.js': '2.3.1', 'uc.micro': '3.0.0'};
     fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({private: true, dependencies}));
     execFileSync('npm', ['install', '--prefix', temporary, '--ignore-scripts', '--package-lock=false',
@@ -20,7 +21,8 @@ test('repairs the real Markdown denial of service and retains pnpm consumers and
     const directories = {};
     for (const [name, pin] of Object.entries(pins)) {
       const original = path.join(root, name);
-      const directory = path.join(root, '.pnpm', `${name}@${pin.from}`, 'node_modules', name);
+      const baseline = name === 'argparse' ? argparseBaseline : pin.from;
+      const directory = path.join(root, '.pnpm', `${name}@${baseline}`, 'node_modules', name);
       fs.mkdirSync(path.dirname(directory), {recursive: true});
       fs.renameSync(original, directory);
       fs.symlinkSync(path.relative(root, directory), original);
@@ -38,7 +40,7 @@ test('repairs the real Markdown denial of service and retains pnpm consumers and
     const badPins = structuredClone(pins);
     badPins.argparse.sha512 = '0'.repeat(128);
     await assert.rejects(patchMarkdownPackages(root, badPins), {code: 'ERR_ASSERTION'});
-    assert.equal(JSON.parse(fs.readFileSync(path.join(directories.argparse, 'package.json'))).version, pins.argparse.from);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(directories.argparse, 'package.json'))).version, argparseBaseline);
     badPins.argparse = pins.argparse;
     badPins['markdown-it'].sha512 = '0'.repeat(128);
     await assert.rejects(patchMarkdownPackages(root, badPins), {code: 'ERR_ASSERTION'});
@@ -59,3 +61,4 @@ test('repairs the real Markdown denial of service and retains pnpm consumers and
     fs.rmSync(temporary, {recursive: true});
   }
 });
+}

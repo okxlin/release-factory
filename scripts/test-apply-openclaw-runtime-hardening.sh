@@ -89,7 +89,7 @@ PY
   test "$(grep -Fc -- 'AS openclaw-runtime-docker-tools' "${dockerfile}")" -eq 1
   grep -Fq -- 'ARG OPENCLAW_DOCKER_CRYPTO_VERSION="0.59.0"' "${dockerfile}" || fail 'missing configured Go crypto pin'
   grep -Fq -- 'ARG OPENCLAW_DOCKER_MOD_VERSION="0.43.0"' "${dockerfile}" || fail 'missing configured Go mod pin'
-  grep -Fq -- 'ARG OPENCLAW_DOCKER_NET_VERSION="0.62.0"' "${dockerfile}" || fail 'missing configured Go net pin'
+  grep -Fq -- 'ARG OPENCLAW_DOCKER_NET_VERSION="0.63.0"' "${dockerfile}" || fail 'missing configured Go net pin'
   grep -Fq -- 'ARG OPENCLAW_DOCKER_OTEL_VERSION="1.47.0"' "${dockerfile}" || fail 'missing configured OpenTelemetry pin'
   grep -Fq -- '-require=golang.org/x/crypto@v${OPENCLAW_DOCKER_CRYPTO_VERSION}' "${dockerfile}"
   grep -Fq -- '-require=golang.org/x/mod@v${OPENCLAW_DOCKER_MOD_VERSION}' "${dockerfile}"
@@ -145,7 +145,7 @@ assert_rejected() {
 
 invalid_net="${tmp_dir}/invalid-net-version"
 create_fixture "${invalid_net}" production-deps
-OPENCLAW_DOCKER_NET_VERSION=0.62.0-preview assert_rejected "${invalid_net}" 'Docker tool versions must be stable semver values' invalid-net-version
+OPENCLAW_DOCKER_NET_VERSION=0.63.0-preview assert_rejected "${invalid_net}" 'Docker tool versions must be stable semver values' invalid-net-version
 
 invalid_otel="${tmp_dir}/invalid-otel-version"
 create_fixture "${invalid_otel}" production-deps
