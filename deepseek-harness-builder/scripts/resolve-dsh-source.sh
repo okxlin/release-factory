@@ -131,7 +131,9 @@ source_commit="$(node -e 'const fs=require("fs"); const value=JSON.parse(fs.read
 
 archive_url="https://codeload.github.com/${source_repo}/tar.gz/${source_commit}"
 archive_path="${tmp_dir}/dsh-source.tar.gz"
-curl "${curl_common_args[@]}" "${archive_url}" -o "${archive_path}"
+# Source archives are much larger than API JSON; keep API requests bounded at
+# 120 seconds while allowing ten minutes for a verified source download.
+curl "${curl_common_args[@]}" --max-time 600 "${archive_url}" -o "${archive_path}"
 source_archive_sha256="$(sha256sum "${archive_path}" | awk '{print $1}')"
 [[ "${source_archive_sha256}" =~ ^[a-f0-9]{64}$ ]] || {
     printf 'ERROR: failed to compute source archive SHA-256\n' >&2

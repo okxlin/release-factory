@@ -40,7 +40,7 @@ env:
 jobs:
   prepare:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 60
     outputs:
       dsh_version: ${{ steps.dsh.outputs.dsh_version }}
       image_tag: ${{ steps.params.outputs.image_tag }}

@@ -15,7 +15,7 @@ PINS = json.loads((ROOT / "image/components.lock.json").read_text())["build_args
 
 
 class CaddyVulnerabilityTests(unittest.TestCase):
-    def run_gate(self, saml_version="v0.5.2", findings=("GO-2026-6909", "GO-2026-5932"),
+    def run_gate(self, saml_version="v0.6.3", findings=("GO-2026-6909", "GO-2026-5932"),
                  receipt_valid=True, openpgp=False, symbols=False, scan_status=None):
         with tempfile.TemporaryDirectory(prefix="caddy-gate-test-") as temporary:
             root = Path(temporary)
@@ -40,7 +40,7 @@ class CaddyVulnerabilityTests(unittest.TestCase):
                 f"dep github.com/go-jose/go-jose/v3 v{PINS['GO_JOSE_V3_VERSION']} h1:fixture\n"
                 f"=> /usr/src/go-jose-{PINS['GO_JOSE_V3_VERSION']} (devel)\n"
                 f"dep github.com/go-jose/go-jose/v4 v{PINS['GO_JOSE_VERSION']} h1:fixture\n"
-                f"dep github.com/crewjam/saml v0.5.1 h1:original\n"
+                f"dep github.com/crewjam/saml v0.6.3 h1:original\n"
                 f"=> github.com/crewjam/saml {saml_version} h1:replacement\n")
             (fixtures / "scan.txt").write_text("\n".join(
                 f"Vulnerability #{index}: {finding}\n    More info: https://pkg.go.dev/vuln/{finding}"
@@ -91,10 +91,11 @@ raise SystemExit(int(os.environ["CADDY_TEST_SCAN_STATUS"]))
         result = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("GO-2026-6909", result.stdout)
-        self.assertIn("v0.5.2", result.stdout)
+        self.assertIn("v0.6.3", result.stdout)
 
     def test_unreviewed_versions_and_changed_receipts_fail(self):
-        for options in ({"saml_version": "v0.5.1"}, {"saml_version": "v0.6.3"},
+        for options in ({"saml_version": "v0.5.1"}, {"saml_version": "v0.5.2"},
+                        {"saml_version": "v0.6.4"},
                         {"receipt_valid": False}):
             with self.subTest(options=options):
                 result = self.run_gate(**options)

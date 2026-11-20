@@ -20,6 +20,7 @@ func releaseFactorySAMLAssertion() (*ServiceProvider, *Assertion, time.Time) {
 		AllowIDPInitiated: true,
 	}
 	assertion := &Assertion{
+		Version:      "2.0",
 		IssueInstant: now,
 		Issuer:       Issuer{Value: sp.IDPMetadata.EntityID},
 		Subject: &Subject{
@@ -35,6 +36,7 @@ func releaseFactorySAMLAssertion() (*ServiceProvider, *Assertion, time.Time) {
 			NotBefore: now.Add(-time.Minute), NotOnOrAfter: now.Add(time.Hour),
 			AudienceRestrictions: []AudienceRestriction{{Audience: Audience{Value: sp.EntityID}}},
 		},
+		AuthnStatements: []AuthnStatement{{AuthnInstant: now}},
 	}
 	return sp, assertion, now
 }
@@ -45,8 +47,10 @@ func TestReleaseFactorySAMLRequiredElements(t *testing.T) {
 		t.Fatalf("valid assertion rejected: %v", err)
 	}
 	for name, remove := range map[string]func(*Assertion){
-		"Subject":    func(a *Assertion) { a.Subject = nil },
-		"Conditions": func(a *Assertion) { a.Conditions = nil },
+		"Version":        func(a *Assertion) { a.Version = "" },
+		"AuthnStatement": func(a *Assertion) { a.AuthnStatements = nil },
+		"Subject":        func(a *Assertion) { a.Subject = nil },
+		"Conditions":     func(a *Assertion) { a.Conditions = nil },
 		"SubjectConfirmationData": func(a *Assertion) {
 			a.Subject.SubjectConfirmations[0].SubjectConfirmationData = nil
 		},

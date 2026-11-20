@@ -8,45 +8,24 @@ import path from 'node:path';
 import test from 'node:test';
 import { patchMcpHttpFetch } from '../openclaw-builder/image/patch-vendored-deps.mjs';
 
-// Bind the executable upstream fixture to the reviewed OpenClaw release.
-const revision = '847611dcaa3bf0e2783335f961dd1fd0580e4d9f';
-const sources = {
-  'src/agents/mcp-http-fetch.ts': 'f144f2e0707d4a81077c759b5cfc3dd9fa432fc6c5317c3599ee9462d8866f26',
-  'src/infra/net/fetch-guard.ts': '03843d1c80972be77675903b6b90db065b9627f364fc08672d5e1378a3b87a9b',
-  'src/infra/net/redirect-headers.ts': 'edd641d428ff0fd5c051d9f6d16bc12b526e8c16ea0dae90e252ea2a5972eefd',
-};
+// Execute exact reviewed bytes without relying on GitHub availability in CI.
+const fixtureRoot = new URL('../openclaw-builder/fixtures/mcp-http-fetch/', import.meta.url);
+const manifest = JSON.parse(fs.readFileSync(new URL('sources.json', fixtureRoot)));
+assert.equal(manifest.schema_version, 1);
+assert.deepEqual(manifest.fixtures.map(fixture => fixture.release), ['v2026.11.3', 'v2026.11.6']);
 
-async function copyReviewedSources(root) {
-  // Local diagnosis reuses the exact raw bytes already retrieved for the audit.
-  // CI retrieves only these three small files from the fixed commit.
-  const evidence = process.env.OPENCLAW_MCP_SOURCE_EVIDENCE ?
-    JSON.parse(fs.readFileSync(process.env.OPENCLAW_MCP_SOURCE_EVIDENCE)) : undefined;
-  if (evidence) assert.equal(evidence.revision, revision);
-  await Promise.all(Object.entries(sources).map(async ([relative, sha256]) => {
-    let bytes;
-    if (evidence) {
-      const entry = evidence.sources.find(item => item.path === relative);
-      assert.ok(entry, 'missing reviewed MCP source: ' + relative);
-      bytes = Buffer.from(entry.raw_bytes_base64, 'base64');
-    } else {
-      const response = await fetch('https://raw.githubusercontent.com/openclaw/openclaw/' + revision + '/' + relative,
-        {redirect: 'error', signal: AbortSignal.timeout(30000)});
-      assert.equal(response.status, 200);
-      const chunks = [];
-      let size = 0;
-      for await (const chunk of response.body) {
-        size += chunk.length;
-        assert.ok(size <= 64 * 1024, 'MCP fixture source exceeds expected size');
-        chunks.push(chunk);
-      }
-      bytes = Buffer.concat(chunks);
-    }
+function copyReviewedSources(root, fixture) {
+  assert.match(fixture.release, /^v\d{4}\.\d+\.\d+$/);
+  assert.match(fixture.revision, /^[a-f0-9]{40}$/);
+  for (const [relative, sha256] of Object.entries(fixture.sources)) {
+    assert.match(relative, /^src\/(agents|infra\/net)\/[a-z-]+\.ts$/);
+    const bytes = fs.readFileSync(new URL(fixture.release + '/' + relative, fixtureRoot));
     assert.ok(bytes.length <= 64 * 1024);
     assert.equal(createHash('sha256').update(bytes).digest('hex'), sha256, 'unreviewed MCP fixture source');
     const file = path.join(root, relative);
     fs.mkdirSync(path.dirname(file), {recursive: true});
     fs.writeFileSync(file, bytes);
-  }));
+  }
 }
 
 // Isolate transport admission and lifecycle helpers, not the redirect loop.
@@ -78,6 +57,7 @@ const fixtureModules = {
   `,
   'src/infra/net/configured-local-origin-bypass.js': `
     const unexpected = () => { throw new Error('unexpected managed proxy in MCP fixture'); };
+    export const resolveConfiguredLocalOriginLinkLocalHopPolicy = ({policy}) => policy;
     export const shouldUseConfiguredLocalOriginManagedProxyBypass = unexpected;
     export const shouldResolveConfiguredLocalOriginManagedProxyBypass = unexpected;
   `,
@@ -99,8 +79,23 @@ const fixtureModules = {
       });
     }
   `,
-  'src/infra/net/pinned-dispatcher-pool.js':
-    'export class PinnedDispatcherPool { constructor() { throw new Error("unexpected dispatcher pool"); } }\n',
+  'src/infra/net/pinned-dispatcher-pool.js': `
+    export class PinnedDispatcherPool {
+      constructor() {
+        globalThis.mcpFixtureProviderPool ??= {created: 0, acquired: 0, released: 0, closed: 0};
+        globalThis.mcpFixtureProviderPool.created++;
+      }
+      acquire({createDispatcher}) {
+        globalThis.mcpFixtureProviderPool.acquired++;
+        return {dispatcher: createDispatcher(), release: async () => {
+          globalThis.mcpFixtureProviderPool.released++;
+        }};
+      }
+      async closeAll() { globalThis.mcpFixtureProviderPool.closed++; }
+    }
+  `,
+  'src/agents/provider-runtime-lifecycle.js':
+    'export const setProviderTransportDispatcherPoolActive = active => { globalThis.mcpFixtureProviderPool.active = active; };\n',
   'src/infra/net/proxy-env.js': 'export const shouldUseEnvHttpProxyForUrl = () => false;\n',
   'src/infra/net/runtime-fetch.js': `
     export const isMockedFetch = () => false;
@@ -111,6 +106,8 @@ const fixtureModules = {
     export class SsrFBlockedError extends Error {}
     export const assertHostnameAllowedWithPolicy = hostname => assert.equal(hostname, '127.0.0.1');
     export const resolveSsrFPolicyForUrl = url => {
+      globalThis.mcpFixtureGuardChecks ??= [];
+      globalThis.mcpFixtureGuardChecks.push(url.hostname);
       assert.equal(url.protocol, 'http:');
       assertHostnameAllowedWithPolicy(url.hostname);
       return undefined;
@@ -124,6 +121,8 @@ const fixtureModules = {
     export const createPinnedDispatcher = () => null;
     export const closeDispatcher = async () => {};
   `,
+  'src/infra/net/ssrf-trusted-host-linklocal-exemptions.js':
+    'export const hasTrustedHostPodmanGatewayLinkLocalExemption = () => false;\n',
   'src/infra/net/undici-dispatcher-options.js':
     'export const globalUndiciStreamTimeoutMs = undefined;\n',
   'src/infra/net/undici-family-policy.js':
@@ -137,8 +136,8 @@ const fixtureModules = {
   `,
 };
 
-function compileFixture(root) {
-  for (const relative of Object.keys(sources)) {
+function compileFixture(root, fixture) {
+  for (const relative of Object.keys(fixture.sources)) {
     const file = path.join(root, relative);
     fs.writeFileSync(file.slice(0, -3) + '.js',
       stripTypeScriptTypes(fs.readFileSync(file, 'utf8'), {sourceUrl: file}));
@@ -307,6 +306,23 @@ async function exerciseBodyRedirects() {
       }
     }
     assert.deepEqual(failures, [], 'OpenClaw custom fetch replayed private MCP tool arguments across origins');
+    if (mode !== 'native') {
+      assert.ok(globalThis.mcpFixtureGuardChecks.length > counter,
+        'MCP custom fetch did not execute the real per-hop SSRF guard');
+      const guarded = buildMcpHttpFetch({resourceUrl: trustedOrigin});
+      await assert.rejects(guarded('http://blocked.invalid/'), /blocked.invalid/);
+      assert.equal(globalThis.mcpFixtureGuardChecks.at(-1), 'blocked.invalid');
+      const provider = globalThis.mcpFixtureProviderPool;
+      if (process.argv[3] === 'provider') {
+        assert.ok(provider, 'MCP fetch did not reach the provider dispatcher pool');
+        assert.equal(provider.created, 1);
+        assert.ok(provider.acquired > counter);
+        await (await import('./src/agents/provider-transport-dispatcher-pool.js')).closeProviderTransportDispatcherPool();
+        assert.equal(provider.closed, 1);
+        assert.equal(provider.active, false);
+        console.log('Verified actual MCP provider guard and dispatcher lifecycle');
+      } else assert.equal(provider, undefined, 'legacy MCP fetch unexpectedly used a provider pool');
+    }
     console.log('Verified actual MCP Client.callTool body redirects: ' + mode);
   } finally {
     await stop(trusted);
@@ -314,14 +330,20 @@ async function exerciseBodyRedirects() {
   }
 }
 
-function runFixture(root, mode) {
-  return spawnSync(process.execPath, [path.join(root, 'experiment.mjs'), mode], {
+function runFixture(root, mode, fixture) {
+  const provider = fixture.sources['src/agents/provider-transport-dispatcher-pool.ts'] ? 'provider' : 'legacy';
+  return spawnSync(process.execPath, [path.join(root, 'experiment.mjs'), mode, provider], {
     encoding: 'utf8', timeout: 45000,
     env: {...process.env, OPENCLAW_PROXY_ACTIVE: '', OPENCLAW_DEBUG_PROXY_ENABLED: ''},
   });
 }
 
-test('blocks private tool body replay through the actual OpenClaw HTTP/SSE fetch', {timeout: 180000}, async () => {
+function reportFixture(result) {
+  console.log(result.stdout.split('\n').filter(line => line.startsWith('Verified')).join('\n'));
+}
+
+for (const fixture of manifest.fixtures) {
+test('blocks private tool body replay through actual OpenClaw HTTP/SSE fetch (' + fixture.release + ')', {timeout: 180000}, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-mcp-fetch-'));
   try {
     fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({private: true, type: 'module', dependencies: {
@@ -330,7 +352,7 @@ test('blocks private tool body replay through the actual OpenClaw HTTP/SSE fetch
     }}));
     execFileSync('npm', ['install', '--prefix', root, '--ignore-scripts', '--package-lock=false',
       '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], {timeout: 120000, stdio: 'pipe'});
-    await copyReviewedSources(root);
+    copyReviewedSources(root, fixture);
     for (const [relative, content] of Object.entries(fixtureModules)) {
       const file = path.join(root, relative);
       fs.mkdirSync(path.dirname(file), {recursive: true});
@@ -338,18 +360,18 @@ test('blocks private tool body replay through the actual OpenClaw HTTP/SSE fetch
     }
     fs.writeFileSync(path.join(root, 'experiment.mjs'),
       '(' + exerciseBodyRedirects.toString() + ')().catch(error => { console.error(error); process.exitCode = 1; });\n');
-    compileFixture(root);
-    const native = runFixture(root, 'native');
+    compileFixture(root, fixture);
+    const native = runFixture(root, 'native', fixture);
     assert.equal(native.error, undefined, native.error?.message);
     assert.equal(native.status, 0, native.stderr || native.stdout);
     assert.match(native.stdout, /Verified actual MCP Client.callTool body redirects: native/);
-    console.log(native.stdout.trim());
+    reportFixture(native);
 
-    const replay = runFixture(root, 'replay');
+    const replay = runFixture(root, 'replay', fixture);
     assert.equal(replay.error, undefined, replay.error?.message);
     assert.equal(replay.status, 0, replay.stderr || replay.stdout);
     assert.match(replay.stdout, /Verified actual MCP Client.callTool body redirects: replay/);
-    console.log(replay.stdout.trim());
+    reportFixture(replay);
 
     const file = path.join(root, 'src/agents/mcp-http-fetch.ts');
     const original = fs.readFileSync(file);
@@ -369,9 +391,9 @@ test('blocks private tool body replay through the actual OpenClaw HTTP/SSE fetch
     const patched = fs.readFileSync(file);
     patchMcpHttpFetch(root);
     assert.deepEqual(fs.readFileSync(file), patched, 'MCP HTTP fetch patch is not idempotent');
-    compileFixture(root);
-    const hardened = runFixture(root, 'reject');
-    console.log(hardened.stdout.trim());
+    compileFixture(root, fixture);
+    const hardened = runFixture(root, 'reject', fixture);
+    reportFixture(hardened);
     assert.equal(hardened.error, undefined, hardened.error?.message);
     assert.equal(hardened.status, 0, hardened.stderr || hardened.stdout);
     assert.match(hardened.stdout, /Verified actual MCP Client.callTool body redirects: reject/);
@@ -379,3 +401,4 @@ test('blocks private tool body replay through the actual OpenClaw HTTP/SSE fetch
     fs.rmSync(root, {recursive: true});
   }
 });
+}

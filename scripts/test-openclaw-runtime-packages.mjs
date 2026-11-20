@@ -11,6 +11,55 @@ const names = ['qs', 'body-parser', 'dompurify', 'undici', 'joi'];
 const run = (source, ...arguments_) => spawnSync(process.execPath, ['--input-type=module', '-e', source, ...arguments_],
   {encoding: 'utf8', timeout: 15000});
 
+test('accepts the actual v2026.11.6 lock baselines without downgrading seroval', {timeout: 120000}, async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-runtime-current-'));
+  const baselines = {undici: '8.12.3', hono: '4.13.13', '@hono/node-server': '2.1.5', seroval: '1.7.0'};
+  const selected = Object.fromEntries(Object.keys(baselines).map(name => [name, pins[name]]));
+  try {
+    fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({private: true, dependencies: {
+      ...baselines, 'seroval-legacy': 'npm:seroval@1.6.11',
+    }}));
+    execFileSync('npm', ['install', '--prefix', temporary, '--ignore-scripts', '--package-lock=false',
+      '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], {timeout: 90000, stdio: 'pipe'});
+    const root = path.join(temporary, 'node_modules');
+    const directories = {};
+    const links = new Map();
+    for (const [name, version] of Object.entries(baselines)) {
+      const original = path.join(root, name);
+      const entry = name.replaceAll('/', '+') + '@' + version;
+      const directory = path.join(root, '.pnpm', entry, 'node_modules', name);
+      fs.mkdirSync(path.dirname(directory), {recursive: true});
+      fs.renameSync(original, directory);
+      fs.symlinkSync(path.relative(path.dirname(original), directory), original);
+      directories[name] = directory;
+      links.set(original, fs.readlinkSync(original));
+    }
+    const honoLink = path.join(path.dirname(directories['@hono/node-server']), '..', 'hono');
+    fs.symlinkSync(path.relative(path.dirname(honoLink), directories.hono), honoLink);
+    links.set(honoLink, fs.readlinkSync(honoLink));
+    const legacy = path.join(root, '.pnpm/seroval@1.6.11/node_modules/seroval');
+    fs.mkdirSync(path.dirname(legacy), {recursive: true});
+    fs.renameSync(path.join(root, 'seroval-legacy'), legacy);
+    const preserved = ['package.json', 'dist/index.js'].map(relative =>
+      [relative, fs.readFileSync(path.join(directories.seroval, relative))]);
+    const receipt = await patchRuntimePackages(root, selected);
+    assert.equal(receipt.length, 5);
+    for (const [name, directory] of Object.entries(directories)) {
+      assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'package.json'))).version,
+        name === 'seroval' ? '1.7.0' : selected[name].version);
+    }
+    assert.equal(JSON.parse(fs.readFileSync(path.join(legacy, 'package.json'))).version, '1.7.0');
+    for (const [relative, bytes] of preserved) {
+      assert.deepEqual(fs.readFileSync(path.join(directories.seroval, relative)), bytes,
+        'current seroval package was rewritten or downgraded');
+    }
+    for (const [link, target] of links) assert.equal(fs.readlinkSync(link), target);
+    await patchRuntimePackages(root, selected);
+  } finally {
+    fs.rmSync(temporary, {recursive: true});
+  }
+});
+
 // GHSA-27r3-jxmh-p828: the valid gzip frame completes before trailing bytes reach its decoder.
 const bodyParserRegression = `
   import assert from 'node:assert/strict';
@@ -263,6 +312,48 @@ test('repairs real runtime packages and preserves pnpm consumers and security pr
     fs.renameSync(directories.dompurify, outside);
     fs.symlinkSync(outside, directories.dompurify);
     await assert.rejects(patchRuntimePackages(root, pins), /unexpected .* dependency path/);
+  } finally {
+    fs.rmSync(temporary, {recursive: true});
+  }
+});
+
+test('upgrades stable upstream DOMPurify 3.4.17 and still rejects unreviewed versions', {timeout: 120000}, async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-current-dompurify-'));
+  try {
+    fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({private: true,
+      dependencies: {dompurify: '3.4.17', jsdom: '27.0.1'}}));
+    execFileSync('npm', ['install', '--prefix', temporary, '--ignore-scripts', '--package-lock=false',
+      '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], {timeout: 90000, stdio: 'pipe'});
+    const root = path.join(temporary, 'node_modules');
+    const original = path.join(root, 'dompurify');
+    const directory = path.join(root, '.pnpm', 'dompurify@3.4.17', 'node_modules/dompurify');
+    fs.mkdirSync(path.dirname(directory), {recursive: true});
+    fs.renameSync(original, directory);
+    fs.symlinkSync(path.relative(root, directory), original);
+    const consumer = path.join(root, 'fixture-consumer/node_modules/dompurify');
+    fs.mkdirSync(path.dirname(consumer), {recursive: true});
+    fs.symlinkSync(path.relative(path.dirname(consumer), directory), consumer);
+    const links = new Map([original, consumer].map(link => [link, fs.readlinkSync(link)]));
+    const packageFile = path.join(directory, 'package.json');
+    assert.equal(JSON.parse(fs.readFileSync(packageFile)).version, '3.4.17');
+
+    const receipt = await patchRuntimePackages(root, {dompurify: pins.dompurify});
+    assert.equal(JSON.parse(fs.readFileSync(packageFile)).version, '3.4.18');
+    assert.equal(receipt.length, 1);
+    assert.equal(receipt[0].version, '3.4.18');
+    assert.equal(receipt[0].sha512, pins.dompurify.sha512);
+    for (const [link, target] of links) assert.equal(fs.readlinkSync(link), target);
+    for (const mode of ['shadow', 'hook']) {
+      checkPassed(run(domPurifyRegression, consumer, temporary, mode), /DOMPurify .* protection passed/);
+    }
+
+    const fixedPackage = fs.readFileSync(packageFile);
+    const unreviewed = JSON.parse(fixedPackage);
+    unreviewed.version = '3.4.19';
+    fs.writeFileSync(packageFile, JSON.stringify(unreviewed));
+    await assert.rejects(patchRuntimePackages(root, {dompurify: pins.dompurify}), /unreviewed dompurify version/);
+    fs.writeFileSync(packageFile, fixedPackage);
+    await patchRuntimePackages(root, {dompurify: pins.dompurify});
   } finally {
     fs.rmSync(temporary, {recursive: true});
   }

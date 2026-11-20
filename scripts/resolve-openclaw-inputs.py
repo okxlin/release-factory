@@ -110,9 +110,11 @@ class Registry:
             except ValueError:
                 raise ValueError(f"unexpected registry blob redirect from {self.host}: invalid URL") from None
             # Docker's pull CDN hosts: https://docs.docker.com/desktop/setup/allow-list/
+            # Docker Hub also redirects signed blobs to its exact S3 bucket.
             allowed_destination = (parsed.hostname or "").endswith(".githubusercontent.com") if self.host == "ghcr.io" else parsed.hostname in {
                 "production.cloudflare.docker.com", "production.cloudfront.docker.com",
                 "docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com",
+                "docker-images-prod.s3.dualstack.us-east-1.amazonaws.com",
             }
             # Same-origin signed URLs stay on this repository's digest-bound blob.
             if parsed.hostname == self.host:
@@ -160,6 +162,38 @@ def pin_image(reference):
     if not DIGEST.fullmatch(digest):
         raise ValueError("registry returned an invalid base digest")
     return reference.split("@", 1)[0] + "@" + digest
+
+
+def node_base_build_args(build_args, upstream_sha):
+    # Use the Dockerfile at the resolved commit, including historical Bookworm releases.
+    metadata = github("contents/Dockerfile?ref=" + upstream_sha)
+    if (not isinstance(metadata, dict) or metadata.get("type") != "file"
+            or metadata.get("path") != "Dockerfile" or metadata.get("encoding") != "base64"
+            or not isinstance(metadata.get("content"), str) or len(metadata["content"]) > 128 * 1024):
+        raise ValueError("unexpected upstream Dockerfile metadata")
+    source = base64.b64decode(metadata["content"].replace("\n", ""), validate=True)
+    if len(source) > 64 * 1024:
+        raise ValueError("upstream Dockerfile exceeded size limit")
+    dockerfile = source.decode("utf-8")
+    node_args = re.findall(r"^ARG (OPENCLAW_NODE_[A-Z_]+)=", dockerfile, re.MULTILINE)
+    family = next((family for family in ("BOOKWORM", "TRIXIE")
+                   if set(node_args) == {f"OPENCLAW_NODE_{family}_IMAGE",
+                                         f"OPENCLAW_NODE_{family}_SLIM_IMAGE",
+                                         f"OPENCLAW_NODE_{family}_SLIM_DIGEST"}), None)
+    if family is None or len(node_args) != 3:
+        raise ValueError("unreviewed upstream Node base arguments")
+    prefix = "OPENCLAW_NODE_" + family
+    if any(f"FROM ${{{prefix}{suffix}}}" not in dockerfile for suffix in ("_IMAGE", "_SLIM_IMAGE")):
+        raise ValueError("upstream Node base arguments are not used by its stages")
+    resolved = {key: value for key, value in build_args.items() if not key.startswith("OPENCLAW_NODE_")}
+    for suffix in ("_IMAGE", "_SLIM_IMAGE"):
+        key = prefix + suffix
+        resolved[key] = pin_image(build_args[key])
+    resolved[prefix + "_SLIM_DIGEST"] = resolved[prefix + "_SLIM_IMAGE"].split("@")[1]
+    # https://packages.debian.org/trixie/libgnutls30t64
+    # https://packages.debian.org/bookworm/libgnutls30
+    resolved["OPENCLAW_IMAGE_APT_PACKAGES"] = "libgnutls30t64" if family == "TRIXIE" else "libgnutls30"
+    return resolved
 
 
 def needs_build(labels, upstream_sha, recipe_digest, now, max_age_days):
@@ -225,10 +259,7 @@ def main():
     upstream_sha = github("commits/" + urllib.parse.quote(tag, safe=""))["sha"]
     if not SHA.fullmatch(upstream_sha):
         raise ValueError("invalid upstream commit")
-    build_args = dict(components["build_args"])
-    for key in ("OPENCLAW_NODE_BOOKWORM_IMAGE", "OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE"):
-        build_args[key] = pin_image(build_args[key])
-    build_args["OPENCLAW_NODE_BOOKWORM_SLIM_DIGEST"] = build_args["OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE"].split("@")[1]
+    build_args = node_base_build_args(components["build_args"], upstream_sha)
     recipe = hashlib.sha256(json.dumps(build_args, sort_keys=True).encode())
     paths = sorted([*ROOT.joinpath("openclaw-builder").rglob("*"),
                     *ROOT.joinpath("scripts").glob("*openclaw*"),
@@ -245,7 +276,7 @@ def main():
         rebuild, reason = needs_publication(repositories, tag + "-sandbox", upstream_sha, digest, now,
                                             components["max_build_age_days"], publish_latest=publish_latest)
     build_args.update(SECURITY_REFRESH=now.strftime("%G-%V"), OPENCLAW_INSTALL_DOCKER_CLI="1",
-                      OPENCLAW_IMAGE_APT_PACKAGES="libgnutls30", OPENCLAW_PREFER_PNPM="1",
+                      OPENCLAW_PREFER_PNPM="1",
                       GIT_COMMIT=upstream_sha, OPENCLAW_DOCKER_BUILD_VERSION=tag.removeprefix("v"))
     result = {"skip": str(not rebuild).lower(), "reason": reason, "upstream_tag": tag,
               "upstream_sha": upstream_sha, "recipe_digest": digest, "created": now.isoformat(),
