@@ -655,7 +655,7 @@ export async function patchMarkdownPackages(root, pins) {
       assert.equal(fs.realpathSync(directory), directory, 'unexpected Markdown dependency path');
       const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
       assert.equal(pkg.name, name);
-      if (pkg.version === pin.from) outdated.push(directory);
+      if (pinFromVersions(pin).includes(pkg.version)) outdated.push(directory);
       else assert.equal(pkg.version, pin.version, `unreviewed ${name} version`);
       if (name === 'markdown-it') markdown.push(directory);
     }
@@ -740,21 +740,27 @@ export function patchCacheSemantics(directory) {
 }
 
 export function patchMcpHttpFetch(root) {
-  // OpenClaw v2026.11.3 wraps the SDK's manual fetch with its own redirect loop.
+  // Reviewed v2026.11.3 and v2026.11.6 wrap the SDK's manual fetch with a redirect loop.
   // Reuse its OAuth policy so a tool's POST body stays on the resource origin.
   const file = path.join(fs.realpathSync(root), 'src/agents/mcp-http-fetch.ts');
   assert.equal(fs.realpathSync(file), file, 'unexpected MCP HTTP fetch source path');
   const source = fs.readFileSync(file, 'utf8');
   const original = '  return buildMcpHttpFetchWithRedirectPolicy(params, "replay");';
   const replacement = '  return buildMcpHttpFetchWithRedirectPolicy(params, "reject");';
-  const originalHash = 'f144f2e0707d4a81077c759b5cfc3dd9fa432fc6c5317c3599ee9462d8866f26';
-  const patchedHash = 'e88a9f6501cf5897289a8141e32b4a0ea096e35bf70dd6ed73a73820e0ebf7bd';
+  const reviewedHashes = new Map([
+    ['f144f2e0707d4a81077c759b5cfc3dd9fa432fc6c5317c3599ee9462d8866f26',
+      'e88a9f6501cf5897289a8141e32b4a0ea096e35bf70dd6ed73a73820e0ebf7bd'],
+    ['12bb94f5831176e608650ab8ccb56ee024216065eadefa4a6df43b8f4d4c56b9',
+      '859f813f697bf09ae785bced98445237df41581ebb86ed443fadcc179e5a9db6'],
+  ]);
   const sha256 = value => createHash('sha256').update(value).digest('hex');
-  if (sha256(source) === patchedHash) {
+  const sourceHash = sha256(source);
+  if ([...reviewedHashes.values()].includes(sourceHash)) {
     assert.equal(source.split(replacement).length, 2, 'missing MCP HTTP fetch patch anchor');
     return;
   }
-  assert.equal(sha256(source), originalHash, 'unreviewed MCP HTTP fetch source');
+  const patchedHash = reviewedHashes.get(sourceHash);
+  assert.ok(patchedHash, 'unreviewed MCP HTTP fetch source');
   assert.equal(source.split(original).length, 2, 'missing MCP HTTP fetch patch anchor');
   const patched = source.replace(original, replacement);
   assert.equal(sha256(patched), patchedHash, 'unexpected MCP HTTP fetch patch result');

@@ -10,6 +10,8 @@
 `configs/components.json` 统一记录 Node 维护通道、npm、Docker CLI/Compose 源码和 Go 工具链，
 以及内嵌依赖补丁和测试镜像。正常版本维护先改清单，Dockerfile 的安装逻辑由
 `scripts/apply-openclaw-runtime-hardening.sh` 根据上游构建阶段生成。
+Node 参数按确定提交中的 Dockerfile 选择：新版使用 Trixie，历史版本保留 Bookworm；
+只对实际使用的基础镜像解析 digest，并匹配对应的 Debian 系统包。
 
 每日 workflow 使用 Registry Bearer 认证读取已发布镜像，Docker Hub 镜像须可公开拉取。只有 404 表示不存在；认证、网络及元数据
 校验失败会停止。上游提交、基础镜像 digest、构建配方变化或构建满七天都会触发重建；
@@ -26,14 +28,17 @@ release 并解析其确定提交，只检查和发布该版本的 `-sandbox` 标
 不会把宿主 Docker socket 交给应用。该测试不调用外部模型。arm64 尚未纳入此镜像的发布范围。
 
 Copilot 平台包内的 Foundry SDK 自带 `adm-zip`，无法通过 OpenClaw 的 pnpm override 更新。
-构建只替换其中受影响的 0.5.17 副本，使用 SHA-512 固定的 MIT 许可版 0.6.0；保留许可和补丁记录。
+构建只替换其中受影响的 0.5.17 副本，使用 SHA-512 固定的 MIT 许可版 0.6.1；保留许可和补丁记录。
 回归检查覆盖正常 ZIP 读取，并阻止伪造大小字段触发巨额预分配：
 <https://github.com/advisories/GHSA-xcpc-8h2w-3j85>。
 
-MCP OAuth 修复同步更新 SDK 1.31.0、client/core 2.2.0，并在实际依赖上验证 issuer 绑定和正常授权。
+MCP OAuth 修复使用 SDK 1.32.2、client/core 2.4.0，并在实际依赖上验证 issuer 绑定和正常授权。
 已有部署中，未记录 `issuer` 的旧 OAuth 凭据仍需重新授权，或依据可信的原授权服务器信息补充绑定；
 预配置的 OAuth provider 也必须设置 `expectedIssuer`。镜像构建不会修改持久化凭据。
 详见官方迁移说明：<https://github.com/modelcontextprotocol/typescript-sdk/security/advisories/GHSA-6qxp-vccf-f47h>。
+OpenClaw 的 HTTP/SSE fetch 补丁阻止跨源重定向重放工具请求正文；未知源码仍会停止构建。
+回归使用固定提交和 SHA-256 的本地上游源码夹具，覆盖旧版和新版 provider guard，
+避免源码下载限流影响这项验证。夹具来源和许可见 [`fixtures/mcp-http-fetch`](fixtures/mcp-http-fetch/README.md)。
 
 运行时依赖替换使用 `components.json` 中的官方 npm tarball 和 SHA-512，保留 pnpm 消费者链接。
 同样的依赖修补在 UI/A2UI 打包前执行，并使 A2UI 旧 bundle 缓存失效，避免内联旧代码。
@@ -42,7 +47,7 @@ Zod 使用 [4.6.7 完整包](https://github.com/colinhacks/zod/releases/tag/v4.6
 未声明上界的容器保持原有语义。来源、路径及本地兼容修改记录在镜像的
 `/usr/share/doc/release-factory/openclaw-runtime-deps.json`。
 
-Joi 使用 18.3.1 修复多邮箱分隔符的二次方正则开销；构建验证默认及自定义分隔符的长空白输入：
+Joi 使用 18.3.2 修复多邮箱分隔符的二次方正则开销；构建验证默认及自定义分隔符的长空白输入：
 <https://github.com/hapijs/joi/security/advisories/GHSA-4528-x5fx-h6hg>。
 
 镜像扫描采用 `configs/trivy-policy.json`：可修复 CRITICAL 阻断，应用目录的 HIGH/CRITICAL 阻断，

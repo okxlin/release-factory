@@ -2,18 +2,20 @@
   "schema_version": 1,
   "max_build_age_days": 7,
   "build_args": {
+    "OPENCLAW_NODE_TRIXIE_IMAGE": "docker.io/library/node:24-trixie",
+    "OPENCLAW_NODE_TRIXIE_SLIM_IMAGE": "docker.io/library/node:24-trixie-slim",
     "OPENCLAW_NODE_BOOKWORM_IMAGE": "docker.io/library/node:24-bookworm",
     "OPENCLAW_NODE_BOOKWORM_SLIM_IMAGE": "docker.io/library/node:24-bookworm-slim",
-    "OPENCLAW_NPM_VERSION": "11.21.2",
+    "OPENCLAW_NPM_VERSION": "11.21.3",
     "OPENCLAW_DOCKER_TOOLCHAIN_IMAGE": "docker.io/library/golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea",
-    "OPENCLAW_DOCKER_CLI_SOURCE_REF": "5457199aa57c45e990c59c89cab5f02b817238d7",
-    "OPENCLAW_DOCKER_CLI_VERSION": "29.9.3",
-    "OPENCLAW_DOCKER_COMPOSE_SOURCE_REF": "fb1fd129f86828359335477f82821525201d4a8c",
-    "OPENCLAW_DOCKER_COMPOSE_VERSION": "5.7.1",
+    "OPENCLAW_DOCKER_CLI_SOURCE_REF": "fdd4b8e5da335e1d0d83d29af5045f57280cd694",
+    "OPENCLAW_DOCKER_CLI_VERSION": "29.10.0",
+    "OPENCLAW_DOCKER_COMPOSE_SOURCE_REF": "aee88dcde588d9dc7d8d2902f97b6b5502fdb771",
+    "OPENCLAW_DOCKER_COMPOSE_VERSION": "5.8.0",
     "OPENCLAW_DOCKER_GRPC_VERSION": "1.85.0",
     "OPENCLAW_DOCKER_CRYPTO_VERSION": "0.59.0",
     "OPENCLAW_DOCKER_MOD_VERSION": "0.43.0",
-    "OPENCLAW_DOCKER_NET_VERSION": "0.62.0",
+    "OPENCLAW_DOCKER_NET_VERSION": "0.63.0",
     "OPENCLAW_DOCKER_OTEL_VERSION": "1.47.0"
   },
   "adm_zip": {
@@ -78,7 +80,7 @@
       "sha512": "a1f7b7c08fee366ebc1c89c005814962a431470d4468a02335dac554aaa3518f9466eaef35dd8bfc7b907b4f7bb3fe118af5a26723fab53edaa13f1ab637e1c2"
     },
     "undici": {
-      "from": ["8.11.2", "8.12.2"],
+      "from": ["8.11.2", "8.12.2", "8.12.3"],
       "version": "8.12.4",
       "url": "https://registry.npmjs.org/undici/-/undici-8.12.4.tgz",
       "sha512": "f0cc7eb8d28a111d9b03801db5e764a916f050220916bda725c91745ee72ac3ab378fab02cfed535c72d37cfd77660d26c5ee64be8c9288b3394bfaf6da9b554"
@@ -98,7 +100,8 @@
     },
     "hono": {
       "from": [
-        "4.13.12"
+        "4.13.12",
+        "4.13.13"
       ],
       "version": "4.13.16",
       "url": "https://registry.npmjs.org/hono/-/hono-4.13.16.tgz",
@@ -106,7 +109,8 @@
     },
     "@hono/node-server": {
       "from": [
-        "2.1.3"
+        "2.1.3",
+        "2.1.5"
       ],
       "version": "2.1.6",
       "url": "https://registry.npmjs.org/@hono/node-server/-/node-server-2.1.6.tgz",
@@ -124,11 +128,12 @@
     },
     "seroval": {
       "from": [
-        "1.6.8"
+        "1.6.8",
+        "1.6.11"
       ],
-      "version": "1.6.11",
-      "url": "https://registry.npmjs.org/seroval/-/seroval-1.6.11.tgz",
-      "sha512": "8696fa5e730218dfc0fbbf547fc57bfe24c6932cb26b3367e57d02a02029ed4cbdbd3dd14fc8d9f462dc9f11a85638373fc000adb7b86551eae82f284f66b490"
+      "version": "1.7.0",
+      "url": "https://registry.npmjs.org/seroval/-/seroval-1.7.0.tgz",
+      "sha512": "154f8b524983cd636c27aa2e6d914dddd18f2a7cb9dc34613c91ba9dfb446970cbf0c227d7dfa4104d46bdcfbadc6a3ea8f3b055494a21d2a1b2ed8737ab64b3"
     },
     "is-unsafe": {
       "from": ["2.0.2"],
@@ -157,7 +162,7 @@
   },
   "markdown_packages": {
     "argparse": {
-      "from": "3.0.2",
+      "from": ["3.0.2", "3.0.3"],
       "version": "3.0.4",
       "url": "https://registry.npmjs.org/argparse/-/argparse-3.0.4.tgz",
       "sha512": "7f058add9ab6da5e172498f1e667011c68a4224fa126a3bedf674f9b426eafbfabb46e71d6c70e8d27dd4fd64a7961cfa6cc9afe5d071cae2d0c8981913aedbc"
