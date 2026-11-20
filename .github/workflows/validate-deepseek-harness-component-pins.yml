@@ -77,4 +77,5 @@ jobs:
         run: |
           node --test deepseek-harness-builder/scripts/test-resolve-latest-npm-version.mjs
           node --test deepseek-harness-builder/scripts/test-resolve-dsh-source.mjs
+          python3 deepseek-harness-builder/scripts/test-resolve-dsh-source-download.py
           bash deepseek-harness-builder/scripts/test-prepare-dsh-version.sh
