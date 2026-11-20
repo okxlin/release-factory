@@ -42,6 +42,14 @@
       }
     },
     {
+      "name": "SAML security override",
+      "pin": "SAML_VERSION",
+      "source": {
+        "type": "go_module",
+        "module": "github.com/crewjam/saml"
+      }
+    },
+    {
       "name": "gRPC security override",
       "pin": "GRPC_VERSION",
       "source": {

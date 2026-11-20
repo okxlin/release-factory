@@ -7,7 +7,7 @@ EXPECTED_STRIPPED_BINARY_FINDING="GO-2026-5932"
 EXPECTED_PATCHED_GRPC_FINDING="GO-2026-6443"
 EXPECTED_PATCHED_GRPC_VERSION="v1.84.0"
 EXPECTED_FIXED_SAML_FINDING="GO-2026-6909"
-EXPECTED_FIXED_SAML_VERSION="v0.5.2"
+EXPECTED_FIXED_SAML_VERSION="v0.6.3"
 
 usage() {
     cat <<'EOF'
@@ -19,7 +19,7 @@ production build is stripped, so govulncheck can fall back to module-level
 findings. The only accepted fallback is GO-2026-5932 when the build-produced Go
 package manifest proves that no openpgp package is linked. GO-2026-6443 is also
 accepted only for patched gRPC v1.84.0 when the manifest excludes its xDS server.
-GO-2026-6909 is accepted only for reviewed SAML v0.5.2 with a build-produced
+GO-2026-6909 is accepted only for reviewed SAML v0.6.3 with a build-produced
 assertion regression receipt; the advisory has not recorded the fixed version.
 EOF
 }

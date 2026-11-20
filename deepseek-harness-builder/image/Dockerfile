@@ -139,9 +139,10 @@ RUN PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "google\.g
     && grep -Fx 'golang.org/x/crypto/ssh' /licenses/CADDY_GO_PACKAGES.txt \
     && ! grep -Eq '^golang\.org/x/crypto/openpgp(/|$)' /licenses/CADDY_GO_PACKAGES.txt
 
-# v0.5.2 fixes GO-2026-6909; the advisory currently omits its fixed range.
-# Test the module selected by the actual Caddy build and retain a bound receipt.
-# https://github.com/crewjam/saml/compare/v0.5.1...v0.5.2
+# Match caddy-security/go-authcrunch's v0.6.3 SAML dependency, preserving its
+# assertion and namespace fixes. Test the module selected by the actual Caddy
+# build and retain a bound receipt for the stale GO-2026-6909 fixed range.
+# https://github.com/crewjam/saml/compare/v0.5.2...v0.6.3
 RUN set -- /tmp/buildenv_* \
     && test "$#" -eq 1 \
     && saml_dir="$(PATH="/usr/local/go/bin:${PATH}" go list -C "$1" -m \
