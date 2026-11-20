@@ -142,6 +142,7 @@ async function verifyReviewedBundle(t, version, integrity) {
 for (const [version, integrity] of [
   ['0.2.1-rc.2', 'oU8f/0+DsdbgF0XhM+Po7W4PDJmTbhifQVwIoAcKfj29JN/4tLxKqIKS0IRcMbIGD39BGFITne78KIMgrGJy3Q=='],
   ['0.2.2-rc.3', 'TKhhqu88UGr71A90AND+As6ioxRZmaUyLgferrCcKurAlJ7O8mClJZZj8EjsMtjzM1TZy1SOxa23WDsT5IZuvQ=='],
+  ['0.2.2-rc.5', '4yyASIRM0tkDCeblxVeTsaJ5cGNZ9SMcgeHvjLDfWFK5WpasZHkHKp7rvu5Oil1qsQenLy1Y0nZCl99EvGP5Jw=='],
 ]) {
   test(`reviewed ${version} bundle persists remote preferences and preserves Host rejection`,
     t => verifyReviewedBundle(t, version, integrity))
