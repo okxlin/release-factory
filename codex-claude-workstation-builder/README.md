@@ -50,7 +50,7 @@ Build-time versions can be overridden with `--build-arg`:
 ```bash
 docker build \
   --build-arg NODE_MAJOR=24 \
-  --build-arg NPM_VERSION=12.0.2 \
+  --build-arg NPM_VERSION=12.2.3 \
   --build-arg GO_VERSION=1.27.2 \
   --build-arg GO_SHA256_AMD64=ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5 \
   --build-arg GO_SHA256_ARM64=94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8 \
@@ -198,9 +198,10 @@ Default release policy:
 - Scheduled builds publish only `YYYYMMDD` and `latest`.
 - Manual builds use the provided tag, or `YYYYMMDD` when the tag is left empty.
 - `sha-*` tags are intentionally not published by default to avoid long-lived tag sprawl.
-- The workflow builds a local `linux/amd64` test image first, runs `healthcheck.sh`, `doctor.sh`, and `smoke-test.sh`, then builds and pushes the requested platforms after tests pass.
+- The workflow builds each requested platform on a native runner, runs runtime smoke and the service vulnerability policy, then publishes the same tested images without rebuilding.
 - Before building, it validates the pinned Paseo dependency graph, reviewed lifecycle-script allowlist, direct 6767 listener, disabled relay/voice defaults, and exact upstream source notice.
 - The sing-box source build selects patched go-jose/v4 (default `4.1.9`) and verifies the module embedded in the binary for [CVE-2026-116587](https://github.com/advisories/GHSA-mgcc-cww5-fp2q).
+- The mihomo and sing-box source builds pin DHCP to `v0.0.0-20260719225207-c76316d4aa82` for [GHSA-jp3c-6v3g-mpxv](https://github.com/advisories/GHSA-jp3c-6v3g-mpxv), verify the linked version, and retain its BSD-3-Clause LICENSE; this reviewed pseudo-version is maintained separately from the stable module resolver.
 - Before building, it resolves the current proxy-core release inputs, verifies their immutable source archives, selects Go modules compatible with the Dockerfile's Go version, and passes those inputs as build arguments. The reviewed upper bounds are gRPC `1.85.0`, which includes the stable [CVE-2026-84445 fix](https://github.com/advisories/GHSA-2v4p-qf9q-27wj), and klauspost/compress `1.20.4`. Local builds use the Dockerfile's fallback pins; CI resolves the current releases within these bounds.
 - The proxy resolver records release tags, source commits, source archive SHA256 values, and selected Go module versions in the Actions step summary. It accepts Xray's upstream release channel, whose production tags are marked as prereleases, while keeping prereleases excluded for mihomo and sing-box.
 - The CI test container intentionally does not mount `/var/run/docker.sock`, and GHCR login happens only after tests pass.
