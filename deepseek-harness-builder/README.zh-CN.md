@@ -13,7 +13,7 @@
 
 两个工作流都会把相同标签发布到 `ghcr.io/okxlin/deepseek-harness` 和 `docker.io/$DOCKERHUB_USERNAME/deepseek-harness`。请把 `DOCKERHUB_USERNAME` 配置为 GitHub Actions 仓库变量或 Secret，并把 `DOCKERHUB_TOKEN` 配置为仓库 Secret。Docker Hub token 只用于 Registry 认证和已验证镜像的发布，不会传入镜像构建上下文。
 
-留空版本的手动发布会从 DeepSeek Harness GitHub Releases 选择最高的非 draft `dsh-v*` 源码版本，校验对应 tag、commit 和源码归档 SHA-256 后构建，并发布匹配的 `<DSH_VERSION>` 和 `<DSH_VERSION>-workstation` 标签；因此上游源码版本可以在发布到 npm 之前进入镜像。手动显式传入 `dsh-v*` 可以选择指定的源码 release，传入已发布的 npm 版本或 dist-tag 时仍按请求的 npm selector 解析。`image/dsh-source.json` 保留可复现的本地/PR 基线，未来源码 release 不需要修改 Dockerfile。手动工作流也可覆盖发布标签。AppStore `latest` 通道使用浮动标签，编号 AppStore 版本使用匹配的版本标签。
+留空版本的手动发布会从 DeepSeek Harness GitHub Releases 选择最高的非 draft `dsh-v*` 源码版本，校验对应 tag、commit 和源码归档 SHA-256 后构建，并发布匹配的 `<DSH_VERSION>` 和 `<DSH_VERSION>-workstation` 标签；因此上游源码版本可以在发布到 npm 之前进入镜像。手动显式传入 `dsh-v*` 可以选择指定的源码 release。输入匹配仓库固定的源码版本时沿用源码构建；其他版本或 dist-tag 通过 npm 解析，解析结果若匹配源码 pin 仍会走源码构建。`image/dsh-source.json` 保留可复现的本地/PR 基线，未来源码 release 不需要修改 Dockerfile。手动工作流也可覆盖发布标签。AppStore `latest` 通道使用浮动标签，编号 AppStore 版本使用匹配的版本标签。
 
 当前提交的源码基线是 [0.2.3-alpha.2](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.3-alpha.2)。该基线包含 PTC 包名 `ptc-runtime` 和 workflow 执行器 `workflow-ptc`；使用旧名称的自定义 profile 需要更新。DeepSeek 现在默认使用 Messages 协议；手动配置的旧官方 API 根地址应删除或改为 `https://api.deepseek.com/anthropic`，自定义 provider URL 不受影响。
 
