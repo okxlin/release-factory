@@ -51,7 +51,7 @@ gh workflow run build-deepseek-harness.yml \
   -f push_latest=true
 ```
 
-The example omits DeepSeek Harness `dsh_version` and `image_tag`, so the workflow resolves the latest GitHub `dsh-v*` source release, pins its commit and archive checksum, and uses the corresponding version tag. An explicit npm version or dist-tag still selects the npm distribution. Check each workflow for its input schema and defaults before publishing; required repository Variables, Secrets, and registry access must already be configured.
+The example omits DeepSeek Harness `dsh_version` and `image_tag`, so the workflow resolves the latest GitHub `dsh-v*` source release, pins its commit and archive checksum, and uses the corresponding version tag. An explicit input matching the pinned source version uses the source build. Other versions or dist-tags resolve through npm; a resolved version matching the source pin also uses the source build. Check each workflow for its input schema and defaults before publishing; required repository Variables, Secrets, and registry access must already be configured.
 
 ## Tags and Publication
 
