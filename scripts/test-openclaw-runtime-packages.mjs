@@ -11,6 +11,38 @@ const names = ['qs', 'body-parser', 'dompurify', 'undici', 'joi'];
 const run = (source, ...arguments_) => spawnSync(process.execPath, ['--input-type=module', '-e', source, ...arguments_],
   {encoding: 'utf8', timeout: 15000});
 
+test('accepts the actual v2026.11.10 qs package and still rejects unreviewed versions', {timeout: 120000}, async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-current-qs-'));
+  try {
+    fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({private: true,
+      dependencies: {qs: '6.17.1'}}));
+    execFileSync('npm', ['install', '--prefix', temporary, '--ignore-scripts', '--package-lock=false',
+      '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], {timeout: 90000, stdio: 'pipe'});
+    const root = path.join(temporary, 'node_modules');
+    const original = path.join(root, 'qs');
+    const directory = path.join(root, '.pnpm/qs@6.17.1/node_modules/qs');
+    fs.mkdirSync(path.dirname(directory), {recursive: true});
+    fs.renameSync(original, directory);
+    fs.symlinkSync(path.relative(root, directory), original);
+    const preserved = ['package.json', 'lib/index.js'].map(relative =>
+      [relative, fs.readFileSync(path.join(directory, relative))]);
+    const receipt = await patchRuntimePackages(root, {qs: pins.qs});
+    assert.equal(receipt.length, 1);
+    assert.equal(receipt[0].version, '6.17.1');
+    assert.equal(fs.readlinkSync(original), path.relative(root, directory));
+    for (const [relative, bytes] of preserved) assert.deepEqual(fs.readFileSync(path.join(directory, relative)), bytes,
+      'current reviewed qs package was rewritten or downgraded');
+    await patchRuntimePackages(root, {qs: pins.qs});
+    const packageFile = path.join(directory, 'package.json');
+    const metadata = JSON.parse(fs.readFileSync(packageFile));
+    metadata.version = '6.99.99';
+    fs.writeFileSync(packageFile, JSON.stringify(metadata));
+    await assert.rejects(patchRuntimePackages(root, {qs: pins.qs}), /unreviewed qs version/);
+  } finally {
+    fs.rmSync(temporary, {recursive: true});
+  }
+});
+
 test('accepts the actual v2026.11.6 lock baselines without downgrading seroval', {timeout: 120000}, async () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-runtime-current-'));
   const baselines = {undici: '8.12.3', hono: '4.13.13', '@hono/node-server': '2.1.5', seroval: '1.7.0'};
@@ -18,6 +50,7 @@ test('accepts the actual v2026.11.6 lock baselines without downgrading seroval',
   try {
     fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({private: true, dependencies: {
       ...baselines, 'seroval-legacy': 'npm:seroval@1.6.11',
+      'seroval-current': `npm:seroval@${selected.seroval.version}`,
     }}));
     execFileSync('npm', ['install', '--prefix', temporary, '--ignore-scripts', '--package-lock=false',
       '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], {timeout: 90000, stdio: 'pipe'});
@@ -40,17 +73,19 @@ test('accepts the actual v2026.11.6 lock baselines without downgrading seroval',
     const legacy = path.join(root, '.pnpm/seroval@1.6.11/node_modules/seroval');
     fs.mkdirSync(path.dirname(legacy), {recursive: true});
     fs.renameSync(path.join(root, 'seroval-legacy'), legacy);
+    const current = path.join(root, `.pnpm/seroval@${selected.seroval.version}/node_modules/seroval`);
+    fs.mkdirSync(path.dirname(current), {recursive: true});
+    fs.renameSync(path.join(root, 'seroval-current'), current);
     const preserved = ['package.json', 'dist/index.js'].map(relative =>
-      [relative, fs.readFileSync(path.join(directories.seroval, relative))]);
+      [relative, fs.readFileSync(path.join(current, relative))]);
     const receipt = await patchRuntimePackages(root, selected);
-    assert.equal(receipt.length, 5);
+    assert.equal(receipt.length, 6);
     for (const [name, directory] of Object.entries(directories)) {
-      assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'package.json'))).version,
-        name === 'seroval' ? '1.7.0' : selected[name].version);
+      assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'package.json'))).version, selected[name].version);
     }
-    assert.equal(JSON.parse(fs.readFileSync(path.join(legacy, 'package.json'))).version, '1.7.0');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(legacy, 'package.json'))).version, selected.seroval.version);
     for (const [relative, bytes] of preserved) {
-      assert.deepEqual(fs.readFileSync(path.join(directories.seroval, relative)), bytes,
+      assert.deepEqual(fs.readFileSync(path.join(current, relative)), bytes,
         'current seroval package was rewritten or downgraded');
     }
     for (const [link, target] of links) assert.equal(fs.readlinkSync(link), target);
@@ -289,7 +324,7 @@ test('repairs real runtime packages and preserves pnpm consumers and security pr
     await patchRuntimePackages(root, pins);
     for (const name of names) {
       assert.equal(JSON.parse(fs.readFileSync(path.join(directories[name], 'package.json'))).version, pins[name].version);
-      verifyRuntimePackage(name, directories[name]);
+      verifyRuntimePackage(name, directories[name], undefined, pins);
     }
     for (const [link, original] of links) assert.equal(fs.readlinkSync(link), original);
     checkPassed(run(bodyParserRegression, directories['body-parser']), /trailing-frame protection passed/);
@@ -338,9 +373,9 @@ test('upgrades stable upstream DOMPurify 3.4.17 and still rejects unreviewed ver
     assert.equal(JSON.parse(fs.readFileSync(packageFile)).version, '3.4.17');
 
     const receipt = await patchRuntimePackages(root, {dompurify: pins.dompurify});
-    assert.equal(JSON.parse(fs.readFileSync(packageFile)).version, '3.4.18');
+    assert.equal(JSON.parse(fs.readFileSync(packageFile)).version, pins.dompurify.version);
     assert.equal(receipt.length, 1);
-    assert.equal(receipt[0].version, '3.4.18');
+    assert.equal(receipt[0].version, pins.dompurify.version);
     assert.equal(receipt[0].sha512, pins.dompurify.sha512);
     for (const [link, target] of links) assert.equal(fs.readlinkSync(link), target);
     for (const mode of ['shadow', 'hook']) {

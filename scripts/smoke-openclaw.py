@@ -48,6 +48,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
 import {resolveSandboxContext} from '/app/dist/plugin-sdk/agent-harness-runtime.js';
+for (const name of ['DOCKER_CLI_LICENSE', 'DOCKER_CLI_NOTICE', 'DOCKER_COMPOSE_LICENSE', 'DOCKER_COMPOSE_NOTICE']) {
+  const license = await fs.readFile('/usr/share/doc/release-factory/docker-tools/' + name, 'utf8');
+  assert.ok(license.trim().length > 0, name + ' must be retained in the tested image');
+}
+console.log('PASS: rebuilt Docker CLI and Compose retain their LICENSE and NOTICE');
 const config = {agents: {defaults: {
   workspace: '/workspace/agent', skipBootstrap: true,
   sandbox: {mode: 'all', scope: 'session', workspaceAccess: 'rw', workspaceRoot: '/workspace/sandboxes',

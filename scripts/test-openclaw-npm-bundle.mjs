@@ -49,7 +49,8 @@ test('repairs real old npm undici copies and rejects unsafe replacement inputs',
     const root = path.join(temporary, 'node_modules');
     const directories = versions.map((version, index) => {
       const original = path.join(root, `undici-${index}`);
-      const directory = path.join(root, `.pnpm/npm@${index ? '12.2.0' : '11.20.0'}/node_modules/npm/node_modules/undici`);
+      const npmVersion = index ? `12.2.${index - 1}` : '11.20.0';
+      const directory = path.join(root, `.pnpm/npm@${npmVersion}/node_modules/npm/node_modules/undici`);
       fs.mkdirSync(path.dirname(directory), {recursive: true});
       fs.renameSync(original, directory);
       fs.symlinkSync(path.relative(root, directory), original);
@@ -82,6 +83,84 @@ test('repairs real old npm undici copies and rejects unsafe replacement inputs',
       assert.equal(result.status, 0, result.stderr || result.stdout);
       assert.match(result.stdout, /without an orphan stream/);
     }
+  } finally {
+    fs.rmSync(temporary, {recursive: true});
+  }
+});
+
+// These bundled versions come from https://registry.npmjs.org/npm/12.2.1.
+test('repairs the complete real npm 12.2.1 pnpm bundle and preserves its CLI', {timeout: 150000}, async () => {
+  const version = '12.2.1';
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-npm-12-2-1-'));
+  try {
+    fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({private: true, dependencies: {npm: version}}));
+    execFileSync('npm', ['install', '--prefix', temporary, '--ignore-scripts', '--package-lock=false',
+      '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], {timeout: 120000, stdio: 'pipe'});
+    const root = path.join(temporary, 'node_modules');
+    const original = path.join(root, 'npm');
+    const directory = path.join(root, `.pnpm/npm@${version}/node_modules/npm`);
+    fs.mkdirSync(path.dirname(directory), {recursive: true});
+    fs.renameSync(original, directory);
+    fs.symlinkSync(path.relative(root, directory), original);
+    const link = fs.readlinkSync(original);
+    const packageFile = path.join(directory, 'package.json');
+    const packageBytes = fs.readFileSync(packageFile);
+    const npmLicense = fs.readFileSync(path.join(directory, 'LICENSE'));
+    assert.equal(JSON.parse(packageBytes).version, version);
+    const bundled = name => path.join(directory, 'node_modules', name);
+    const sourceVersions = {'brace-expansion': '5.0.12', undici: '6.29.0',
+      'ip-address': '10.7.2', 'postcss-selector-parser': '7.1.6'};
+    assert.deepEqual(Object.keys(pins).sort(), Object.keys(sourceVersions).sort());
+    for (const [name, version] of Object.entries(sourceVersions)) {
+      assert.equal(JSON.parse(fs.readFileSync(path.join(bundled(name), 'package.json'))).version, version);
+    }
+    await patchNpmBundles(root, pins);
+    const licenses = {'brace-expansion': ['LICENSE'], undici: ['LICENSE', 'lib/web/fetch/LICENSE'],
+      'ip-address': ['LICENSE'], 'postcss-selector-parser': ['LICENSE-MIT']};
+    for (const [name, pin] of Object.entries(pins)) {
+      const repaired = JSON.parse(fs.readFileSync(path.join(bundled(name), 'package.json')));
+      assert.equal(repaired.version, pin.version);
+      assert.equal(repaired.license, 'MIT');
+      for (const license of licenses[name]) {
+        assert.ok(fs.readFileSync(path.join(bundled(name), license), 'utf8').trim(), `missing ${name} ${license}`);
+      }
+    }
+    assert.deepEqual(fs.readFileSync(packageFile), packageBytes);
+    assert.deepEqual(fs.readFileSync(path.join(directory, 'LICENSE')), npmLicense);
+    assert.equal(fs.readlinkSync(original), link);
+    const cli = path.join(directory, 'bin/npm-cli.js');
+    assert.equal(execFileSync(process.execPath, [cli, '--version'], {encoding: 'utf8', timeout: 10000}).trim(), version);
+    const query = JSON.parse(execFileSync(process.execPath, [cli, 'query', '[name="npm"]'],
+      {cwd: temporary, encoding: 'utf8', timeout: 15000}));
+    assert.ok(query.some(pkg => pkg.name === 'npm' && pkg.version === version));
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', undiciRegression, bundled('undici')],
+      {encoding: 'utf8', timeout: 15000});
+    assert.equal(result.error, undefined, result.error?.message);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /without an orphan stream/);
+    const unknownVersions = {'brace-expansion': '5.1.1', undici: '6.29.2',
+      'ip-address': '10.7.8', 'postcss-selector-parser': '7.2.2'};
+    for (const [name, version] of Object.entries(unknownVersions)) {
+      const packageFile = path.join(bundled(name), 'package.json');
+      const repairedPackage = fs.readFileSync(packageFile);
+      const unreviewedPackage = JSON.stringify({...JSON.parse(repairedPackage), version});
+      fs.writeFileSync(packageFile, unreviewedPackage);
+      await assert.rejects(patchNpmBundles(root, pins), new RegExp(`unreviewed bundled ${name} version`));
+      assert.equal(fs.readFileSync(packageFile, 'utf8'), unreviewedPackage);
+      fs.writeFileSync(packageFile, repairedPackage);
+    }
+    const integrityPackage = path.join(bundled('ip-address'), 'package.json');
+    const repairedPackage = fs.readFileSync(integrityPackage);
+    const reviewedPackage = JSON.stringify({...JSON.parse(repairedPackage), version: sourceVersions['ip-address']});
+    fs.writeFileSync(integrityPackage, reviewedPackage);
+    const badPins = structuredClone(pins);
+    badPins['ip-address'].sha512 = '0'.repeat(128);
+    await assert.rejects(patchNpmBundles(root, badPins), {
+      code: 'ERR_ASSERTION', actual: pins['ip-address'].sha512, expected: badPins['ip-address'].sha512,
+    });
+    assert.equal(fs.readFileSync(integrityPackage, 'utf8'), reviewedPackage);
+    fs.writeFileSync(integrityPackage, repairedPackage);
+    await patchNpmBundles(root, pins);
   } finally {
     fs.rmSync(temporary, {recursive: true});
   }

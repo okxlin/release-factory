@@ -41,6 +41,7 @@ OpenClaw 的 HTTP/SSE fetch 补丁阻止跨源重定向重放工具请求正文�
 避免源码下载限流影响这项验证。夹具来源和许可见 [`fixtures/mcp-http-fetch`](fixtures/mcp-http-fetch/README.md)。
 
 运行时依赖替换使用 `components.json` 中的官方 npm tarball 和 SHA-512，保留 pnpm 消费者链接。
+当前已审目标支持上游 `v2026.11.10` 的 qs 6.17.1 和 postcss-selector-parser 7.1.7；未知版本仍会停止构建。
 同样的依赖修补在 UI/A2UI 打包前执行，并使 A2UI 旧 bundle 缓存失效，避免内联旧代码。
 Zod 使用 [4.6.7 完整包](https://github.com/colinhacks/zod/releases/tag/v4.6.7)；原 3.25.76 目录的默认入口仍指向 v3，以保持 A2UI 和 JSON Schema 转换兼容。
 构建为 v3 的 `.max()`、`.length()`、`.size()` 补上元素解析前的超限拒绝，v4 使用上游修复；
@@ -49,6 +50,10 @@ Zod 使用 [4.6.7 完整包](https://github.com/colinhacks/zod/releases/tag/v4.6
 
 Joi 使用 18.3.2 修复多邮箱分隔符的二次方正则开销；构建验证默认及自定义分隔符的长空白输入：
 <https://github.com/hapijs/joi/security/advisories/GHSA-4528-x5fx-h6hg>。
+
+Docker CLI 和 Compose 从校验和固定的官方源码重新编译，并保留 LICENSE 和 NOTICE。
+Compose 5.8.1 不再链接 `x/mod`；构建要求 Go 模块清单读取成功，并对实际链接的 `x/mod` 严格校验版本。
+回归同时覆盖未链接、正确版本、过期版本和清单读取失败。
 
 镜像扫描采用 `configs/trivy-policy.json`：可修复 CRITICAL 阻断，应用目录的 HIGH/CRITICAL 阻断，
 其余开发工具和系统包 HIGH 保留报告。测试和扫描通过后将同一个镜像推送到两个仓库，不再二次构建。
