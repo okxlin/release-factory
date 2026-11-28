@@ -51,7 +51,7 @@ gh workflow run build-deepseek-harness.yml \
   -f push_latest=true
 ```
 
-The example omits DeepSeek Harness `dsh_version` and `image_tag`, so the workflow resolves the current npm version and uses the corresponding version tag. Check each workflow for its input schema and defaults before publishing; required repository Variables, Secrets, and registry access must already be configured.
+The example omits DeepSeek Harness `dsh_version` and `image_tag`, so the workflow resolves the latest GitHub `dsh-v*` source release, pins its commit and archive checksum, and uses the corresponding version tag. An explicit `dsh-v*` selects that source release; an input matching the checked-in source version uses the source build. Other npm version selectors or dist-tags resolve through npm; a resolved version matching the source pin also uses the source build. Check each workflow for its input schema and defaults before publishing; required repository Variables, Secrets, and registry access must already be configured.
 
 ## Tags and Publication
 
@@ -59,14 +59,14 @@ The example omits DeepSeek Harness `dsh_version` and `image_tag`, so the workflo
 | --- | --- | --- |
 | 1Panel | `1panel-<actor>-<version>`; file: `1panel-<actor>-<version>-<arch>.tar.gz` | Not applicable |
 | Codex Claude Workstation | UTC date `YYYYMMDD` | `latest` |
-| DeepSeek Harness Runtime | Resolved `@deepseek-ai/dsh` version `<DSH_VERSION>` | `latest` |
+| DeepSeek Harness Runtime | Resolved source or npm version `<DSH_VERSION>` | `latest` |
 | DeepSeek Harness Workstation | `<DSH_VERSION>-workstation` | `workstation` |
 | Gemini Skill Browser (Kasm) | `<browser_base_tag>-kasm` | `latest-kasm`, maintained weekly and optional for manual builds |
 | Gemini Skill Browser (LinuxServer) | `<browser_base_tag>-linuxserver` | `latest-linuxserver`, maintained weekly and optional for manual builds |
 | OpenCode Workstation | A manually supplied tag or `latest` | Can explicitly add `latest` |
 | OpenClaw Sandbox | `<upstream_release>-sandbox` | `latest` |
 
-Except for DeepSeek Harness, container workflows publish only to the current repository owner's GHCR namespace by default. DeepSeek Harness requires Docker Hub credentials as well; the 1Panel workflow does not publish a container image and instead adds each architecture's installer and SHA-256 checksum to a GitHub Release.
+DeepSeek Harness and OpenClaw publish to both GHCR and the configured Docker Hub namespace and require Docker Hub credentials. Other container workflows publish only to the current repository owner's GHCR namespace by default. The 1Panel workflow does not publish a container image and instead adds each architecture's installer and SHA-256 checksum to a GitHub Release.
 
 ## Verification and Security
 
