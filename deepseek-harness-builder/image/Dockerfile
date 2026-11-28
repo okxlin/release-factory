@@ -389,7 +389,9 @@ RUN mkdir -p \
     && tar -xzf /tmp/docker-compose.tar.gz -C /usr/src/docker-compose --strip-components=1 \
     && tar -xzf /tmp/docker-buildx.tar.gz -C /usr/src/docker-buildx --strip-components=1 \
     && cp /usr/src/docker-cli/LICENSE /licenses/DOCKER_CLI_LICENSE \
+    && cp /usr/src/docker-cli/NOTICE /licenses/DOCKER_CLI_NOTICE \
     && cp /usr/src/docker-compose/LICENSE /licenses/DOCKER_COMPOSE_LICENSE \
+    && cp /usr/src/docker-compose/NOTICE /licenses/DOCKER_COMPOSE_NOTICE \
     && cp /usr/src/docker-buildx/LICENSE /licenses/DOCKER_BUILDX_LICENSE
 
 WORKDIR /usr/src/docker-cli
