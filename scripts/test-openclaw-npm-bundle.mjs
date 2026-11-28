@@ -49,7 +49,8 @@ test('repairs real old npm undici copies and rejects unsafe replacement inputs',
     const root = path.join(temporary, 'node_modules');
     const directories = versions.map((version, index) => {
       const original = path.join(root, `undici-${index}`);
-      const directory = path.join(root, `.pnpm/npm@${index ? '12.2.0' : '11.20.0'}/node_modules/npm/node_modules/undici`);
+      const npmVersion = index ? `12.2.${index - 1}` : '11.20.0';
+      const directory = path.join(root, `.pnpm/npm@${npmVersion}/node_modules/npm/node_modules/undici`);
       fs.mkdirSync(path.dirname(directory), {recursive: true});
       fs.renameSync(original, directory);
       fs.symlinkSync(path.relative(root, directory), original);
@@ -82,6 +83,56 @@ test('repairs real old npm undici copies and rejects unsafe replacement inputs',
       assert.equal(result.status, 0, result.stderr || result.stdout);
       assert.match(result.stdout, /without an orphan stream/);
     }
+  } finally {
+    fs.rmSync(temporary, {recursive: true});
+  }
+});
+
+// npm 12.2.1 ships undici 6.29.0: https://registry.npmjs.org/npm/12.2.1
+test('repairs undici in the real npm 12.2.1 pnpm bundle and preserves its CLI', {timeout: 150000}, async () => {
+  const version = '12.2.1';
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-npm-12-2-1-'));
+  try {
+    fs.writeFileSync(path.join(temporary, 'package.json'), JSON.stringify({private: true, dependencies: {npm: version}}));
+    execFileSync('npm', ['install', '--prefix', temporary, '--ignore-scripts', '--package-lock=false',
+      '--no-audit', '--no-fund', '--registry=https://registry.npmjs.org'], {timeout: 120000, stdio: 'pipe'});
+    const root = path.join(temporary, 'node_modules');
+    const original = path.join(root, 'npm');
+    const directory = path.join(root, `.pnpm/npm@${version}/node_modules/npm`);
+    fs.mkdirSync(path.dirname(directory), {recursive: true});
+    fs.renameSync(original, directory);
+    fs.symlinkSync(path.relative(root, directory), original);
+    const link = fs.readlinkSync(original);
+    const packageFile = path.join(directory, 'package.json');
+    const packageBytes = fs.readFileSync(packageFile);
+    const npmLicense = fs.readFileSync(path.join(directory, 'LICENSE'));
+    assert.equal(JSON.parse(packageBytes).version, version);
+    const bundled = path.join(directory, 'node_modules/undici');
+    const bundledPackage = path.join(bundled, 'package.json');
+    assert.equal(JSON.parse(fs.readFileSync(bundledPackage)).version, '6.29.0');
+    await patchNpmBundles(root, {undici: pins.undici});
+    const repairedPackage = fs.readFileSync(bundledPackage);
+    assert.equal(JSON.parse(repairedPackage).version, '6.29.1');
+    assert.equal(JSON.parse(repairedPackage).license, 'MIT');
+    for (const license of ['LICENSE', 'lib/web/fetch/LICENSE']) {
+      assert.ok(fs.readFileSync(path.join(bundled, license), 'utf8').trim(), `missing undici ${license}`);
+    }
+    assert.deepEqual(fs.readFileSync(packageFile), packageBytes);
+    assert.deepEqual(fs.readFileSync(path.join(directory, 'LICENSE')), npmLicense);
+    assert.equal(fs.readlinkSync(original), link);
+    const cli = path.join(directory, 'bin/npm-cli.js');
+    assert.equal(execFileSync(process.execPath, [cli, '--version'], {encoding: 'utf8', timeout: 10000}).trim(), version);
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', undiciRegression, bundled],
+      {encoding: 'utf8', timeout: 15000});
+    assert.equal(result.error, undefined, result.error?.message);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /without an orphan stream/);
+    const unreviewedPackage = JSON.stringify({...JSON.parse(repairedPackage), version: '6.29.2'});
+    fs.writeFileSync(bundledPackage, unreviewedPackage);
+    await assert.rejects(patchNpmBundles(root, {undici: pins.undici}), /unreviewed bundled undici version/);
+    assert.equal(fs.readFileSync(bundledPackage, 'utf8'), unreviewedPackage);
+    fs.writeFileSync(bundledPackage, repairedPackage);
+    await patchNpmBundles(root, {undici: pins.undici});
   } finally {
     fs.rmSync(temporary, {recursive: true});
   }

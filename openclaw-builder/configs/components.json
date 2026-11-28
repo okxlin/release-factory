@@ -33,7 +33,7 @@
       "sha512": "69ad750efe3dd462a762ac5aba5dda449d2ccdec3bc8c24c7d93e7a83e383631ab657a23eb6978d4e1030e97690b8784d8ff3cbc115f2ee4b2461a46f75354be"
     },
     "undici": {
-      "from": ["6.28.0", "6.28.1"],
+      "from": ["6.28.0", "6.28.1", "6.29.0"],
       "version": "6.29.1",
       "url": "https://registry.npmjs.org/undici/-/undici-6.29.1.tgz",
       "sha512": "12f46552dfd0a8012f5dd41e44c6147f0390b1fce90f3b7292b1b6a3018413fac1381a18bfdb85dfd673b0d0e1e254c51e14ebd973998ca91882e783d7666618"
