@@ -51,7 +51,7 @@ gh workflow run build-deepseek-harness.yml \
   -f push_latest=true
 ```
 
-该示例省略了 DeepSeek Harness 的 `dsh_version` 和 `image_tag`，因此会解析最新的 GitHub `dsh-v*` 源码 release，固定提交和归档校验和，并使用对应版本标签。显式输入匹配已固定源码版本时沿用源码构建；其他版本或 dist-tag 通过 npm 解析，解析结果若匹配已固定源码版本仍会走源码构建。其他项目的输入字段和默认值请直接查看对应工作流；发布前必须确认仓库所需的 Variables、Secrets 和目标镜像仓库已配置。
+该示例省略了 DeepSeek Harness 的 `dsh_version` 和 `image_tag`，因此会解析最新的 GitHub `dsh-v*` 源码 release，固定提交和归档校验和，并使用对应版本标签。显式 `dsh-v*` 会选择指定源码 release；输入匹配仓库固定的源码版本时沿用源码构建。其余 npm 版本选择器或 dist-tag 通过 npm 解析；解析结果若匹配源码 pin，仍使用源码构建。其他项目的输入字段和默认值请直接查看对应工作流；发布前必须确认仓库所需的 Variables、Secrets 和目标镜像仓库已配置。
 
 ## 标签与发布
 
