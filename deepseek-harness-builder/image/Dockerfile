@@ -26,8 +26,11 @@ ARG GO_JOSE_V3_SOURCE_SHA256
 ARG GO_JOSE_V3_LICENSE_SHA256
 ARG GO_JOSE_VERSION
 ARG SAML_VERSION
+ARG GO_SMTP_VERSION
 ARG GRPC_VERSION
 ARG KLAUSPOST_COMPRESS_VERSION
+ARG OTEL_VERSION
+ARG OTEL_SDK_LOG_VERSION
 ARG X_CRYPTO_VERSION
 ARG X_NET_VERSION
 ARG X_TEXT_VERSION
@@ -108,6 +111,11 @@ RUN xcaddy build "v${CADDY_VERSION}" \
         --replace "github.com/crewjam/saml=github.com/crewjam/saml@v${SAML_VERSION}" \
         --replace "google.golang.org/grpc=google.golang.org/grpc@v${GRPC_VERSION}" \
         --replace "github.com/klauspost/compress=github.com/klauspost/compress@v${KLAUSPOST_COMPRESS_VERSION}" \
+        --replace "github.com/emersion/go-smtp=github.com/emersion/go-smtp@v${GO_SMTP_VERSION}" \
+        --replace "go.opentelemetry.io/otel=go.opentelemetry.io/otel@v${OTEL_VERSION}" \
+        --replace "go.opentelemetry.io/otel/sdk=go.opentelemetry.io/otel/sdk@v${OTEL_VERSION}" \
+        --replace "go.opentelemetry.io/otel/trace=go.opentelemetry.io/otel/trace@v${OTEL_VERSION}" \
+        --replace "go.opentelemetry.io/otel/sdk/log=go.opentelemetry.io/otel/sdk/log@v${OTEL_SDK_LOG_VERSION}" \
         --replace "golang.org/x/crypto=golang.org/x/crypto@v${X_CRYPTO_VERSION}" \
         --replace "golang.org/x/net=golang.org/x/net@v${X_NET_VERSION}" \
         --replace "golang.org/x/text=golang.org/x/text@v${X_TEXT_VERSION}" \
@@ -130,6 +138,17 @@ RUN PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "google\.g
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "golang\.org/x/crypto[[:space:]]+v${X_CRYPTO_VERSION}" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "golang\.org/x/net[[:space:]]+v${X_NET_VERSION}" \
     && PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy | grep -Eq "golang\.org/x/text[[:space:]]+v${X_TEXT_VERSION}" \
+    && for module_version in \
+        "go.opentelemetry.io/otel=v${OTEL_VERSION}" \
+        "go.opentelemetry.io/otel/sdk=v${OTEL_VERSION}" \
+        "go.opentelemetry.io/otel/trace=v${OTEL_VERSION}" \
+        "go.opentelemetry.io/otel/sdk/log=v${OTEL_SDK_LOG_VERSION}" \
+        "github.com/emersion/go-smtp=v${GO_SMTP_VERSION}"; do \
+        module="${module_version%=*}"; version="${module_version#*=}"; \
+        PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy \
+            | grep -A1 -F "$(printf 'dep\t%s\t' "${module}")" \
+            | grep -F "$(printf '=>\t%s\t%s\t' "${module}" "${version}")" || exit 1; \
+       done \
     && set -- /tmp/buildenv_* \
     && test "$#" -eq 1 \
     && test -d "$1" \

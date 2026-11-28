@@ -150,6 +150,33 @@ class ComponentUpdateCheckerTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1, result.stderr)
             self.assertIn("| pnpm | `1.2.3` |", summary_path.read_text())
 
+    def test_caddy_go_module_policies_keep_sdk_log_and_smtp_pins_independent(self) -> None:
+        selected = {"OTEL_VERSION", "OTEL_SDK_LOG_VERSION", "GO_SMTP_VERSION"}
+        components = CHECKER_MODULE.load_policy(SCRIPT_DIR.parent / "configs/component-update-policy.json")
+        policy = {"version": 1, "components": [c for c in components if c.get("pin") in selected]}
+        self.assertEqual({c["pin"] for c in policy["components"]}, selected)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "components.lock.json").write_text(json.dumps({
+                "schema_version": 1, "build_args": {
+                    "OTEL_VERSION": "1.47.0", "OTEL_SDK_LOG_VERSION": "0.22.0", "GO_SMTP_VERSION": "0.25.0",
+                },
+            }), encoding="utf-8")
+            (root / "dsh-source.json").write_text('{"version":"0.1.5"}', encoding="utf-8")
+            result, summary_path = self.run_checker(
+                root, policy, "".join(f"ARG {pin}\n" for pin in sorted(selected)), {
+                    "go-module-go.opentelemetry.io-otel.txt": "v1.46.0\nv1.47.0\n",
+                    "go-module-go.opentelemetry.io-otel-sdk-log.txt": "v0.22.0\nv1.47.0\nv1.48.0-rc.1\n",
+                    "go-module-github.com-emersion-go-smtp.txt": "v0.25.0\nv0.25.1\nv0.26.0-rc.1\n",
+                }, "--fail-on-updates",
+            )
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("component_updates=2", result.stdout)
+            summary = summary_path.read_text(encoding="utf-8")
+            self.assertIn("| OpenTelemetry security override | `1.47.0` | [1.47.0]", summary)
+            self.assertIn("| OpenTelemetry Logs SDK security override | `0.22.0` | [1.47.0]", summary)
+            self.assertIn("| go-smtp security override | `0.25.0` | [0.25.1]", summary)
+
     def test_github_latest_release_remains_stable_only(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             result, summary_path = self.run_checker(

@@ -85,6 +85,8 @@ deepseek-harness-builder/scripts/build-local.sh \
 
 自定义 Caddy 构建会校验 Caddy 和 go-authcrunch 源码归档 checksum，移除 go-authcrunch 未使用的 GPG 公钥解析器，并在链接前运行上游 identity 包测试。它会对固定 Caddy 源码应用上游的两行 CEL 兼容修复，再将安全敏感的 Go 模块提升到已修复版本。caddy-security 仍保留 SSH 公钥支持，同时生成的 `CADDY_GO_PACKAGES.txt` 清单不得包含 `golang.org/x/crypto/openpgp` 包。限速模块及其许可证也会在同一构建中固定和校验。
 
+Caddy 将 OpenTelemetry core/SDK/trace 固定到 1.47.0，将 [Logs SDK 固定到首次稳定版本 1.47.0](https://github.com/open-telemetry/opentelemetry-go/blob/66cfc9520e205b7d450183532772401bc2b6674c/sdk/log/go.mod)，并将 [go-smtp 固定到 0.25.1](https://github.com/emersion/go-smtp/releases/tag/v0.25.1)。这些版本对应 [GO-2026-6974](https://pkg.go.dev/vuln/GO-2026-6974)、[GO-2026-6975](https://pkg.go.dev/vuln/GO-2026-6975) 和 [GO-2026-7029](https://pkg.go.dev/vuln/GO-2026-7029) 的官方修复。构建检查读取编译后二进制实际使用的替换版本。每个候选仍须提供原生 amd64/arm64 构建、认证 smoke、govulncheck 和 Trivy 证据。
+
 两个镜像都包含校验和固定的独立 pnpm bundle，并移除 Corepack，避免所选 pnpm 版本静默跟随包管理器通道。轻量 runtime 还会移除 npm 和 npx；workstation 会用单独校验和固定的 npm 11 bundle 替换 Node.js 自带的旧 npm，为开发兼容性提供 npm 和 npx，并在镜像构建及 smoke 测试中校验版本。
 
 ## 开发环境
