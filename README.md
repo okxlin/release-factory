@@ -51,7 +51,7 @@ gh workflow run build-deepseek-harness.yml \
   -f push_latest=true
 ```
 
-该示例省略了 DeepSeek Harness 的 `dsh_version` 和 `image_tag`，因此会解析当前 npm 版本并使用对应版本标签。其他项目的输入字段和默认值请直接查看对应工作流；发布前必须确认仓库所需的 Variables、Secrets 和目标镜像仓库已配置。
+该示例省略了 DeepSeek Harness 的 `dsh_version` 和 `image_tag`，因此会解析最新的 GitHub `dsh-v*` 源码 release，固定提交和归档校验和，并使用对应版本标签。显式传入 npm 版本或 dist-tag 时仍使用 npm 分发包。其他项目的输入字段和默认值请直接查看对应工作流；发布前必须确认仓库所需的 Variables、Secrets 和目标镜像仓库已配置。
 
 ## 标签与发布
 
@@ -59,14 +59,14 @@ gh workflow run build-deepseek-harness.yml \
 | --- | --- | --- |
 | 1Panel | `1panel-<actor>-<version>`；文件为 `1panel-<actor>-<version>-<arch>.tar.gz` | 不适用 |
 | Codex Claude Workstation | UTC 日期 `YYYYMMDD` | `latest` |
-| DeepSeek Harness Runtime | 解析到的 `@deepseek-ai/dsh` 版本 `<DSH_VERSION>` | `latest` |
+| DeepSeek Harness Runtime | 解析到的源码或 npm 版本 `<DSH_VERSION>` | `latest` |
 | DeepSeek Harness Workstation | `<DSH_VERSION>-workstation` | `workstation` |
 | Gemini Skill Browser（Kasm） | `<browser_base_tag>-kasm` | `latest-kasm`，周更新维护，手动构建可选 |
 | Gemini Skill Browser（LinuxServer） | `<browser_base_tag>-linuxserver` | `latest-linuxserver`，周更新维护，手动构建可选 |
 | OpenCode Workstation | 手动指定标签或 `latest` | 可显式附带 `latest` |
 | OpenClaw Sandbox | `<upstream_release>-sandbox` | `latest` |
 
-除 DeepSeek Harness 外，容器工作流默认只发布到当前仓库所有者的 GHCR 命名空间。DeepSeek Harness 需要同时配置 Docker Hub 凭据；1Panel 工作流不发布容器镜像，而是把各架构安装包和 SHA-256 校验文件写入 GitHub Release。
+DeepSeek Harness 和 OpenClaw 同时发布到 GHCR 和配置的 Docker Hub 命名空间，需要 Docker Hub 凭据。其他容器工作流默认只发布到当前仓库所有者的 GHCR 命名空间。1Panel 工作流不发布容器镜像，而是把各架构安装包和 SHA-256 校验文件写入 GitHub Release。
 
 ## 验证与安全
 
