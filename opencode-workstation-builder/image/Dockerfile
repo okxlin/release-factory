@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-ARG GO_TOOLS_IMAGE=docker.io/library/golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea
+ARG GO_TOOLS_IMAGE=docker.io/library/golang:1.27.4-bookworm@sha256:ce59b41415e2524ae99926fe1f37ce48ba8c194dcbd2a56a65436cdcefa2bd34
 FROM ${GO_TOOLS_IMAGE} AS workstation-go-tools
 ARG ACTIONLINT_VERSION=1.7.12
 ARG ACTIONLINT_SOURCE_SHA256=454800bd4f854592bcfe79b161f71d56e35940eb7016e48a26dd356adc9d400a
@@ -17,7 +17,7 @@ COPY --from=workstation-go-tools /out/licenses/ /usr/share/doc/release-factory-g
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-ARG BUN_VERSION=1.4.4
+ARG BUN_VERSION=1.4.5
 ARG ACTIONLINT_VERSION=1.7.12
 ARG GO_VERSION=1.27.4
 ARG GO_SHA256_AMD64=7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840

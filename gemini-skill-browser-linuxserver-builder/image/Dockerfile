@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 ARG BASE_IMAGE
 ARG NODE_IMAGE
-ARG GO_TOOLS_IMAGE=docker.io/library/golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea
+ARG GO_TOOLS_IMAGE=docker.io/library/golang:1.27.4-bookworm@sha256:ce59b41415e2524ae99926fe1f37ce48ba8c194dcbd2a56a65436cdcefa2bd34
 FROM ${GO_TOOLS_IMAGE} AS docker-plugins
 COPY gemini-skill-browser-builder/image/runtime/build-workstation-go-tools.sh /tmp/build-workstation-go-tools.sh
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -54,8 +54,8 @@ RUN apt-get update \
 
 COPY --from=docker-plugins /out/cli-plugins/ /usr/libexec/docker/cli-plugins/
 COPY --from=docker-plugins /out/licenses/ /usr/share/doc/release-factory-go-tools/
-RUN docker buildx version | grep -F 'github.com/docker/buildx v0.39.0 ' \
-    && docker compose version | grep -F 'Docker Compose version v5.7.1'
+RUN docker buildx version | grep -F 'github.com/docker/buildx v0.39.1 ' \
+    && docker compose version | grep -F 'Docker Compose version v5.8.1'
 
 RUN --mount=type=bind,source=gemini-skill-browser-builder/configs/components.json,target=/tmp/browser-components.json \
     pip_version="$(node -p "require('/tmp/browser-components.json').variants.linuxserver.pip.version")" \

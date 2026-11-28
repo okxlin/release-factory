@@ -70,6 +70,7 @@ jobs:
         run: |
           cmp codex-claude-workstation-builder/image/build-workstation-go-tools.sh opencode-workstation-builder/image/build-workstation-go-tools.sh
           cmp codex-claude-workstation-builder/image/build-workstation-go-tools.sh gemini-skill-browser-builder/image/runtime/build-workstation-go-tools.sh
+          python3 codex-claude-workstation-builder/scripts/test-workstation-go-tools.py
           python3 gemini-skill-browser-builder/scripts/test-resolve-browser-inputs.py
           python3 scripts/test-smoke-gemini-browser.py
           python3 scripts/test-registry-image.py

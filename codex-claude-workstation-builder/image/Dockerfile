@@ -1,6 +1,6 @@
 # codex-claude-workstation Dockerfile v2
 # Ubuntu 24.04 base, linux/amd64 and linux/arm64
-ARG GO_TOOLS_IMAGE=docker.io/library/golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea
+ARG GO_TOOLS_IMAGE=docker.io/library/golang:1.27.4-bookworm@sha256:ce59b41415e2524ae99926fe1f37ce48ba8c194dcbd2a56a65436cdcefa2bd34
 FROM ${GO_TOOLS_IMAGE} AS workstation-go-tools
 ARG ACTIONLINT_VERSION=1.7.12
 ARG ACTIONLINT_SOURCE_SHA256=454800bd4f854592bcfe79b161f71d56e35940eb7016e48a26dd356adc9d400a
@@ -21,7 +21,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG TARGETARCH
 ARG DEBIAN_FRONTEND=noninteractive
 ARG NODE_MAJOR=24
-ARG NPM_VERSION=12.2.2
+ARG NPM_VERSION=12.2.3
 ARG GO_VERSION=1.27.4
 ARG GO_SHA256_AMD64=7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840
 ARG GO_SHA256_ARM64=3392582988a273a87ab5043ee1b2c9c17a2c3c00580bf9326c47a2e0aaaeac92
@@ -35,14 +35,14 @@ ARG CODE_SERVER_TAR_VERSION=7.5.22
 ARG MIHOMO_VERSION=1.19.34
 ARG MIHOMO_SOURCE_REF=0455d0d28c4526937380505153e65a843d8612e8
 ARG MIHOMO_SOURCE_SHA256=db0cc4145fe4024e9c2386bd4768bf23a69c8789610d56d7243819e2f77c0cfe
-ARG SING_BOX_VERSION=1.14.4
-ARG SING_BOX_SOURCE_REF=c005f35300ce76427dc285481ec5695f5b179cd2
-ARG SING_BOX_SOURCE_SHA256=1c4d2b3bf261a8d98e1b026be0bbcddbcb3f53bbca77eb15e8f25f7d4e602e59
+ARG SING_BOX_VERSION=1.14.6
+ARG SING_BOX_SOURCE_REF=a713aee3058f97f3facc98e85244a3e73c82dca1
+ARG SING_BOX_SOURCE_SHA256=744380370e6bbe40337439218e5d497c5311b83fde881cd23eaa0381ade93c7c
 ARG XRAY_VERSION=26.11.9
 ARG XRAY_SOURCE_REF=676eaf66f8f05d4d558ee7a74b4736623d3feeb9
 ARG XRAY_SOURCE_SHA256=adccbbb35f9efccae0884bfd46b9d439daee60aa543efa19e775799c74589bab
 ARG PROXY_X_CRYPTO_VERSION=0.59.0
-ARG PROXY_X_NET_VERSION=0.62.0
+ARG PROXY_X_NET_VERSION=0.63.0
 ARG PROXY_X_TEXT_VERSION=0.44.0
 ARG PROXY_X_MOD_VERSION=0.43.0
 ARG PROXY_GRPC_VERSION=1.85.0
@@ -321,6 +321,7 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
             -o /tmp/proxy-build/xray-bin ./main) \
     && install -m 0755 /tmp/proxy-build/mihomo-bin /usr/local/bin/mihomo \
     && install -m 0755 /tmp/proxy-build/sing-box-bin /usr/local/bin/sing-box \
+    && install -Dm 0644 /tmp/proxy-build/sing-box/LICENSE /usr/share/doc/sing-box/LICENSE \
     && install -m 0755 /tmp/proxy-build/xray-bin /usr/local/bin/xray \
     && ln -sf /usr/local/bin/mihomo /usr/local/bin/clash-meta \
     && for binary in mihomo sing-box xray; do \

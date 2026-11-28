@@ -50,7 +50,7 @@ Build-time versions can be overridden with `--build-arg`:
 ```bash
 docker build \
   --build-arg NODE_MAJOR=24 \
-  --build-arg NPM_VERSION=12.0.2 \
+  --build-arg NPM_VERSION=12.2.3 \
   --build-arg GO_VERSION=1.27.2 \
   --build-arg GO_SHA256_AMD64=ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5 \
   --build-arg GO_SHA256_ARM64=94f3e30b8e374bc285e7dadc11e0865726b9bc6e85b841ccceaabc0214c6b7c8 \
