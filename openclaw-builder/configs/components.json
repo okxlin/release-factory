@@ -39,7 +39,7 @@
       "sha512": "12f46552dfd0a8012f5dd41e44c6147f0390b1fce90f3b7292b1b6a3018413fac1381a18bfdb85dfd673b0d0e1e254c51e14ebd973998ca91882e783d7666618"
     },
     "ip-address": {
-      "from": ["10.5.0", "10.7.3", "10.7.4", "10.7.5", "10.7.6"],
+      "from": ["10.5.0", "10.7.2", "10.7.3", "10.7.4", "10.7.5", "10.7.6"],
       "version": "10.7.7",
       "url": "https://registry.npmjs.org/ip-address/-/ip-address-10.7.7.tgz",
       "sha512": "1ded79ac0b388e2a79004033ed733d2fe4ba63c2c13080e3e987b06d8b897e60e73822966fedd32ce1a71c50530085bbc299b9a21b59f97ca8e4f11a1be3b6bd"
