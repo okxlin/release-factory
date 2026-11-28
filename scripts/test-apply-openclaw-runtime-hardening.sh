@@ -85,6 +85,12 @@ for index, line in enumerate(Path(sys.argv[1]).read_text().splitlines()):
 assert copy_line < build_patch_line < cache_line < canvas_line < runtime_patch_line
 assert cache_line == build_patch_line + 1
 assert mount_counts == {'build': 1, 'runtime': 1}, mount_counts
+dockerfile = Path(sys.argv[1]).read_text()
+for component, source in [('CLI', 'cli'), ('COMPOSE', 'compose')]:
+    for name in ['LICENSE', 'NOTICE']:
+        assert (f'install -m 0644 /go/src/github.com/docker/{source}/{name} '
+                f'/out/licenses/DOCKER_{component}_{name}') in dockerfile
+assert 'install -m 0644 /tmp/openclaw-runtime-docker-tools/licenses/* /usr/share/doc/release-factory/docker-tools/' in dockerfile
 PY
   test "$(grep -Fc -- 'AS openclaw-runtime-docker-tools' "${dockerfile}")" -eq 1
   grep -Fq -- 'ARG OPENCLAW_DOCKER_CRYPTO_VERSION="0.59.0"' "${dockerfile}" || fail 'missing configured Go crypto pin'
@@ -118,6 +124,60 @@ PY
 OPENCLAW_DOCKER_CRYPTO_VERSION=0.59.0 OPENCLAW_DOCKER_MOD_VERSION=0.43.0 run_case legacy-stage-source build
 OPENCLAW_DOCKER_CRYPTO_VERSION=0.59.0 OPENCLAW_DOCKER_MOD_VERSION=0.43.0 run_case production-deps-stage-source production-deps
 OPENCLAW_DOCKER_CRYPTO_VERSION=0.59.0 OPENCLAW_DOCKER_MOD_VERSION=0.43.0 run_case platform-qualified-stage-source '--platform=linux/amd64 production-deps'
+
+module_case="${tmp_dir}/compose-module-check"
+mkdir -p "${module_case}/bin"
+python3 - "${tmp_dir}/production-deps-stage-source/Dockerfile" "${module_case}/guard.sh" <<'PY'
+from pathlib import Path
+import re
+import sys
+lines = Path(sys.argv[1]).read_text().splitlines()
+start = next(i for i, line in enumerate(lines) if 'compose_binary_modules=' in line or
+             ('if ' in line and 'go version -m /out/docker-compose' in line and 'golang.org/x/mod' in line))
+guard = []
+depth = 0
+seen_if = False
+for line in lines[start:]:
+    line = line.strip().removesuffix('\\').rstrip()
+    if re.match(r'if\b', line):
+        depth += 1
+        seen_if = True
+    if re.match(r'fi\b', line):
+        depth -= 1
+    if seen_if and depth == 0:
+        guard.append(line.removesuffix('&&').rstrip())
+        break
+    guard.append(line)
+else:
+    raise AssertionError('Compose module guard is incomplete')
+Path(sys.argv[2]).write_text('set -eu\n' + '\n'.join(guard) + '\n')
+PY
+cat > "${module_case}/bin/go" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == 'version -m /out/docker-compose' ]]
+[[ "${OPENCLAW_MODULE_PROBE_ERROR:-false}" == false ]] || exit 7
+cat -- "${OPENCLAW_MODULE_FIXTURE}"
+SH
+chmod +x "${module_case}/bin/go"
+printf '/out/docker-compose: go1.27.4\n' > "${module_case}/absent.txt"
+printf '\tdep\tgolang.org/x/mod\tv0.43.0\th1:fixture\n' > "${module_case}/current.txt"
+printf '\tdep\tgolang.org/x/mod\tv0.42.0\th1:fixture\n' > "${module_case}/stale.txt"
+for module_fixture in absent current; do
+  PATH="${module_case}/bin:${PATH}" OPENCLAW_DOCKER_MOD_VERSION=0.43.0 \
+    OPENCLAW_MODULE_FIXTURE="${module_case}/${module_fixture}.txt" sh "${module_case}/guard.sh"
+done
+if PATH="${module_case}/bin:${PATH}" OPENCLAW_DOCKER_MOD_VERSION=0.43.0 \
+  OPENCLAW_MODULE_FIXTURE="${module_case}/stale.txt" sh "${module_case}/guard.sh" > "${module_case}/stale.output" 2>&1; then
+  fail 'stale Compose x/mod dependency unexpectedly passed'
+fi
+grep -Fq 'does not contain golang.org/x/mod v0.43.0' "${module_case}/stale.output"
+if PATH="${module_case}/bin:${PATH}" OPENCLAW_DOCKER_MOD_VERSION=0.43.0 \
+  OPENCLAW_MODULE_FIXTURE="${module_case}/absent.txt" OPENCLAW_MODULE_PROBE_ERROR=true \
+  sh "${module_case}/guard.sh" > "${module_case}/probe-error.output" 2>&1; then
+  fail 'failed Compose metadata inspection unexpectedly passed'
+fi
+printf '[openclaw-hardening-test] PASS: Compose optional x/mod linkage and failure controls\n'
 
 missing_anchor="${tmp_dir}/missing-anchor"
 create_fixture "${missing_anchor}" production-deps

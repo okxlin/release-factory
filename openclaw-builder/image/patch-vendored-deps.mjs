@@ -399,7 +399,7 @@ export function verifyFastXmlParser(directory) {
   `, directory], {timeout: 10000, stdio: 'pipe'});
 }
 
-export function verifyRuntimePackage(name, directory, compatibility) {
+export function verifyRuntimePackage(name, directory, compatibility, dependencyPins) {
   const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
   assert.equal(pkg.name, name);
   const require = createRequire(path.join(directory, 'package.json'));
@@ -410,7 +410,8 @@ export function verifyRuntimePackage(name, directory, compatibility) {
     assert.equal(typeof parser.json, 'function');
     assert.equal(typeof parser.urlencoded, 'function');
     assert.equal(typeof parser.json(), 'function');
-    assert.equal(JSON.parse(fs.readFileSync(require.resolve('qs/package.json'))).version, '6.16.1');
+    assert.equal(JSON.parse(fs.readFileSync(require.resolve('qs/package.json'))).version, dependencyPins?.qs?.version,
+      'body-parser must resolve the reviewed qs version');
   } else if (name === 'dompurify') {
     const createDOMPurify = require(directory);
     assert.equal(typeof createDOMPurify, 'function');
@@ -472,7 +473,7 @@ export async function patchRuntimePackages(root, pins) {
     }
     for (const target of directories) {
       const compatibility = pin.compatibility?.[target.entry.match(/^[^@]+@([^_]+)/)?.[1]];
-      verifyRuntimePackage(name, target.directory, compatibility);
+      verifyRuntimePackage(name, target.directory, compatibility, pins);
       const pkg = JSON.parse(fs.readFileSync(path.join(target.directory, 'package.json')));
       evidence.push({name, version: pkg.version, source: pin.url, sha512: pin.sha512,
         path: path.relative(root, target.directory), changes: pkg['release-factory'] ?? null});
@@ -603,8 +604,11 @@ export async function patchSourceMaps(root, pin) {
     assert.equal(fs.realpathSync(directory), directory, 'unexpected source-map-js dependency path');
     const pkg = JSON.parse(fs.readFileSync(path.join(directory, 'package.json')));
     assert.equal(pkg.name, 'source-map-js');
-    if (pkg.version === pin.from) outdated.push(directory);
-    else verifySourceMaps(directory);
+    if (pinFromVersions(pin).includes(pkg.version)) outdated.push(directory);
+    else {
+      assert.equal(pkg.version, pin.version, 'unreviewed source-map-js version');
+      verifySourceMaps(directory);
+    }
   }
   await replaceVerifiedDependency('source-map-js', pin, outdated, verifySourceMaps);
 }
