@@ -44,6 +44,26 @@ class RefreshTests(unittest.TestCase):
         self.assertTrue(changes)
         self.assertEqual(self.lock, original)
 
+    def test_caddy_sdk_log_and_smtp_refresh_only_their_independent_pins(self):
+        self.lock["build_args"].update(OTEL_SDK_LOG_VERSION="0.22.0", GO_SMTP_VERSION="0.25.0")
+        original = copy.deepcopy(self.lock)
+        selected = {"OTEL_SDK_LOG_VERSION", "GO_SMTP_VERSION"}
+        policy = [c for c in updater.checker.load_policy(HERE.parent / "configs/component-update-policy.json")
+                  if c.get("pin") in selected]
+        self.assertEqual({c["pin"] for c in policy}, selected)
+        with tempfile.TemporaryDirectory() as temporary:
+            fixtures = Path(temporary)
+            (fixtures / "go-module-go.opentelemetry.io-otel-sdk-log.txt").write_text("v0.22.0\nv1.47.0\n", encoding="utf-8")
+            (fixtures / "go-module-github.com-emersion-go-smtp.txt").write_text("v0.25.0\nv0.25.1\n", encoding="utf-8")
+            lock, source, changes = updater.refresh(self.lock, self.source, policy,
+                updater.checker.SourceClient(fixtures), Mock(side_effect=AssertionError), self.image)
+        expected = copy.deepcopy(original)
+        expected["build_args"].update(OTEL_SDK_LOG_VERSION="1.47.0", GO_SMTP_VERSION="0.25.1")
+        self.assertEqual(lock, expected)
+        self.assertEqual(self.lock, original)
+        self.assertEqual(source, self.source)
+        self.assertEqual(len(changes), 2)
+
     def test_changed_license_rejects_entire_update(self):
         original = copy.deepcopy(self.lock)
         with self.assertRaisesRegex(ValueError, "license changed"):

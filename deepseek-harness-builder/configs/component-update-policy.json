@@ -50,6 +50,14 @@
       }
     },
     {
+      "name": "go-smtp security override",
+      "pin": "GO_SMTP_VERSION",
+      "source": {
+        "type": "go_module",
+        "module": "github.com/emersion/go-smtp"
+      }
+    },
+    {
       "name": "gRPC security override",
       "pin": "GRPC_VERSION",
       "source": {
@@ -71,6 +79,14 @@
       "source": {
         "type": "go_module",
         "module": "go.opentelemetry.io/otel"
+      }
+    },
+    {
+      "name": "OpenTelemetry Logs SDK security override",
+      "pin": "OTEL_SDK_LOG_VERSION",
+      "source": {
+        "type": "go_module",
+        "module": "go.opentelemetry.io/otel/sdk/log"
       }
     },
     {

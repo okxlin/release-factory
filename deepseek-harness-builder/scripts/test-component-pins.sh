@@ -72,6 +72,101 @@ cp -- "${source_dockerfile}" "${missing_x_crypto_pin}"
 sed -i '/^ARG X_CRYPTO_VERSION$/d' "${missing_x_crypto_pin}"
 expect_failure 'missing-x-crypto-pin' "${missing_x_crypto_pin}" 'required ARG X_CRYPTO_VERSION is missing'
 
+for pin in GO_SMTP_VERSION OTEL_VERSION OTEL_SDK_LOG_VERSION; do
+    missing_pin="${tmp_dir}/missing-caddy-${pin}.Dockerfile"
+    cp -- "${source_dockerfile}" "${missing_pin}"
+    sed -i "0,/^ARG ${pin}\$/s/^ARG ${pin}\$/# removed Caddy ARG/" "${missing_pin}"
+    expect_failure "missing-caddy-${pin}" "${missing_pin}" "Caddy builder required ARG ${pin} is missing"
+
+    missing_lock="${tmp_dir}/missing-${pin}.json"
+    python3 - "${source_components}" "${missing_lock}" "${pin}" <<'PYLOCK'
+import json, sys
+from pathlib import Path
+lock = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+del lock['build_args'][sys.argv[3]]
+Path(sys.argv[2]).write_text(json.dumps(lock), encoding='utf-8')
+PYLOCK
+    expect_failure "missing-locked-${pin}" "${baseline}" "required locked ARG ${pin} is missing" "${missing_lock}"
+done
+
+for module in go.opentelemetry.io/otel go.opentelemetry.io/otel/sdk go.opentelemetry.io/otel/trace \
+    go.opentelemetry.io/otel/sdk/log github.com/emersion/go-smtp; do
+    case "${module}" in
+        go.opentelemetry.io/otel/sdk/log) description='OpenTelemetry Logs SDK' ;;
+        github.com/emersion/go-smtp) description='go-smtp' ;;
+        *) description="${module}" ;;
+    esac
+    for check in override assertion; do
+        if [[ "${check}" == override ]]; then
+            expected='security override'
+        else
+            expected='effective version assertion'
+        fi
+        missing_check="${tmp_dir}/missing-${module//\//-}-${check}.Dockerfile"
+        python3 - "${source_dockerfile}" "${missing_check}" "${module}" "${check}" <<'PYMODULE'
+import sys
+from pathlib import Path
+source, target, module, check = sys.argv[1:]
+lines = Path(source).read_text(encoding='utf-8').splitlines(keepends=True)
+needle = module + '=' + (module + '@' if check == 'override' else '') + 'v${'
+selected = [line for line in lines if needle in line]
+assert len(selected) == 1, (module, check, selected)
+Path(target).write_text(''.join(line for line in lines if needle not in line), encoding='utf-8')
+PYMODULE
+        expect_failure "missing-${module//\//-}-${check}" "${missing_check}" "the Caddy ${description} ${expected}"
+    done
+done
+
+missing_effective_check="${tmp_dir}/missing-effective-replacement-check.Dockerfile"
+cp -- "${source_dockerfile}" "${missing_effective_check}"
+sed -i '/grep -F.*=>/d' "${missing_effective_check}"
+expect_failure 'missing-effective-replacement-check' "${missing_effective_check}" \
+    'the Caddy effective replacement version check and failure propagation'
+
+python3 - "${source_dockerfile}" "${source_components}" "${tmp_dir}" <<'PYGOINFO'
+import json, os, subprocess, sys
+from pathlib import Path
+source, lock_path, directory = map(Path, sys.argv[1:])
+content = source.read_text(encoding='utf-8')
+start = content.index('    && for module_version in \\\n')
+end = content.index('       done \\\n', start) + len('       done')
+program = content[start:end].removeprefix('    && ')
+command = 'PATH="/usr/local/go/bin:${PATH}" go version -m ./caddy'
+assert program.count(command) == 1
+program = program.replace(command, 'cat "${GO_MODULE_FIXTURE}"')
+pins = json.loads(lock_path.read_text(encoding='utf-8'))['build_args']
+modules = [('go.opentelemetry.io/otel', 'OTEL_VERSION', '1.46.0'),
+           ('go.opentelemetry.io/otel/sdk', 'OTEL_VERSION', '1.46.0'),
+           ('go.opentelemetry.io/otel/trace', 'OTEL_VERSION', '1.46.0'),
+           ('go.opentelemetry.io/otel/sdk/log', 'OTEL_SDK_LOG_VERSION', '0.22.0'),
+           ('github.com/emersion/go-smtp', 'GO_SMTP_VERSION', '0.25.0')]
+fixture = directory / 'caddy-go-buildinfo.txt'
+env = {**os.environ, **pins, 'GO_MODULE_FIXTURE': str(fixture)}
+rows = []
+for module, pin, old in modules:
+    rows += [f'\tdep\t{module}\tv{old}\th1:nominal',
+             f'\t=>\t{module}\tv{pins[pin]}\th1:linked', '']
+def verify(data, expected, label):
+    fixture.write_text('\n'.join(data) + '\n', encoding='utf-8')
+    result = subprocess.run(['sh', '-c', program], env=env, text=True, capture_output=True)
+    assert (result.returncode == 0) == expected, (label, result.returncode, result.stdout, result.stderr)
+    print('[component-pins-test] PASS: Caddy effective version ' + label)
+verify(rows, True, 'fixed replacements of stale nominal dependencies')
+for index, (module, pin, old) in enumerate(modules):
+    for case in ('stale-replacement', 'version-prefix', 'missing-module', 'wrong-target'):
+        changed = list(rows)
+        if case == 'stale-replacement':
+            changed[3 * index] = f'\tdep\t{module}\tv{pins[pin]}\th1:nominal'
+            changed[3 * index + 1] = f'\t=>\t{module}\tv{old}\th1:linked'
+        elif case == 'version-prefix':
+            changed[3 * index + 1] = f'\t=>\t{module}\tv{pins[pin]}.1\th1:linked'
+        elif case == 'missing-module':
+            changed[3 * index:3 * index + 2] = []
+        else:
+            changed[3 * index + 1] = f'\t=>\t{module}/wrong\tv{pins[pin]}\th1:linked'
+        verify(changed, False, module + ' rejects ' + case)
+PYGOINFO
+
 missing_x_net_override="${tmp_dir}/missing-x-net-override.Dockerfile"
 cp -- "${source_dockerfile}" "${missing_x_net_override}"
 sed -i '/--replace.*golang.org\/x\/net=/d' "${missing_x_net_override}"

@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -174,6 +174,211 @@ test('installs unpublished local tarballs offline without opt-in plugins or life
   const lock = JSON.parse(readFileSync(join(runtime, 'node_modules/.package-lock.json')))
   assert.equal(Object.keys(lock.packages).length, 4)
   assert.ok(Object.values(lock.packages).every(pkg => pkg.resolved.startsWith('file:')))
+})
+
+test('selects CUA verification by the CLI declaration and rejects a missing declared adapter', t => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-cua-capability-test-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const temporaryParent = join(root, 'temporary-homes')
+  // Unsupported capabilities must not need an available temporary home.
+  const env = { ...process.env, TMPDIR: temporaryParent }
+  const directory = join(root, 'node_modules', cli)
+  mkdirSync(directory, { recursive: true })
+  const manifest = join(directory, 'package.json')
+  writeFileSync(manifest, JSON.stringify({
+    name: cli, version: '0.2.2-rc.5', dependencies: { '@deepseek-ai/dsh-cua-bundle': '0.2.2-rc.5' },
+  }))
+  const verifier = fileURLToPath(new URL('./verify-runtime-dependencies.mjs', import.meta.url))
+  for (const mode of ['mcp-server', 'cua-profile']) {
+    const legacy = spawnSync(process.execPath, [verifier, root, mode], { env, encoding: 'utf8', timeout: 20000 })
+    assert.equal(legacy.error, undefined, legacy.error?.message)
+    assert.equal(legacy.status, 0, legacy.stderr)
+    assert.match(legacy.stdout, /SKIP: DSH CLI does not declare the CUA MCP adapter/)
+    assert.equal(existsSync(temporaryParent), false)
+  }
+  writeFileSync(manifest, JSON.stringify({
+    name: cli, version: '0.2.3-alpha.2', dependencies: { '@deepseek-ai/dsh-cua-mcp': '0.2.3-alpha.2' },
+  }))
+  for (const mode of ['mcp-server', 'cua-profile']) {
+    const missing = spawnSync(process.execPath, [verifier, root, mode], { env, encoding: 'utf8', timeout: 20000 })
+    assert.equal(missing.error, undefined, missing.error?.message)
+    assert.equal(missing.status, 1, missing.stderr)
+    assert.match(missing.stderr, /ENOENT/)
+    assert.match(missing.stderr, /dsh-cua-mcp/)
+    assert.equal(existsSync(temporaryParent), false)
+  }
+})
+
+function cuaProfileFixture(t) {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-cua-profile-test-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const adapter = '@deepseek-ai/dsh-cua-mcp'
+  const directory = join(root, 'node_modules', cli)
+  mkdirSync(join(directory, 'lib'), { recursive: true })
+  writeFileSync(join(directory, 'package.json'), JSON.stringify({
+    name: cli, type: 'module', dependencies: { [adapter]: '0.2.3-alpha.2' },
+  }))
+  const adapterDirectory = join(root, 'node_modules', adapter)
+  mkdirSync(adapterDirectory, { recursive: true })
+  writeFileSync(join(adapterDirectory, 'package.json'), JSON.stringify({ name: adapter }))
+  // Replay the custom-profile contract from the exact alpha.2 README and loadProfile.
+  writeFileSync(join(directory, 'lib', 'bin.js'), `
+    import assert from 'node:assert/strict'
+    import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+    import { join } from 'node:path'
+    const home = process.env.DSH_HOME
+    const args = process.argv.slice(2)
+    writeFileSync(process.env.DSH_CUA_FIXTURE_OBSERVER, JSON.stringify({ home, args }))
+    const path = join(home, 'profiles', 'cua-mcp', 'package.json')
+    if (!existsSync(path)) throw new Error('dsh: profile "cua-mcp" does not exist')
+    const profile = JSON.parse(readFileSync(path, 'utf8'))
+    assert.equal(profile.name, 'dsh-profile-cua-mcp')
+    assert.equal(profile.private, true)
+    assert.deepEqual(profile.dependencies, {})
+    assert.deepEqual(profile.dsh.profile.bundles, ['@deepseek-ai/dsh-cua-mcp'])
+    assert.deepEqual(args, ['--profile', 'cua-mcp', '--help'])
+    if (process.env.DSH_CUA_FIXTURE_RESULT === 'command-failure') {
+      console.error('CUA fixture command failed')
+      process.exit(19)
+    }
+    console.log(process.env.DSH_CUA_FIXTURE_RESULT === 'unrelated-help'
+      ? 'Usage: dsh generic help'
+      : 'Serve DeepSeek Harness Computer Use to an MCP client over stdio.')
+  `)
+  mkdirSync(join(root, 'node_modules', '.bin'))
+  symlinkSync('../@deepseek-ai/dsh/lib/bin.js', join(root, 'node_modules', '.bin', 'dsh'))
+  const callerHome = join(root, 'caller-home')
+  mkdirSync(callerHome)
+  const sentinel = join(callerHome, 'sentinel')
+  writeFileSync(sentinel, 'caller-owned state\n')
+  const temporaryParent = join(root, 'temporary-homes')
+  mkdirSync(temporaryParent)
+  const observer = join(root, 'invocation.json')
+  return {
+    root, callerHome, sentinel, temporaryParent, observer,
+    env: { ...process.env, DSH_HOME: callerHome, TMPDIR: temporaryParent, DSH_CUA_FIXTURE_OBSERVER: observer },
+  }
+}
+
+test('launches the CUA CLI fixture with an isolated standalone profile from file and stdin', t => {
+  const context = cuaProfileFixture(t)
+  const verifier = fileURLToPath(new URL('./verify-runtime-dependencies.mjs', import.meta.url))
+  for (const stdin of [false, true]) {
+    const result = spawnSync(process.execPath,
+      stdin ? ['--input-type=module', '-', context.root, 'cua-profile'] : [verifier, context.root, 'cua-profile'],
+      { env: context.env, input: stdin ? readFileSync(verifier, 'utf8') : undefined, encoding: 'utf8', timeout: 20000 })
+    assert.equal(result.error, undefined, result.error?.message)
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(result.stdout, /Verified compiled CUA stdio profile help/)
+    const observed = JSON.parse(readFileSync(context.observer, 'utf8'))
+    assert.notEqual(observed.home, context.callerHome)
+    assert.deepEqual(observed.args, ['--profile', 'cua-mcp', '--help'])
+    assert.equal(existsSync(observed.home), false, 'the temporary CUA home must be removed after success')
+    assert.deepEqual(readdirSync(context.temporaryParent), [])
+    assert.equal(readFileSync(context.sentinel, 'utf8'), 'caller-owned state\n')
+    assert.deepEqual(readdirSync(context.callerHome), ['sentinel'])
+  }
+})
+
+test('cleans the isolated CUA home when the CLI fails or prints unrelated help', t => {
+  const context = cuaProfileFixture(t)
+  const verifier = fileURLToPath(new URL('./verify-runtime-dependencies.mjs', import.meta.url))
+  for (const [mode, expected] of [
+    ['command-failure', /CUA fixture command failed/],
+    ['unrelated-help', /the compiled CUA profile must load/],
+  ]) {
+    const result = spawnSync(process.execPath, [verifier, context.root, 'cua-profile'], {
+      env: { ...context.env, DSH_CUA_FIXTURE_RESULT: mode }, encoding: 'utf8', timeout: 20000,
+    })
+    assert.equal(result.error, undefined, result.error?.message)
+    assert.equal(result.status, 1, result.stderr)
+    assert.match(result.stderr, expected)
+    assert.doesNotMatch(result.stdout, /Verified compiled CUA stdio profile help/)
+    const observed = JSON.parse(readFileSync(context.observer, 'utf8'))
+    assert.notEqual(observed.home, context.callerHome)
+    assert.equal(existsSync(observed.home), false, 'the temporary CUA home must be removed after failure')
+    assert.deepEqual(readdirSync(context.temporaryParent), [])
+    assert.equal(readFileSync(context.sentinel, 'utf8'), 'caller-owned state\n')
+    assert.deepEqual(readdirSync(context.callerHome), ['sentinel'])
+  }
+})
+
+test('applies the reviewed MCP server override to a packed CUA adapter and passes the high audit gate', { timeout: 120000 }, t => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-mcp-server-test-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  console.log(`MCP fixture root: ${root}`)
+  const adapter = '@deepseek-ai/dsh-cua-mcp'
+  const packages = [
+    fixture(cli, { dependencies: { [adapter]: '0.2.3-alpha.2' } }),
+    fixture(adapter, { version: '0.2.3-alpha.2', dependencies: { '@modelcontextprotocol/server': '2.2.0' } }),
+  ]
+  const tarballs = packages.map(({ manifest }, index) => {
+    const stage = join(root, `stage-${index}`)
+    const payload = join(stage, 'package')
+    mkdirSync(payload, { recursive: true })
+    writeFileSync(join(payload, 'package.json'), JSON.stringify(manifest))
+    writeFileSync(join(payload, 'index.js'), 'module.exports = "local-cua-source"\n')
+    const tarball = join(root, `${index}.tgz`)
+    execFileSync('tar', ['-czf', tarball, '-C', stage, 'package'])
+    return tarball
+  })
+  const installer = fileURLToPath(new URL('../image/scripts/install-dsh-runtime.mjs', import.meta.url))
+  const verifier = fileURLToPath(new URL('./verify-runtime-dependencies.mjs', import.meta.url))
+  const pins = JSON.parse(readFileSync(new URL('../image/package.json', import.meta.url)))
+  const install = (name, overrides) => {
+    const runtime = join(root, name)
+    mkdirSync(runtime)
+    writeFileSync(join(runtime, 'package.json'), JSON.stringify({ name: 'mcp-runtime-fixture', private: true, overrides }))
+    execFileSync('npm', ['init', '--yes'], { cwd: runtime, encoding: 'utf8', timeout: 10000 })
+    execFileSync(process.execPath, [installer, ...tarballs], {
+      cwd: runtime, encoding: 'utf8', timeout: 60000,
+      env: { ...process.env, NPM_CONFIG_REGISTRY: 'https://registry.npmjs.org' },
+    })
+    return runtime
+  }
+  const baselineOverrides = { ...pins.overrides }
+  delete baselineOverrides['@modelcontextprotocol/server@>=2.0.0 <2.4.0']
+  const original = install('original', baselineOverrides)
+  const red = spawnSync(process.execPath, [verifier, original, 'mcp-server'], { encoding: 'utf8', timeout: 20000 })
+  assert.equal(red.error, undefined, red.error?.message)
+  assert.equal(red.status, 1, red.stderr)
+  assert.match(red.stderr, /Missing expected rejection/)
+  console.log('RED: MCP server 2.2.0 allowed a second connection on the same Server')
+  const audit = runtime => spawnSync('npm', ['audit', '--omit=dev', '--audit-level', 'high', '--package-lock=false', '--json'], {
+    cwd: runtime, encoding: 'utf8', timeout: 30000,
+    env: { ...process.env, NPM_CONFIG_REGISTRY: 'https://registry.npmjs.org' },
+  })
+  const originalAudit = audit(original)
+  assert.equal(originalAudit.status, 1, originalAudit.stderr)
+  assert.equal(JSON.parse(originalAudit.stdout).vulnerabilities['@modelcontextprotocol/server'].severity, 'high')
+  console.log('RED: packed CUA dependency tree failed npm audit at the high threshold')
+
+  const runtime = install('reviewed', pins.overrides)
+  const result = spawnSync(process.execPath, [verifier, runtime, 'mcp-server'], { encoding: 'utf8', timeout: 20000 })
+  assert.equal(result.error, undefined, result.error?.message)
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /Verified MCP server 2\.4\.0 cjs/)
+  assert.match(result.stdout, /Verified MCP server 2\.4\.0 esm/)
+  console.log(result.stdout.trim())
+  const stdinResult = spawnSync(process.execPath, ['--input-type=module', '-', runtime, 'mcp-server'], {
+    input: readFileSync(verifier, 'utf8'), encoding: 'utf8', timeout: 20000,
+  })
+  assert.equal(stdinResult.error, undefined, stdinResult.error?.message)
+  assert.equal(stdinResult.status, 0, stdinResult.stderr)
+  assert.match(stdinResult.stdout, /Verified MCP server 2\.4\.0 cjs/)
+  assert.match(stdinResult.stdout, /Verified MCP server 2\.4\.0 esm/)
+  const reviewedAudit = audit(runtime)
+  assert.equal(reviewedAudit.status, 0, reviewedAudit.stdout || reviewedAudit.stderr)
+  const vulnerabilities = JSON.parse(reviewedAudit.stdout).metadata.vulnerabilities
+  assert.equal(vulnerabilities.high, 0)
+  assert.equal(vulnerabilities.critical, 0)
+  console.log('GREEN: packed CUA dependency tree passed npm audit at the high threshold')
+  assert.equal(readFileSync(join(runtime, 'node_modules', adapter, 'index.js'), 'utf8'), 'module.exports = "local-cua-source"\n')
+  const lock = JSON.parse(readFileSync(join(runtime, 'node_modules/.package-lock.json')))
+  assert.equal(lock.packages['node_modules/@modelcontextprotocol/server'].version, '2.4.0')
+  assert.equal(lock.packages['node_modules/@modelcontextprotocol/server'].integrity,
+    'sha512-rgR9yxSaAJ+bcsi/XroT/S2AfPiIWloXAnrdfYSCms9ivVju0ishu/wW0J21Ho6+ZOR1r7RyeRbjiRuF87ix5Q==')
+  assert.match(readFileSync(join(runtime, 'node_modules/@modelcontextprotocol/server/LICENSE'), 'utf8'), /Apache License/)
 })
 
 test('applies the reviewed fflate override to a source-only office dependency and rejects malformed ZIP64', { timeout: 120000 }, t => {

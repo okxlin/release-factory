@@ -135,6 +135,8 @@ normalize_official_image_name() {
 
 declare -A arg_values=()
 declare -A arg_counts=()
+declare -A caddy_arg_counts=()
+caddy_builder=0
 component_inputs="$(python3 "${script_dir}/component-inputs.py" \
     --components-file "${components_file}" --source-file "${source_file}")"
 while IFS='=' read -r arg_name arg_value; do
@@ -161,6 +163,13 @@ then
     fail 'Python requirements lock is inconsistent with the component inputs'
 fi
 for line in "${docker_lines[@]}"; do
+    if from_remainder="$(instruction_remainder "${line}" FROM)"; then
+        if [[ "${from_remainder}" =~ [[:space:]]+[aA][sS][[:space:]]+caddy-builder[[:space:]]*(#.*)?$ ]]; then
+            caddy_builder=1
+        else
+            caddy_builder=0
+        fi
+    fi
     if arg_remainder="$(instruction_remainder "${line}" ARG)" \
         && [[ "${arg_remainder}" =~ ^[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)(=([^[:space:]#]*))?[[:space:]]*(#.*)?$ ]]; then
         arg_name="${BASH_REMATCH[1]}"
@@ -171,6 +180,9 @@ for line in "${docker_lines[@]}"; do
             fail "required locked ARG ${arg_name} is missing"
         fi
         arg_counts["${arg_name}"]=$(( ${arg_counts[${arg_name}]:-0} + 1 ))
+        if (( caddy_builder )); then
+            caddy_arg_counts["${arg_name}"]=$(( ${caddy_arg_counts[${arg_name}]:-0} + 1 ))
+        fi
     fi
 done
 
@@ -184,6 +196,10 @@ require_arg() {
 
 for name in "${!arg_values[@]}"; do
     require_arg "${name}"
+done
+for name in GO_SMTP_VERSION OTEL_VERSION OTEL_SDK_LOG_VERSION; do
+    [[ -v "caddy_arg_counts[${name}]" ]] \
+        || fail "Caddy builder required ARG ${name} is missing"
 done
 
 resolve_pin_variables() {
@@ -472,6 +488,32 @@ require_literal \
 require_literal \
     'grep -Eq "golang\.org/x/net[[:space:]]+v${X_NET_VERSION}"' \
     'the Caddy x/net module verification'
+for module in go.opentelemetry.io/otel go.opentelemetry.io/otel/sdk go.opentelemetry.io/otel/trace; do
+    require_literal \
+        "${module}=${module}@v\${OTEL_VERSION}" \
+        "the Caddy ${module} security override"
+    require_literal \
+        "\"${module}=v\${OTEL_VERSION}\"" \
+        "the Caddy ${module} effective version assertion"
+done
+require_literal \
+    'go.opentelemetry.io/otel/sdk/log=go.opentelemetry.io/otel/sdk/log@v${OTEL_SDK_LOG_VERSION}' \
+    'the Caddy OpenTelemetry Logs SDK security override'
+require_literal \
+    '"go.opentelemetry.io/otel/sdk/log=v${OTEL_SDK_LOG_VERSION}"' \
+    'the Caddy OpenTelemetry Logs SDK effective version assertion'
+require_literal \
+    'github.com/emersion/go-smtp=github.com/emersion/go-smtp@v${GO_SMTP_VERSION}' \
+    'the Caddy go-smtp security override'
+require_literal \
+    '"github.com/emersion/go-smtp=v${GO_SMTP_VERSION}"' \
+    'the Caddy go-smtp effective version assertion'
+require_literal \
+    "grep -A1 -F \"\$(printf 'dep\\t%s\\t' \"\${module}\")\"" \
+    'the Caddy dependency row selection for effective version checks'
+require_literal \
+    "grep -F \"\$(printf '=>\\t%s\\t%s\\t' \"\${module}\" \"\${version}\")\" || exit 1;" \
+    'the Caddy effective replacement version check and failure propagation'
 require_literal \
     'golang.org/x/text=golang.org/x/text@v${X_TEXT_VERSION}' \
     'the Caddy x/text security override'

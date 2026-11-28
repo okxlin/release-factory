@@ -13,9 +13,9 @@
 
 两个工作流都会把相同标签发布到 `ghcr.io/okxlin/deepseek-harness` 和 `docker.io/$DOCKERHUB_USERNAME/deepseek-harness`。请把 `DOCKERHUB_USERNAME` 配置为 GitHub Actions 仓库变量或 Secret，并把 `DOCKERHUB_TOKEN` 配置为仓库 Secret。Docker Hub token 只用于 Registry 认证和已验证镜像的发布，不会传入镜像构建上下文。
 
-留空版本的手动发布会从 DeepSeek Harness GitHub Releases 选择最高的非 draft `dsh-v*` 源码版本，校验对应 tag、commit 和源码归档 SHA-256 后构建，并发布匹配的 `<DSH_VERSION>` 和 `<DSH_VERSION>-workstation` 标签；因此上游源码版本可以在发布到 npm 之前进入镜像。手动显式传入 `dsh-v*` 可以选择指定的源码 release，传入已发布的 npm 版本或 dist-tag 时仍按请求的 npm selector 解析。`image/dsh-source.json` 保留可复现的本地/PR 基线，未来源码 release 不需要修改 Dockerfile。手动工作流也可覆盖发布标签。AppStore `latest` 通道使用浮动标签，编号 AppStore 版本使用匹配的版本标签。
+留空版本的手动发布会从 DeepSeek Harness GitHub Releases 选择最高的非 draft `dsh-v*` 源码版本，校验对应 tag、commit 和源码归档 SHA-256 后构建，并发布匹配的 `<DSH_VERSION>` 和 `<DSH_VERSION>-workstation` 标签；因此上游源码版本可以在发布到 npm 之前进入镜像。手动显式传入 `dsh-v*` 可以选择指定的源码 release。输入匹配仓库固定的源码版本时沿用源码构建；其他版本或 dist-tag 通过 npm 解析，解析结果若匹配源码 pin 仍会走源码构建。`image/dsh-source.json` 保留可复现的本地/PR 基线，未来源码 release 不需要修改 Dockerfile。手动工作流也可覆盖发布标签。AppStore `latest` 通道使用浮动标签，编号 AppStore 版本使用匹配的版本标签。
 
-当前提交的源码基线是 [0.2.2-rc.5](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-rc.5)。该基线包含 PTC 包名 `ptc-runtime` 和 workflow 执行器 `workflow-ptc`；使用旧名称的自定义 profile 需要更新。DeepSeek 现在默认使用 Messages 协议；手动配置的旧官方 API 根地址应删除或改为 `https://api.deepseek.com/anthropic`，自定义 provider URL 不受影响。
+当前提交的源码基线是 [0.2.3-alpha.2](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.3-alpha.2)。该基线包含 PTC 包名 `ptc-runtime` 和 workflow 执行器 `workflow-ptc`；使用旧名称的自定义 profile 需要更新。DeepSeek 现在默认使用 Messages 协议；手动配置的旧官方 API 根地址应删除或改为 `https://api.deepseek.com/anthropic`，自定义 provider URL 不受影响。
 
 构建版本、基础镜像 digest、源码和工具校验和集中保存在 [`image/components.lock.json`](image/components.lock.json)。Python 依赖使用独立的 [`image/python-requirements.lock`](image/python-requirements.lock)，旧版 npm 路径保留自己的 [package.json](image/package.json) 和 [pnpm-lock.yaml](image/pnpm-lock.yaml)。[`image/dsh-source.json`](image/dsh-source.json) 把源码归档绑定到确定的 commit 和 SHA-256。本地构建与 CI 都通过 `scripts/component-inputs.py` 解析参数，常规组件更新无需手改 Dockerfile 指令。源码构建当前仍由 npm 安装本地打包的 runtime tarball，依赖审计检查这棵实际安装树。
 
@@ -40,6 +40,8 @@ pytest 更新会在 Linux、Python 3.12 环境中使用 PyPI wheel 重新生成 
 Go 跟随官方稳定版本端点 <https://go.dev/VERSION?m=text>，其 Docker Official Image index 固定 digest，用于可复现地选择 `amd64` 和 `arm64`。actionlint 使用该固定 Go 工具链从 checksum 固定的官方源码归档重新构建；其他独立 workstation 工具从各自官方 GitHub Release 下载，并按架构固定 SHA-256 checksum。
 
 源码运行时安装会把受影响的 undici 8.x 固定到 [8.12.3](https://github.com/nodejs/undici/releases/tag/v8.12.3)，Zod 4.x 固定到 [4.6.7](https://github.com/colinhacks/zod/releases/tag/v4.6.7)，保留原有主版本 API。源码 CI 检查正常的 CJS/ESM schema、超限集合在元素校验前被拒绝、共享 HTTP dispatcher，以及小写、大写和混合大小写摘要算法的响应完整性校验。
+
+CUA adapter 的 MCP server 2.x 中低于 2.4.0 的版本会覆盖到 2.4.0，修复[连接复用](https://github.com/advisories/GHSA-jm63-cq47-j5jp)、[工具输入限制](https://github.com/advisories/GHSA-46jr-4wx8-v453)和[资源绑定](https://github.com/advisories/GHSA-rvq5-wwqv-78pq)问题。CUA 使用 stdio，每条连接创建独立 server。CLI 声明此 adapter 时，原生 CI 检查实际安装包的 CJS/ESM stdio 握手、工具发现、连接隔离和重复连接拒绝，再通过 `--help` 加载编译后的 CUA profile。不包含此 adapter 的旧源码版本跳过这组检查；声明了依赖却缺包时验证失败。MCP 2.4.0 包完整保留其 MIT/Apache-2.0 过渡 LICENSE。
 
 workstation 的 Docker CLI、Buildx、Compose 从校验和固定的官方源码重新编译。构建和 smoke 会检查各二进制的 Go 包清单，拒绝 daemon 代码；旧 Docker 模块只允许贡献 `pkg/namesgenerator`。不再为守护进程专属的扫描结果维护本地 Buildx 源码补丁。具体漏洞、包版本、二进制路径、依据及到期日期记录在[安全策略](configs/trivy-policy.json)中。
 
@@ -83,6 +85,8 @@ deepseek-harness-builder/scripts/build-local.sh \
 
 自定义 Caddy 构建会校验 Caddy 和 go-authcrunch 源码归档 checksum，移除 go-authcrunch 未使用的 GPG 公钥解析器，并在链接前运行上游 identity 包测试。它会对固定 Caddy 源码应用上游的两行 CEL 兼容修复，再将安全敏感的 Go 模块提升到已修复版本。caddy-security 仍保留 SSH 公钥支持，同时生成的 `CADDY_GO_PACKAGES.txt` 清单不得包含 `golang.org/x/crypto/openpgp` 包。限速模块及其许可证也会在同一构建中固定和校验。
 
+Caddy 将 OpenTelemetry core/SDK/trace 固定到 1.47.0，将 [Logs SDK 固定到首次稳定版本 1.47.0](https://github.com/open-telemetry/opentelemetry-go/blob/66cfc9520e205b7d450183532772401bc2b6674c/sdk/log/go.mod)，并将 [go-smtp 固定到 0.25.1](https://github.com/emersion/go-smtp/releases/tag/v0.25.1)。这些版本对应 [GO-2026-6974](https://pkg.go.dev/vuln/GO-2026-6974)、[GO-2026-6975](https://pkg.go.dev/vuln/GO-2026-6975) 和 [GO-2026-7029](https://pkg.go.dev/vuln/GO-2026-7029) 的官方修复。构建检查读取编译后二进制实际使用的替换版本。每个候选仍须提供原生 amd64/arm64 构建、认证 smoke、govulncheck 和 Trivy 证据。
+
 两个镜像都包含校验和固定的独立 pnpm bundle，并移除 Corepack，避免所选 pnpm 版本静默跟随包管理器通道。轻量 runtime 还会移除 npm 和 npx；workstation 会用单独校验和固定的 npm 11 bundle 替换 Node.js 自带的旧 npm，为开发兼容性提供 npm 和 npx，并在镜像构建及 smoke 测试中校验版本。
 
 ## 开发环境
@@ -97,7 +101,7 @@ deepseek-harness-builder/scripts/build-local.sh \
 workstation 镜像继承相同的 DSH/认证运行时，并额外包含：
 
 - Node.js、npm、npx 和 pnpm
-- Python 3.12.14，含 pip、venv、pipx、pytest 和开发头文件
+- Python 3.12.16，含 pip、venv、pipx、pytest 和开发头文件
 - Go
 - Docker CLI、Compose 和 Buildx，仅客户端工具
 - GCC/G++、Clang、clang-format、GDB、CMake、Ninja、Autoconf/Automake、libtool、pkg-config 和常见原生库头文件

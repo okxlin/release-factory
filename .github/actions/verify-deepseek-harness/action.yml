@@ -111,15 +111,18 @@ runs:
         AUDIT_IMAGE: ${{ steps.components.outputs.audit_image }}
       run: bash deepseek-harness-builder/scripts/audit-runtime-dependencies.sh --image "$AUDIT_IMAGE"
 
-    - name: Verify runtime schemas and HTTP integrity
+    - name: Verify runtime schemas, HTTP integrity and MCP stdio isolation
       if: steps.components.outputs.dsh_version == steps.components.outputs.dsh_source_version
       shell: bash
       env:
         AUDIT_IMAGE: ${{ steps.components.outputs.audit_image }}
       run: |
-        docker run --rm -i --network none --entrypoint node "$AUDIT_IMAGE" \
-          --input-type=module - /opt/dsh \
-          < deepseek-harness-builder/scripts/verify-runtime-dependencies.mjs
+        set -euo pipefail
+        for component in all cua-profile; do
+          docker run --rm -i --network none --entrypoint node "$AUDIT_IMAGE" \
+            --input-type=module - /opt/dsh "$component" \
+            < deepseek-harness-builder/scripts/verify-runtime-dependencies.mjs
+        done
 
     - name: Verify MCP issuer binding and native SVG decoding
       if: steps.components.outputs.dsh_version == steps.components.outputs.dsh_source_version

@@ -3,17 +3,130 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { once } from 'node:events'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { PassThrough } from 'node:stream'
+import { execFileSync } from 'node:child_process'
 import { Worker } from 'node:worker_threads'
 
 const root = resolve(process.argv[2] ?? '/opt/dsh')
 const component = process.argv[3] ?? 'all'
-assert.ok(['all', 'zod', 'undici', 'fflate'].includes(component), 'expected all, zod, undici or fflate')
+assert.ok(['all', 'zod', 'undici', 'fflate', 'mcp-server', 'cua-profile'].includes(component), 'expected all, zod, undici, fflate, mcp-server or cua-profile')
 const consumerRequire = name => createRequire(join(root, 'node_modules', name, 'package.json'))
+
+let hasCuaAdapter = false
+if (['all', 'mcp-server', 'cua-profile'].includes(component)) {
+  const cli = JSON.parse(readFileSync(join(root, 'node_modules/@deepseek-ai/dsh/package.json'), 'utf8'))
+  assert.ok(cli.dependencies && typeof cli.dependencies === 'object' && !Array.isArray(cli.dependencies),
+    'DSH CLI must declare its runtime dependencies')
+  hasCuaAdapter = Object.hasOwn(cli.dependencies, '@deepseek-ai/dsh-cua-mcp')
+  if (hasCuaAdapter) {
+    const adapter = JSON.parse(readFileSync(join(root, 'node_modules/@deepseek-ai/dsh-cua-mcp/package.json'), 'utf8'))
+    assert.equal(adapter.name, '@deepseek-ai/dsh-cua-mcp', 'the declared CUA adapter must be installed')
+  } else {
+    console.log('SKIP: DSH CLI does not declare the CUA MCP adapter')
+  }
+}
+
+if (hasCuaAdapter && (component === 'all' || component === 'mcp-server')) {
+  const require = consumerRequire('@deepseek-ai/dsh-cua-mcp')
+  const directory = dirname(dirname(require.resolve('@modelcontextprotocol/server')))
+  const manifest = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'))
+  for (const mode of ['cjs', 'esm']) {
+    const load = entry => mode === 'cjs' ? require(entry) : import(pathToFileURL(entry))
+    const { Server } = await load(join(directory, `dist/index.${mode === 'cjs' ? 'cjs' : 'mjs'}`))
+    const { StdioServerTransport } = await load(join(directory, `dist/stdio.${mode === 'cjs' ? 'cjs' : 'mjs'}`))
+    const connections = []
+    const connection = async name => {
+      const input = new PassThrough()
+      const output = new PassThrough()
+      const server = new Server({ name, version: '1.0.0' }, { capabilities: { tools: {} } })
+      const transport = new StdioServerTransport(input, output)
+      const pending = new Map()
+      let buffer = ''
+      output.setEncoding('utf8')
+      output.on('data', chunk => {
+        buffer += chunk
+        while (buffer.includes('\n')) {
+          const newline = buffer.indexOf('\n')
+          const message = JSON.parse(buffer.slice(0, newline))
+          buffer = buffer.slice(newline + 1)
+          pending.get(message.id)?.(message)
+        }
+      })
+      const request = (id, method, params) => new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error(`MCP stdio request timed out: ${method}`)), 5000)
+        pending.set(id, message => {
+          clearTimeout(timeout)
+          pending.delete(id)
+          if (message.error) reject(new Error(JSON.stringify(message.error)))
+          else resolve(message.result)
+        })
+        input.write(JSON.stringify({ jsonrpc: '2.0', id, method, ...(params ? { params } : {}) }) + '\n')
+      })
+      // The DSH CUA adapter uses the low-level Server and string-method API.
+      server.setRequestHandler('tools/list', () => ({
+        tools: [{ name: name + '-tool', inputSchema: { type: 'object' } }],
+      }))
+      connections.push({ server, input, output })
+      await server.connect(transport)
+      return { server, input, request }
+    }
+    try {
+      const first = await connection('first')
+      const second = await connection('second')
+      // https://github.com/advisories/GHSA-jm63-cq47-j5jp
+      // A shared Server used to replace its connection and mix colliding IDs.
+      await assert.rejects(first.server.connect({ async start() {}, async close() {}, async send() {} }),
+        /already.connected|ALREADY_CONNECTED/i)
+      for (const client of [first, second]) {
+        const initialized = await client.request(1, 'initialize', {
+          protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'fixture-client', version: '1.0.0' },
+        })
+        assert.equal(initialized.protocolVersion, '2025-11-25')
+        client.input.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
+      }
+      const [firstTools, secondTools] = await Promise.all([
+        first.request(2, 'tools/list'), second.request(2, 'tools/list'),
+      ])
+      assert.deepEqual(firstTools.tools.map(tool => tool.name), ['first-tool'])
+      assert.deepEqual(secondTools.tools.map(tool => tool.name), ['second-tool'])
+      console.log(`Verified MCP server ${manifest.version} ${mode}: isolated stdio connections and tool discovery`)
+    } finally {
+      for (const { server, input, output } of connections) {
+        await server.close()
+        input.destroy()
+        output.destroy()
+      }
+    }
+  }
+}
+
+if (hasCuaAdapter && component === 'cua-profile') {
+  const home = mkdtempSync(join(tmpdir(), 'dsh-cua-profile-'))
+  try {
+    // The standalone CUA bundle requires this custom profile in a fresh home.
+    // https://github.com/deepseek-ai/deepseek-harness/blob/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/packages/experimental/cua-mcp/README.md#start-the-server
+    const directory = join(home, 'profiles', 'cua-mcp')
+    mkdirSync(directory, { recursive: true })
+    writeFileSync(join(directory, 'package.json'), JSON.stringify({
+      name: 'dsh-profile-cua-mcp', private: true, dependencies: {},
+      dsh: { profile: { bundles: ['@deepseek-ai/dsh-cua-mcp'] } },
+    }) + '\n', 'utf8')
+    const help = execFileSync(process.execPath,
+      [join(root, 'node_modules/.bin/dsh'), '--profile', 'cua-mcp', '--help'],
+      { env: { ...process.env, DSH_HOME: home }, encoding: 'utf8', timeout: 30000 })
+    assert.ok(help.includes('Serve DeepSeek Harness Computer Use to an MCP client over stdio.'),
+      'the compiled CUA profile must load')
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+  console.log('Verified compiled CUA stdio profile help')
+}
 
 if (component === 'all' || component === 'zod') {
   const require = consumerRequire('@deepseek-ai/dsh-agent-loop')
