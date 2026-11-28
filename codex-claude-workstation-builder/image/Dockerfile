@@ -48,6 +48,9 @@ ARG PROXY_X_MOD_VERSION=0.43.0
 ARG PROXY_GRPC_VERSION=1.85.0
 ARG MIHOMO_COMPRESS_VERSION=1.20.4
 ARG SING_BOX_GO_JOSE_VERSION=4.1.9
+# DHCP has no stable tags; pin the reviewed fix separately from the resolver.
+# https://github.com/advisories/GHSA-jp3c-6v3g-mpxv
+ARG PROXY_DHCP_VERSION=0.0.0-20260719225207-c76316d4aa82
 ARG PNPM_VERSION=latest
 ARG YARN_VERSION=stable
 ARG RUFF_VERSION=latest
@@ -286,6 +289,7 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
     && (cd /tmp/proxy-build/mihomo \
         && go mod edit \
             -require="github.com/klauspost/compress@v${MIHOMO_COMPRESS_VERSION}" \
+            -require="github.com/insomniacslk/dhcp@v${PROXY_DHCP_VERSION}" \
             -require="golang.org/x/crypto@v${PROXY_X_CRYPTO_VERSION}" \
             -require="golang.org/x/net@v${PROXY_X_NET_VERSION}" \
             -require="golang.org/x/text@v${PROXY_X_TEXT_VERSION}" \
@@ -300,6 +304,7 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
     && (cd /tmp/proxy-build/sing-box \
         && go mod edit \
             -require="github.com/go-jose/go-jose/v4@v${SING_BOX_GO_JOSE_VERSION}" \
+            -require="github.com/insomniacslk/dhcp@v${PROXY_DHCP_VERSION}" \
             -require="golang.org/x/crypto@v${PROXY_X_CRYPTO_VERSION}" \
             -require="golang.org/x/net@v${PROXY_X_NET_VERSION}" \
             -require="golang.org/x/text@v${PROXY_X_TEXT_VERSION}" \
@@ -322,6 +327,8 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
     && install -m 0755 /tmp/proxy-build/mihomo-bin /usr/local/bin/mihomo \
     && install -m 0755 /tmp/proxy-build/sing-box-bin /usr/local/bin/sing-box \
     && install -Dm 0644 /tmp/proxy-build/sing-box/LICENSE /usr/share/doc/sing-box/LICENSE \
+    && install -Dm 0644 "${GOMODCACHE}/github.com/insomniacslk/dhcp@v${PROXY_DHCP_VERSION}/LICENSE" /usr/share/doc/release-factory-go-tools/dhcp.LICENSE \
+    && test -s /usr/share/doc/release-factory-go-tools/dhcp.LICENSE \
     && install -m 0755 /tmp/proxy-build/xray-bin /usr/local/bin/xray \
     && ln -sf /usr/local/bin/mihomo /usr/local/bin/clash-meta \
     && for binary in mihomo sing-box xray; do \
@@ -331,6 +338,9 @@ RUN dpkg_arch="$(dpkg --print-architecture)" \
     done \
     && for binary in sing-box xray; do \
         go version -m "/usr/local/bin/${binary}" | grep -Fq $'\tdep\tgoogle.golang.org/grpc\tv'"${PROXY_GRPC_VERSION}" || { echo "${binary} has an unexpected grpc version" >&2; exit 1; }; \
+    done \
+    && for binary in mihomo sing-box; do \
+        go version -m "/usr/local/bin/${binary}" | grep -Fq $'\tdep\tgithub.com/insomniacslk/dhcp\tv'"${PROXY_DHCP_VERSION}"$'\t' || { echo "${binary} has an unexpected DHCP version" >&2; exit 1; }; \
     done \
     && go version -m /usr/local/bin/sing-box | grep -Fq $'\tdep\tgolang.org/x/mod\tv'"${PROXY_X_MOD_VERSION}" \
     && go version -m /usr/local/bin/sing-box | grep -Fq $'\tdep\tgithub.com/go-jose/go-jose/v4\tv'"${SING_BOX_GO_JOSE_VERSION}"$'\t' \
