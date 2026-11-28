@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -179,6 +179,9 @@ test('installs unpublished local tarballs offline without opt-in plugins or life
 test('selects CUA verification by the CLI declaration and rejects a missing declared adapter', t => {
   const root = mkdtempSync(join(tmpdir(), 'dsh-cua-capability-test-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
+  const temporaryParent = join(root, 'temporary-homes')
+  // Unsupported capabilities must not need an available temporary home.
+  const env = { ...process.env, TMPDIR: temporaryParent }
   const directory = join(root, 'node_modules', cli)
   mkdirSync(directory, { recursive: true })
   const manifest = join(directory, 'package.json')
@@ -187,20 +190,116 @@ test('selects CUA verification by the CLI declaration and rejects a missing decl
   }))
   const verifier = fileURLToPath(new URL('./verify-runtime-dependencies.mjs', import.meta.url))
   for (const mode of ['mcp-server', 'cua-profile']) {
-    const legacy = spawnSync(process.execPath, [verifier, root, mode], { encoding: 'utf8', timeout: 20000 })
+    const legacy = spawnSync(process.execPath, [verifier, root, mode], { env, encoding: 'utf8', timeout: 20000 })
     assert.equal(legacy.error, undefined, legacy.error?.message)
     assert.equal(legacy.status, 0, legacy.stderr)
     assert.match(legacy.stdout, /SKIP: DSH CLI does not declare the CUA MCP adapter/)
+    assert.equal(existsSync(temporaryParent), false)
   }
   writeFileSync(manifest, JSON.stringify({
     name: cli, version: '0.2.3-alpha.2', dependencies: { '@deepseek-ai/dsh-cua-mcp': '0.2.3-alpha.2' },
   }))
   for (const mode of ['mcp-server', 'cua-profile']) {
-    const missing = spawnSync(process.execPath, [verifier, root, mode], { encoding: 'utf8', timeout: 20000 })
+    const missing = spawnSync(process.execPath, [verifier, root, mode], { env, encoding: 'utf8', timeout: 20000 })
     assert.equal(missing.error, undefined, missing.error?.message)
     assert.equal(missing.status, 1, missing.stderr)
     assert.match(missing.stderr, /ENOENT/)
     assert.match(missing.stderr, /dsh-cua-mcp/)
+    assert.equal(existsSync(temporaryParent), false)
+  }
+})
+
+function cuaProfileFixture(t) {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-cua-profile-test-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const adapter = '@deepseek-ai/dsh-cua-mcp'
+  const directory = join(root, 'node_modules', cli)
+  mkdirSync(join(directory, 'lib'), { recursive: true })
+  writeFileSync(join(directory, 'package.json'), JSON.stringify({
+    name: cli, type: 'module', dependencies: { [adapter]: '0.2.3-alpha.2' },
+  }))
+  const adapterDirectory = join(root, 'node_modules', adapter)
+  mkdirSync(adapterDirectory, { recursive: true })
+  writeFileSync(join(adapterDirectory, 'package.json'), JSON.stringify({ name: adapter }))
+  // Replay the custom-profile contract from the exact alpha.2 README and loadProfile.
+  writeFileSync(join(directory, 'lib', 'bin.js'), `
+    import assert from 'node:assert/strict'
+    import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+    import { join } from 'node:path'
+    const home = process.env.DSH_HOME
+    const args = process.argv.slice(2)
+    writeFileSync(process.env.DSH_CUA_FIXTURE_OBSERVER, JSON.stringify({ home, args }))
+    const path = join(home, 'profiles', 'cua-mcp', 'package.json')
+    if (!existsSync(path)) throw new Error('dsh: profile "cua-mcp" does not exist')
+    const profile = JSON.parse(readFileSync(path, 'utf8'))
+    assert.equal(profile.name, 'dsh-profile-cua-mcp')
+    assert.equal(profile.private, true)
+    assert.deepEqual(profile.dependencies, {})
+    assert.deepEqual(profile.dsh.profile.bundles, ['@deepseek-ai/dsh-cua-mcp'])
+    assert.deepEqual(args, ['--profile', 'cua-mcp', '--help'])
+    if (process.env.DSH_CUA_FIXTURE_RESULT === 'command-failure') {
+      console.error('CUA fixture command failed')
+      process.exit(19)
+    }
+    console.log(process.env.DSH_CUA_FIXTURE_RESULT === 'unrelated-help'
+      ? 'Usage: dsh generic help'
+      : 'Serve DeepSeek Harness Computer Use to an MCP client over stdio.')
+  `)
+  mkdirSync(join(root, 'node_modules', '.bin'))
+  symlinkSync('../@deepseek-ai/dsh/lib/bin.js', join(root, 'node_modules', '.bin', 'dsh'))
+  const callerHome = join(root, 'caller-home')
+  mkdirSync(callerHome)
+  const sentinel = join(callerHome, 'sentinel')
+  writeFileSync(sentinel, 'caller-owned state\n')
+  const temporaryParent = join(root, 'temporary-homes')
+  mkdirSync(temporaryParent)
+  const observer = join(root, 'invocation.json')
+  return {
+    root, callerHome, sentinel, temporaryParent, observer,
+    env: { ...process.env, DSH_HOME: callerHome, TMPDIR: temporaryParent, DSH_CUA_FIXTURE_OBSERVER: observer },
+  }
+}
+
+test('launches the CUA CLI fixture with an isolated standalone profile from file and stdin', t => {
+  const context = cuaProfileFixture(t)
+  const verifier = fileURLToPath(new URL('./verify-runtime-dependencies.mjs', import.meta.url))
+  for (const stdin of [false, true]) {
+    const result = spawnSync(process.execPath,
+      stdin ? ['--input-type=module', '-', context.root, 'cua-profile'] : [verifier, context.root, 'cua-profile'],
+      { env: context.env, input: stdin ? readFileSync(verifier, 'utf8') : undefined, encoding: 'utf8', timeout: 20000 })
+    assert.equal(result.error, undefined, result.error?.message)
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(result.stdout, /Verified compiled CUA stdio profile help/)
+    const observed = JSON.parse(readFileSync(context.observer, 'utf8'))
+    assert.notEqual(observed.home, context.callerHome)
+    assert.deepEqual(observed.args, ['--profile', 'cua-mcp', '--help'])
+    assert.equal(existsSync(observed.home), false, 'the temporary CUA home must be removed after success')
+    assert.deepEqual(readdirSync(context.temporaryParent), [])
+    assert.equal(readFileSync(context.sentinel, 'utf8'), 'caller-owned state\n')
+    assert.deepEqual(readdirSync(context.callerHome), ['sentinel'])
+  }
+})
+
+test('cleans the isolated CUA home when the CLI fails or prints unrelated help', t => {
+  const context = cuaProfileFixture(t)
+  const verifier = fileURLToPath(new URL('./verify-runtime-dependencies.mjs', import.meta.url))
+  for (const [mode, expected] of [
+    ['command-failure', /CUA fixture command failed/],
+    ['unrelated-help', /the compiled CUA profile must load/],
+  ]) {
+    const result = spawnSync(process.execPath, [verifier, context.root, 'cua-profile'], {
+      env: { ...context.env, DSH_CUA_FIXTURE_RESULT: mode }, encoding: 'utf8', timeout: 20000,
+    })
+    assert.equal(result.error, undefined, result.error?.message)
+    assert.equal(result.status, 1, result.stderr)
+    assert.match(result.stderr, expected)
+    assert.doesNotMatch(result.stdout, /Verified compiled CUA stdio profile help/)
+    const observed = JSON.parse(readFileSync(context.observer, 'utf8'))
+    assert.notEqual(observed.home, context.callerHome)
+    assert.equal(existsSync(observed.home), false, 'the temporary CUA home must be removed after failure')
+    assert.deepEqual(readdirSync(context.temporaryParent), [])
+    assert.equal(readFileSync(context.sentinel, 'utf8'), 'caller-owned state\n')
+    assert.deepEqual(readdirSync(context.callerHome), ['sentinel'])
   }
 })
 

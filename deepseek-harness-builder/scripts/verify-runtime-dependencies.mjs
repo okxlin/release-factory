@@ -3,9 +3,10 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { once } from 'node:events'
-import { readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { PassThrough } from 'node:stream'
@@ -106,11 +107,24 @@ if (hasCuaAdapter && (component === 'all' || component === 'mcp-server')) {
 }
 
 if (hasCuaAdapter && component === 'cua-profile') {
-  const help = execFileSync(process.execPath,
-    [join(root, 'node_modules/.bin/dsh'), '--profile', 'cua-mcp', '--help'],
-    { encoding: 'utf8', timeout: 30000 })
-  assert.ok(help.includes('Serve DeepSeek Harness Computer Use to an MCP client over stdio.'),
-    'the compiled CUA profile must load')
+  const home = mkdtempSync(join(tmpdir(), 'dsh-cua-profile-'))
+  try {
+    // The standalone CUA bundle requires this custom profile in a fresh home.
+    // https://github.com/deepseek-ai/deepseek-harness/blob/4b399c39a6d1479cd84ca591b4d7c88e24d38a96/packages/experimental/cua-mcp/README.md#start-the-server
+    const directory = join(home, 'profiles', 'cua-mcp')
+    mkdirSync(directory, { recursive: true })
+    writeFileSync(join(directory, 'package.json'), JSON.stringify({
+      name: 'dsh-profile-cua-mcp', private: true, dependencies: {},
+      dsh: { profile: { bundles: ['@deepseek-ai/dsh-cua-mcp'] } },
+    }) + '\n', 'utf8')
+    const help = execFileSync(process.execPath,
+      [join(root, 'node_modules/.bin/dsh'), '--profile', 'cua-mcp', '--help'],
+      { env: { ...process.env, DSH_HOME: home }, encoding: 'utf8', timeout: 30000 })
+    assert.ok(help.includes('Serve DeepSeek Harness Computer Use to an MCP client over stdio.'),
+      'the compiled CUA profile must load')
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
   console.log('Verified compiled CUA stdio profile help')
 }
 
